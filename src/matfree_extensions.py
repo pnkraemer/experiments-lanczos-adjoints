@@ -6,7 +6,7 @@ from matfree import decomp
 from matfree.backend import func, linalg, tree_util
 
 
-def integrand_slq_spd_value_and_grad(matfun, order, matvec, /, grad_func):
+def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
     def quadform(v0, *parameters):
         v0_flat, v_unflatten = tree_util.ravel_pytree(v0)
 
@@ -51,9 +51,9 @@ def integrand_slq_spd_value_and_grad(matfun, order, matvec, /, grad_func):
             flat, unflatten = tree_util.ravel_pytree(av)
             return flat
 
-        grad = grad_func(lambda *pa: matvec_flat_p(w2, *pa).T @ w1)(*parameters)
+        grad = jax.grad(lambda *pa: matvec_flat_p(w2, *pa).T @ w1)(*parameters)
 
-        return slqval, grad.data
+        return slqval, grad
 
     return quadform
 
@@ -147,4 +147,5 @@ def bcoo_random_spd(key, /, num_rows, num_nonzeros):
         [data_eye, indices_eye], shape=(num_rows, num_rows)
     )
     M = jax.experimental.sparse.BCOO([data, indices], shape=(num_rows, num_rows))
-    return (M + eye).sum_duplicates()
+    MMM = (M + eye).sum_duplicates()
+    return MMM.T @ MMM
