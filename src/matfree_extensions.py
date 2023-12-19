@@ -1,11 +1,17 @@
 """Extensions for the Matfree package."""
 
+from jax import custom_vjp
 from matfree import decomp
 from matfree.backend import func, linalg, tree_util
 
 
-def integrand_slq_spd_with_grad(matfun, order, matvec, /):
+def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
+    @custom_vjp
     def quadform(v0, *parameters):
+        # This function shall only be meaningful inside a VJP
+        raise RuntimeError
+
+    def quadform_fwd(v0, *parameters):
         v0_flat, v_unflatten = tree_util.ravel_pytree(v0)
 
         def matvec_flat(v_flat):
@@ -42,16 +48,32 @@ def integrand_slq_spd_with_grad(matfun, order, matvec, /):
         sol = eigvecs @ (dfx_eigvals * eigvecs[0, :].T)
         w1, w2 = linalg.vector_norm(v0) * (basis.T @ sol), v0
 
+        @tree_util.partial_pytree
         def matvec_flat_p(v_flat, *p):
             v = v_unflatten(v_flat)
-            Av = matvec(v, *p)
-            flat, unflatten = tree_util.ravel_pytree(Av)
+            av = matvec(v, *p)
+            flat, unflatten = tree_util.ravel_pytree(av)
             return flat
 
-        _, vjp = func.vjp(lambda *p: matvec_flat_p(w2, *p).T @ w1, *parameters)
-        grad = vjp(1.0)
-
         # Return both
-        return {"value": slqval, "grad": grad}
+        cache = {
+            "matvec_flat_p": matvec_flat_p,
+            "w1": w1,
+            "w2": w2,
+            "parameters": parameters,
+        }
+        return slqval, cache
+
+    def quadform_bwd(cache, vjp_incoming):
+        fun = cache["matvec_flat_p"]
+        p = cache["parameters"]
+        w1, w2 = cache["w1"], cache["w2"]
+
+        _fx, vjp = func.vjp(lambda *pa: fun(w2, *pa).T @ w1, *p)
+
+        # todo: compute gradient wrt v?
+        return 0.0, *vjp(vjp_incoming)
+
+    quadform.defvjp(quadform_fwd, quadform_bwd)
 
     return quadform

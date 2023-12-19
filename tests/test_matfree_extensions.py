@@ -1,8 +1,9 @@
 """Tests for the extensions."""
+import jax
 from matfree import hutchinson, slq, test_util
-from matfree.backend import func, np, prng
+from matfree.backend import np, prng
 
-from matfree_extensions import integrand_slq_spd_with_grad
+from matfree_extensions import integrand_slq_spd_custom_vjp
 
 
 def test_slq_spd_with_grad(n=10):
@@ -13,19 +14,23 @@ def test_slq_spd_with_grad(n=10):
         return p @ x
 
     x_like = np.ones((len(A),))
-    sampler = hutchinson.sampler_rademacher(x_like, num=100)
+    sampler = hutchinson.sampler_rademacher(x_like, num=1_000)
     order = n // 2
 
     # Reference
     integrand = slq.integrand_slq_spd(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     key = prng.prng_key(seed=2)
-    slq_value = func.jit(estimate)(key, A)
+    slq_value, slq_gradient = jax.jit(jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Implementation
-    integrand = integrand_slq_spd_with_grad(np.log, order, matvec)
+    integrand = integrand_slq_spd_custom_vjp(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
-    slq_value_and_grad = func.jit(estimate)(key, A)
+    slq_value_and_grad = jax.jit(jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Value should be extremely close
-    assert np.allclose(slq_value, slq_value_and_grad["value"], rtol=1e-10, atol=0.0)
+    assert np.allclose(slq_value, slq_value_and_grad[0], rtol=1e-10, atol=0.0)
+
+    # Gradients tolerances are pretty tight
+    rtol, atol = 0.1, 0.1
+    assert np.allclose(slq_gradient, slq_value_and_grad[1], rtol=rtol, atol=atol)
