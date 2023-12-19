@@ -1,12 +1,13 @@
 """Extensions for the Matfree package."""
 
-from jax import custom_vjp
+import jax
+import jax.numpy as jnp
 from matfree import decomp
 from matfree.backend import func, linalg, tree_util
 
 
 def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
-    @custom_vjp
+    @jax.custom_vjp
     def quadform(v0, *parameters):
         # This function shall only be meaningful inside a VJP
         raise RuntimeError
@@ -77,3 +78,21 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
     quadform.defvjp(quadform_fwd, quadform_bwd)
 
     return quadform
+
+
+def bcoo_random_spd(key, /, num_rows, num_nonzeros):
+    key1, key2 = jax.random.split(key, num=2)
+
+    data = jax.random.normal(key1, shape=(num_nonzeros,))
+    indices = jax.random.randint(
+        key2, shape=(num_nonzeros, 2), minval=0, maxval=num_rows
+    )
+
+    data_eye = jnp.ones((num_rows,), dtype=float)
+    indices_eye = jnp.stack([jnp.arange(num_rows)] * 2).T
+
+    eye = jax.experimental.sparse.BCOO(
+        [data_eye, indices_eye], shape=(num_rows, num_rows)
+    )
+    M = jax.experimental.sparse.BCOO([data, indices], shape=(num_rows, num_rows))
+    return (M + eye).sum_duplicates()
