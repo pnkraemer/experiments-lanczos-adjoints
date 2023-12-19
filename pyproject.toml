@@ -1,13 +1,13 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
-
 
 [project]
 name = "matfree_extensions"
 authors = [
   { name="Nicholas Krämer", email="pekra@dtu.dk" },
 ]
+version = "0.0.1"
 description = "Extensions for the Matfree package"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -16,3 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+
+[tool.setuptools.packages.find]
+# All the following settings are optional:
+where = ["src"]  # ["."] by default
