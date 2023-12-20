@@ -1,5 +1,7 @@
 """Test utilities."""
 
+import os
+
 import jax.experimental.sparse
 import jax.numpy as jnp
 import scipy.io
@@ -41,3 +43,19 @@ def plt_spy_coo(ax, A, /, markersize=3, cmap="jet"):
     ax.set_ylim((0, ncols))
     ax.invert_yaxis()
     ax.xaxis.tick_top()
+
+
+def create_matching_directory(file, where, /, replace="experiments/"):
+    if where not in ["data/", "figures/"]:
+        raise ValueError
+    if replace not in ["experiments/"]:
+        raise ValueError
+
+    # Read directory name and replace "experiments" with e.g. "data"
+    directory_file = os.path.dirname(file) + "/"
+    target = directory_file.replace(replace, where)
+
+    # Create directory unless exists
+    if not os.path.exists(target):
+        print(f"\nCreating {target}...\n")
+        os.mkdir(target)
