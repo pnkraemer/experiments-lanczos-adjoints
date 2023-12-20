@@ -1,7 +1,6 @@
 """Extensions for the Matfree package."""
 
 import jax
-import jax.numpy as jnp
 from matfree import decomp
 from matfree.backend import func, linalg, tree_util
 
@@ -132,21 +131,12 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
-def bcoo_random_spd(key, /, num_rows, num_nonzeros):
+def bcoo_random(key, /, num_rows, num_nonzeros):
     key1, key2 = jax.random.split(key, num=2)
 
     data = jax.random.normal(key1, shape=(num_nonzeros,))
     indices = jax.random.randint(
         key2, shape=(num_nonzeros, 2), minval=0, maxval=num_rows
     )
-
-    data_eye = jnp.ones((num_rows,), dtype=float)
-    indices_eye = jnp.stack([jnp.arange(num_rows)] * 2).T
-
-    eye = jax.experimental.sparse.BCOO(
-        [data_eye, indices_eye], shape=(num_rows, num_rows)
-    )
     M = jax.experimental.sparse.BCOO([data, indices], shape=(num_rows, num_rows))
     return M
-    # MMM = (M + eye).sum_duplicates()
-    # return MMM.T @ MMM

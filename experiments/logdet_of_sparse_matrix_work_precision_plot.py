@@ -20,14 +20,27 @@ reference_errors = jnp.asarray(reference["error"])
 reference_wall_times = jnp.asarray(reference["wall_time"])
 
 
-def reduce(x):
+def plot(
+    axis, times, values, marker, color, linestyle, label, num_stdevs=1, alpha=0.25
+):
+    ts = reduce_t(times)
+    ms, stds = reduce_s(values)
+    axis.loglog(ts, ms, marker=marker, color=color, linestyle=linestyle, label=label)
+    axis.fill_between(
+        ts, ms - num_stdevs * stds, ms + num_stdevs * stds, color=color, alpha=alpha
+    )
+
+
+def reduce_t(x):
     return jnp.mean(x, axis=1)
 
 
-mosaic = [
-    ["value", "grad"],
-]
-fig, ax = plt.subplot_mosaic(mosaic, sharex=True, sharey=False, dpi=150)
+def reduce_s(x):
+    return jnp.mean(x, axis=1), jnp.std(x, axis=1)
+
+
+mosaic = [["value", "grad"]]
+fig, ax = plt.subplot_mosaic(mosaic, sharex=True, sharey=True, dpi=150)
 
 ax["value"].set_title("Log-determinant: Value")
 ax["value"].set_ylabel("Relative RMSE")
@@ -36,40 +49,46 @@ ax["value"].set_xlabel("Wall time [s]")
 ax["grad"].set_xlabel("Wall time [s]")
 
 custom_vjp_value, custom_vjp_grad = custom_vjp_errors
-ax["value"].loglog(
-    reduce(custom_vjp_wall_times),
-    reduce(custom_vjp_value),
+plot(
+    ax["value"],
+    custom_vjp_wall_times,
+    custom_vjp_value,
     marker="P",
     color="C0",
     linestyle="-",
     label="Custom VJP",
 )
-ax["grad"].loglog(
-    reduce(custom_vjp_wall_times),
-    reduce(custom_vjp_grad),
+plot(
+    ax["grad"],
+    custom_vjp_wall_times,
+    custom_vjp_grad,
     marker="P",
     color="C0",
     linestyle="-",
     label="Custom VJP",
 )
 
+
 reference_value, reference_grad = reference_errors
-ax["value"].loglog(
-    reduce(reference_wall_times),
-    reduce(reference_value),
+plot(
+    ax["value"],
+    reference_wall_times,
+    reference_value,
     marker="o",
     color="C1",
     linestyle="-",
     label="AutoDiff",
 )
-ax["grad"].loglog(
-    reduce(reference_wall_times),
-    reduce(reference_grad),
+plot(
+    ax["grad"],
+    reference_wall_times,
+    reference_grad,
     marker="o",
     color="C1",
     linestyle="-",
     label="AutoDiff",
 )
+
 
 ax["value"].legend()
 ax["grad"].legend()

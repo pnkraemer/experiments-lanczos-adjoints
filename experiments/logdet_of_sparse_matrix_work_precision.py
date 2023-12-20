@@ -4,7 +4,7 @@ import jax
 import jax.experimental.sparse
 import jax.numpy as jnp
 import tqdm
-from matfree import hutchinson, slq, test_util
+from matfree import hutchinson, slq
 
 from matfree_extensions import bcoo_random_spd, integrand_slq_spd_custom_vjp
 
