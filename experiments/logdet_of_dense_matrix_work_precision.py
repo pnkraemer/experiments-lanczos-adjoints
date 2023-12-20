@@ -15,12 +15,14 @@ def problem_setup(key, *, nrows):
 
     @jax.value_and_grad
     def logdet(p):
-        return jnp.slogdet(p)[1]
+        return jnp.linalg.slogdet(p)[1]
 
-    eigvals = 1 + jax.random.uniform(key, shape=(nrows,))
+    eigvals = 1 + jnp.arange(0, nrows, step=1, dtype=float)
+    eigvals = eigvals.at[-2].set(eigvals[-1])
     params = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
     value_and_grad_true = logdet(params)
+
     error_fun = rmse_relative(value_and_grad_true)
     return (matvec_, params), error_fun
 
@@ -87,7 +89,9 @@ def estimator(integrand_func, *, nrows, nsamples):
 
 if __name__ == "__main__":
     # Set parameters
-    num_rows, num_samples, num_reps, num_seeds = 10, 1, 1, 1
+    num_rows, num_samples, num_reps, num_seeds = 100, 1_000, 1, 1
+    step = (50 - 2) // 4
+    orders = range(1, 49, step)
 
     # Set a random key
     prng_key = jax.random.PRNGKey(seed=1)
@@ -97,9 +101,6 @@ if __name__ == "__main__":
     (matvec, parameters), error_func = problem_setup(key_problem, nrows=num_rows)
 
     # Run a work precision diagram
-    step = num_rows // 10
-    orders = range(1, num_rows - 1, step)
-
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
     wps_ref = workprecision_avg(
         key_estimate_all,

@@ -9,8 +9,8 @@ from matfree_extensions import integrand_slq_spd_custom_vjp
 
 n = 100  # nrows/ncols
 seed = 1
-num_samples = 100
-num_reps = 1
+num_samples = 1000
+num_reps = 5
 
 key = jax.random.PRNGKey(seed)
 key_mat, key_estim1, key_estim2 = jax.random.split(key, num=3)

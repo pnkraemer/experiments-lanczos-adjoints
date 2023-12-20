@@ -3,17 +3,19 @@ import matplotlib.pyplot as plt
 from tueplots import axes, bundles, markers
 
 plt.rcParams.update(
-    bundles.icml2022(column="half", family="sans-serif", nrows=2, ncols=2)
+    bundles.icml2022(column="full", family="sans-serif", nrows=2, ncols=2)
 )
 plt.rcParams.update(axes.lines())
 plt.rcParams.update(markers.with_edge())
 # plt.rcParams.update(axes.grid())
 
-custom_vjp = jnp.load("./data/workprecision_custom_vjp.npy", allow_pickle=True)[()]
+custom_vjp = jnp.load("./data/workprecision_dense_custom_vjp.npy", allow_pickle=True)[
+    ()
+]
 custom_vjp_errors = jnp.asarray(custom_vjp["error"])
 custom_vjp_wall_times = jnp.asarray(custom_vjp["wall_time"])
 
-reference = jnp.load("./data/workprecision_reference.npy", allow_pickle=True)[()]
+reference = jnp.load("./data/workprecision_dense_reference.npy", allow_pickle=True)[()]
 reference_errors = jnp.asarray(reference["error"])
 reference_wall_times = jnp.asarray(reference["wall_time"])
 
