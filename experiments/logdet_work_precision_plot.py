@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from tueplots import axes, bundles, markers
 
 plt.rcParams.update(
-    bundles.icml2022(column="half", family="sans-serif", nrows=2, ncols=2)
+    bundles.icml2022(column="full", family="sans-serif", nrows=2, ncols=2)
 )
 plt.rcParams.update(axes.lines())
 plt.rcParams.update(markers.with_edge())
