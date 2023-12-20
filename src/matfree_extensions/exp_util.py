@@ -73,6 +73,5 @@ def create_matching_directory(file, where, /, replace="experiments/"):
     target = directory_file.replace(replace, where)
 
     # Create directory unless exists
-    if not os.path.exists(target):
-        print(f"\nCreating {target}...\n")
-        os.mkdir(target)
+    os.makedirs(target, exist_ok=True)
+    return target

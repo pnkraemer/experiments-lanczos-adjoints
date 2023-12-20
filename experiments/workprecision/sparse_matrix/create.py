@@ -6,11 +6,14 @@ import jax.numpy as jnp
 import tqdm
 from matfree import hutchinson, slq
 
-from matfree_extensions import bcoo_random_spd, integrand_slq_spd_custom_vjp
+from matfree_extensions import exp_util
+from matfree_extensions import slq as slq_extensions
 
 
 def problem_setup(key, *, nrows):
-    M = bcoo_random_spd(key, num_rows=nrows, num_nonzeros=2 * nrows)
+    M = jax.experimental.sparse.random_bcoo(
+        key, shape=(num_rows, num_rows), dtype=float
+    )
     params, indices = M.data, M.indices
 
     @jax.jit
@@ -22,12 +25,6 @@ def problem_setup(key, *, nrows):
     def logdet(p):
         P = jax.experimental.sparse.BCOO((p, indices), shape=(nrows, nrows)).todense()
         return jnp.linalg.slogdet(P.T @ P + jnp.eye(nrows))[1]
-
-    #
-    # # eigvals = 1 + jnp.arange(0, nrows, step=1, dtype=float)
-    # eigvals = 1.0 + jax.random.uniform(key, shape=(nrows,))
-    # # eigvals = eigvals.at[-2].set(eigvals[-1])
-    # params = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
     value_and_grad_true = logdet(params)
     error_fun = rmse_relative(value_and_grad_true)
@@ -96,9 +93,9 @@ def estimator(integrand_func, *, nrows, nsamples):
 
 if __name__ == "__main__":
     # Set parameters
-    num_rows, num_samples, num_reps, num_seeds = 1000, 1000, 1, 5
+    num_rows, num_samples, num_reps, num_seeds = 10, 1, 1, 1
     # step = (50 - 2) // 4
-    orders = [2**i for i in range(0, 7)]
+    orders = [2**i for i in range(0, 2)]
     print(orders)
 
     # Set a random key
@@ -123,12 +120,13 @@ if __name__ == "__main__":
     wps_custom = workprecision_avg(
         key_estimate_all,
         orders,
-        lambda o: integrand_slq_spd_custom_vjp(jnp.log, o, matvec),
+        lambda o: slq_extensions.integrand_slq_spd_custom_vjp(jnp.log, o, matvec),
         parameters,
         nsamples=num_samples,
         nrows=num_rows,
         nreps=num_reps,
     )
 
-    jnp.save("./data/workprecision_dense_custom_vjp.npy", wps_custom, allow_pickle=True)
-    jnp.save("./data/workprecision_dense_reference.npy", wps_ref, allow_pickle=True)
+    directory = exp_util.create_matching_directory(__file__, "data/")
+    jnp.save(f"{directory}/custom_vjp.npy", wps_custom, allow_pickle=True)
+    jnp.save(f"{directory}/reference.npy", wps_ref, allow_pickle=True)
