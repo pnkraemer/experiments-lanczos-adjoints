@@ -115,5 +115,5 @@ if __name__ == "__main__":
         nreps=num_reps,
     )
 
-    print(wps_ref)
-    print(wps_custom)
+    jnp.save("./data/workprecision_reference.npy", wps_ref, allow_pickle=True)
+    jnp.save("./data/workprecision_custom_vjp.npy", wps_custom, allow_pickle=True)
