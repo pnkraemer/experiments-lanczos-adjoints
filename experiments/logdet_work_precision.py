@@ -82,7 +82,7 @@ def estimator(integrand_func, *, nrows, nsamples):
 
 if __name__ == "__main__":
     # Set parameters
-    num_rows, num_samples, num_reps, num_seeds = 10, 1, 1, 3
+    num_rows, num_samples, num_reps, num_seeds = 100, 100, 1, 5
 
     # Set a random key
     prng_key = jax.random.PRNGKey(seed=1)
@@ -92,7 +92,7 @@ if __name__ == "__main__":
     (matvec, parameters), error_func = problem_setup(key_problem, nrows=num_rows)
 
     # Run a work precision diagram
-    step = num_rows // 5
+    step = num_rows // 10
     orders = range(1, num_rows - 1, step)
 
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
@@ -105,6 +105,7 @@ if __name__ == "__main__":
         nrows=num_rows,
         nreps=num_reps,
     )
+    print()
     wps_custom = workprecision_avg(
         key_estimate_all,
         orders,
