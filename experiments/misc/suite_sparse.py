@@ -11,7 +11,6 @@ exp_util.suite_sparse_download(path=PATH)
 M = exp_util.suite_sparse_load("1138_bus", path=PATH)
 
 fig, ax = plt.subplots(constrained_layout=True, figsize=(4, 4))
-# ax.set_title(M)
 exp_util.plt_spy_coo(ax, M, cmap="seismic")
 
 plt.show()
