@@ -26,7 +26,7 @@ def plot(
 ):
     ts = reduce_t(times)
     ms, stds = reduce_s(values)
-    axis.loglog(ts, ms, marker=marker, color=color, linestyle=linestyle, label=label)
+    axis.plot(ts, ms, marker=marker, color=color, linestyle=linestyle, label=label)
     axis.fill_between(
         ts, ms - num_stdevs * stds, ms + num_stdevs * stds, color=color, alpha=alpha
     )
@@ -95,6 +95,6 @@ ax["value"].legend()
 ax["grad"].legend()
 for a in ax.values():
     a.grid(which="minor", axis="both", linestyle="dotted")
-
+    a.set_ylim((0.0, 2.0))
 plt.savefig("./figures/wp_sparse_matrix.pdf", dpi=150)
 plt.show()

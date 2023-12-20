@@ -29,7 +29,7 @@ def suite_sparse_download(
     searched.download(destpath=path, format=format, extract=True)
 
 
-def suite_sparse_load(which, /, path):
+def suite_sparse_load(which, /, path="./data/matrices/"):
     matrix = scipy.io.mmread(f"{path}{which}/{which}")
 
     row = jnp.asarray(matrix.row)
@@ -62,7 +62,7 @@ def plt_spy_coo(ax, A, /, markersize=3, cmap="jet"):
     ax.xaxis.tick_top()
 
 
-def create_matching_directory(file, where, /, replace="experiments/"):
+def matching_directory(file, where, /, replace="experiments/"):
     if where not in ["data/", "figures/"]:
         raise ValueError
     if replace not in ["experiments/"]:
@@ -70,8 +70,4 @@ def create_matching_directory(file, where, /, replace="experiments/"):
 
     # Read directory name and replace "experiments" with e.g. "data"
     directory_file = os.path.dirname(file) + "/"
-    target = directory_file.replace(replace, where)
-
-    # Create directory unless exists
-    os.makedirs(target, exist_ok=True)
-    return target
+    return directory_file.replace(replace, where)

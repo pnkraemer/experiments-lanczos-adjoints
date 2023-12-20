@@ -8,17 +8,17 @@ from matfree_extensions import exp_util
 PATH = "./data/matrices/"
 
 # nzbounds = (5_000, 15)
-nzbounds = (None, None)
-sizebounds = (1_000, 10_000)
+nzbounds = (None, 10_000)
+sizebounds = (1_000, None)
 exp_util.suite_sparse_download(
     path=PATH,
-    limit=5,
+    limit=15,
     isspd=True,
     nzbounds=nzbounds,
     rowbounds=sizebounds,
     colbounds=sizebounds,
 )
-M = exp_util.suite_sparse_load("bcsstk08", path=PATH)
+M = exp_util.suite_sparse_load("bcsstm08", path=PATH)
 
 
 fig, ax = plt.subplots(constrained_layout=True, figsize=(4, 4))

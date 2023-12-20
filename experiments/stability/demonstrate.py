@@ -10,30 +10,30 @@ from matfree import hutchinson, slq, test_util
 from matfree_extensions import exp_util
 from matfree_extensions import slq as slq_extensions
 
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
-def problem_setup(suitesparse_matrix_name):
-    M = exp_util.suite_sparse_load(suitesparse_matrix_name)
+def problem_setup(nrows):
+    eigvals_bad = 2 ** (jnp.linspace(-12, 12, num=15, endpoint=True))
+    eigvals_good = jnp.ones((nrows - len(eigvals_bad),))
+    eigvals = jnp.concatenate([eigvals_bad, eigvals_good])
+    params = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
-    @jax.jit
     def matvec_(x, p):
-        P = jax.experimental.sparse.BCOO((p, M.indices), shape=M.shape)
-        return P @ x
+        return p @ x
 
     @jax.value_and_grad
     def logdet(p):
-        P = jax.experimental.sparse.BCOO((p, M.indices), shape=M.shape).todense()
-        return jnp.linalg.slogdet(P)[1]
-
-    params = M.data
+        vals = jnp.linalg.eigvalsh(p)
+        return jnp.sum(1 / vals)
 
     value_and_grad_true = logdet(params)
     print()
-    print(value_and_grad_true)
+    print(value_and_grad_true[0])
+    print(value_and_grad_true[1][0])
     print()
     error_fun = rmse_relative(value_and_grad_true)
-    return (matvec_, params), error_fun, M.shape[0]
+    return (matvec_, params), error_fun
 
 
 def rmse_relative(reference, atol=1e-5):
@@ -52,9 +52,13 @@ def workprecision_avg(keys, *args, **kwargs):
     return jax.tree_util.tree_transpose(outer, inner, wps)
 
 
-def workprecision(key, os, integrand_func, *args, **kwargs):
+def workprecision(key, orders_, integrand_func, *args, **kwargs):
     wps = []
-    for order in tqdm.tqdm(os):
+    for order in tqdm.tqdm(orders_):
+        print()
+        print()
+        print(order)
+        print()
         integrand = integrand_func(order)
         wp = workprecision_single(key, integrand, *args, **kwargs)
         wps.append(wp)
@@ -63,7 +67,7 @@ def workprecision(key, os, integrand_func, *args, **kwargs):
         treedef_inner = jax.tree_util.tree_structure(wp)
 
     # Transpose Pytree to get WP(list()) instead of list(WP())
-    treedef_outer = jax.tree_util.tree_structure(list(os))
+    treedef_outer = jax.tree_util.tree_structure(list(orders_))
     return jax.tree_util.tree_transpose(treedef_outer, treedef_inner, wps)
 
 
@@ -74,12 +78,11 @@ def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps):
     # Estimate and compute error. Precompiles.
     fx, grad = estimate(key, *args)
     error = error_func((fx, grad))
-    print()
+    # print()
     print(error)
+    # print()
+    # print(grad[0])
     print()
-    # print()
-    # print(fx, grad)
-    # print()
 
     # Run a bunch of times to evaluate the runtime
     t0 = time.perf_counter()
@@ -104,9 +107,8 @@ def estimator(integrand_func, *, nrows, nsamples):
 
 if __name__ == "__main__":
     # Set parameters
-    num_samples, num_reps, num_seeds = 100, 1, 1
-    # step = (50 - 2) // 4
-    orders = [2**i for i in range(0, 5)]
+    num_rows, num_samples, num_reps, num_seeds = 50, 1_000, 1, 1
+    orders = list(range(1, num_rows - 1, 2))
     print(orders)
 
     # Set a random key
@@ -114,14 +116,14 @@ if __name__ == "__main__":
     key_problem, key_estimate = jax.random.split(prng_key, num=2)
 
     # Construct a problem
-    (matvec, parameters), error_func, num_rows = problem_setup("t2dal_e")
+    (matvec, parameters), error_func = problem_setup(num_rows)
 
     # Run a work precision diagram
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
     wps_ref = workprecision_avg(
         key_estimate_all,
-        orders[:4],  # memory errors dictate small orders only
-        lambda o: slq.integrand_slq_spd(jnp.log, o, matvec),
+        orders,  # memory errors dictate small orders only
+        lambda o: slq.integrand_slq_spd(lambda s: 1 / s, o, matvec),
         parameters,
         nsamples=num_samples,
         nrows=num_rows,
@@ -131,7 +133,9 @@ if __name__ == "__main__":
     wps_custom = workprecision_avg(
         key_estimate_all,
         orders,
-        lambda o: slq_extensions.integrand_slq_spd_custom_vjp(jnp.log, o, matvec),
+        lambda o: slq_extensions.integrand_slq_spd_custom_vjp(
+            lambda s: 1 / s, o, matvec
+        ),
         parameters,
         nsamples=num_samples,
         nrows=num_rows,
