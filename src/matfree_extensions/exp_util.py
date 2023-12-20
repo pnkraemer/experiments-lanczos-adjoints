@@ -8,9 +8,24 @@ import scipy.io
 import ssgetpy
 
 
-def suite_sparse_download(path, *, limit=5, isspd=None, nzbounds=None, format="MM"):
+def suite_sparse_download(
+    path,
+    *,
+    limit=5,
+    isspd=None,
+    nzbounds=None,
+    rowbounds=(None, None),
+    colbounds=(None, None),
+    format="MM",
+):
     """Download from https://sparse.tamu.edu/."""
-    searched = ssgetpy.search(limit=limit, isspd=isspd, nzbounds=nzbounds)
+    searched = ssgetpy.search(
+        limit=limit,
+        isspd=isspd,
+        nzbounds=nzbounds,
+        rowbounds=rowbounds,
+        colbounds=colbounds,
+    )
     searched.download(destpath=path, format=format, extract=True)
 
 
