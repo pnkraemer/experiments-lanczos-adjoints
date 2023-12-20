@@ -1,4 +1,3 @@
-import functools
 import time
 
 import jax
@@ -6,11 +5,7 @@ import jax.experimental.sparse
 import jax.numpy as jnp
 from matfree import hutchinson, slq
 
-from matfree_extensions import (
-    bcoo_random_spd,
-    integrand_slq_spd_custom_vjp,
-    integrand_slq_spd_value_and_grad,
-)
+from matfree_extensions import integrand_slq_spd_custom_vjp
 
 n = 100  # nrows/ncols
 seed = 1
