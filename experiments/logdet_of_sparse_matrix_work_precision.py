@@ -6,24 +6,30 @@ import jax.numpy as jnp
 import tqdm
 from matfree import hutchinson, slq, test_util
 
-from matfree_extensions import integrand_slq_spd_custom_vjp
+from matfree_extensions import bcoo_random_spd, integrand_slq_spd_custom_vjp
 
 
 def problem_setup(key, *, nrows):
+    M = bcoo_random_spd(key, num_rows=nrows, num_nonzeros=2 * nrows)
+    params, indices = M.data, M.indices
+
+    @jax.jit
     def matvec_(x, p):
-        return p @ x
+        P = jax.experimental.sparse.BCOO((p, indices), shape=(nrows, nrows))
+        return P.T @ (P @ x) + x
 
     @jax.value_and_grad
     def logdet(p):
-        return jnp.linalg.slogdet(p)[1]
+        P = jax.experimental.sparse.BCOO((p, indices), shape=(nrows, nrows)).todense()
+        return jnp.linalg.slogdet(P.T @ P + jnp.eye(nrows))[1]
 
-    # eigvals = 1 + jnp.arange(0, nrows, step=1, dtype=float)
-    eigvals = 1.0 + jax.random.uniform(key, shape=(nrows,))
-    # eigvals = eigvals.at[-2].set(eigvals[-1])
-    params = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+    #
+    # # eigvals = 1 + jnp.arange(0, nrows, step=1, dtype=float)
+    # eigvals = 1.0 + jax.random.uniform(key, shape=(nrows,))
+    # # eigvals = eigvals.at[-2].set(eigvals[-1])
+    # params = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
     value_and_grad_true = logdet(params)
-
     error_fun = rmse_relative(value_and_grad_true)
     return (matvec_, params), error_fun
 
@@ -31,7 +37,7 @@ def problem_setup(key, *, nrows):
 def rmse_relative(reference, atol=1):
     def error(x, ref):
         absolute = jnp.abs(x - ref)
-        normalize = jnp.sqrt(ref.size) * jnp.abs(atol + ref)
+        normalize = jnp.sqrt(ref.size) * (atol + jnp.abs(ref))
         return jnp.linalg.norm(absolute / normalize)
 
     return lambda a: jax.tree_util.tree_map(error, a, reference)
@@ -55,7 +61,7 @@ def workprecision(key, os, integrand_func, *args, **kwargs):
         treedef_inner = jax.tree_util.tree_structure(wp)
 
     # Transpose Pytree to get WP(list()) instead of list(WP())
-    treedef_outer = jax.tree_util.tree_structure(list(orders))
+    treedef_outer = jax.tree_util.tree_structure(list(os))
     return jax.tree_util.tree_transpose(treedef_outer, treedef_inner, wps)
 
 
@@ -82,7 +88,7 @@ def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps):
 def estimator(integrand_func, *, nrows, nsamples):
     integrand_func = jax.value_and_grad(integrand_func, allow_int=True, argnums=1)
     x_like = jnp.ones((nrows,))
-    sampler = hutchinson.sampler_rademacher(x_like, num=nsamples)
+    sampler = hutchinson.sampler_normal(x_like, num=nsamples)
     estimate_approximate = hutchinson.hutchinson(integrand_func, sampler)
     estimate_approximate = jax.jit(estimate_approximate)
     return estimate_approximate
@@ -90,9 +96,10 @@ def estimator(integrand_func, *, nrows, nsamples):
 
 if __name__ == "__main__":
     # Set parameters
-    num_rows, num_samples, num_reps, num_seeds = 100, 100, 1, 1
+    num_rows, num_samples, num_reps, num_seeds = 1000, 1000, 1, 5
     # step = (50 - 2) // 4
-    orders = [2**i for i in range(0, 5)]
+    orders = [2**i for i in range(0, 7)]
+    print(orders)
 
     # Set a random key
     prng_key = jax.random.PRNGKey(seed=1)
@@ -105,7 +112,7 @@ if __name__ == "__main__":
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
     wps_ref = workprecision_avg(
         key_estimate_all,
-        orders,
+        orders[:4],  # memory errors dictate small orders only
         lambda o: slq.integrand_slq_spd(jnp.log, o, matvec),
         parameters,
         nsamples=num_samples,

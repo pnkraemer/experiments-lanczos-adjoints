@@ -147,5 +147,6 @@ def bcoo_random_spd(key, /, num_rows, num_nonzeros):
         [data_eye, indices_eye], shape=(num_rows, num_rows)
     )
     M = jax.experimental.sparse.BCOO([data, indices], shape=(num_rows, num_rows))
-    MMM = (M + eye).sum_duplicates()
-    return MMM.T @ MMM
+    return M
+    # MMM = (M + eye).sum_duplicates()
+    # return MMM.T @ MMM
