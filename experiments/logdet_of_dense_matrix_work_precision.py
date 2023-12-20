@@ -17,8 +17,9 @@ def problem_setup(key, *, nrows):
     def logdet(p):
         return jnp.linalg.slogdet(p)[1]
 
-    eigvals = 1 + jnp.arange(0, nrows, step=1, dtype=float)
-    eigvals = eigvals.at[-2].set(eigvals[-1])
+    # eigvals = 1 + jnp.arange(0, nrows, step=1, dtype=float)
+    eigvals = 1.0 + jax.random.uniform(key, shape=(nrows,))
+    # eigvals = eigvals.at[-2].set(eigvals[-1])
     params = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
     value_and_grad_true = logdet(params)
@@ -89,9 +90,9 @@ def estimator(integrand_func, *, nrows, nsamples):
 
 if __name__ == "__main__":
     # Set parameters
-    num_rows, num_samples, num_reps, num_seeds = 100, 1_000, 1, 1
-    step = (50 - 2) // 4
-    orders = range(1, 49, step)
+    num_rows, num_samples, num_reps, num_seeds = 100, 100, 1, 1
+    # step = (50 - 2) // 4
+    orders = [2**i for i in range(0, 5)]
 
     # Set a random key
     prng_key = jax.random.PRNGKey(seed=1)
@@ -122,5 +123,5 @@ if __name__ == "__main__":
         nreps=num_reps,
     )
 
-    jnp.save("./data/workprecision_dense_reference.npy", wps_ref, allow_pickle=True)
     jnp.save("./data/workprecision_dense_custom_vjp.npy", wps_custom, allow_pickle=True)
+    jnp.save("./data/workprecision_dense_reference.npy", wps_ref, allow_pickle=True)

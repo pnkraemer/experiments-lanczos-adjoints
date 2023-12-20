@@ -6,7 +6,7 @@ from matfree import decomp
 from matfree.backend import func, linalg, tree_util
 
 
-def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
+def integrand_slq_spd_value_and_grad(matfun, order, matvec, /, grad_func=jax.grad):
     def quadform(v0, *parameters):
         v0_flat, v_unflatten = tree_util.ravel_pytree(v0)
 
@@ -51,7 +51,7 @@ def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
             flat, unflatten = tree_util.ravel_pytree(av)
             return flat
 
-        grad = jax.grad(lambda *pa: matvec_flat_p(w2, *pa).T @ w1)(*parameters)
+        grad = grad_func(lambda *pa: matvec_flat_p(w2, *pa).T @ w1)(*parameters)
 
         return slqval, grad
 
