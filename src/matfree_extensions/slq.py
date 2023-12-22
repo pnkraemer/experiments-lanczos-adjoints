@@ -74,15 +74,16 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
         scale = jnp.linalg.norm(v0_flat)
         v0_flat /= scale
 
-        def matvec_flat(v_flat):
+        @jax.tree_util.Partial
+        def matvec_flat(v_flat, *p):
             v = v_unflatten(v_flat)
-            Av = matvec(v, *parameters)
-            flat, unflatten = jax.flatten_util.ravel_pytree(Av)
+            av = matvec(v, *p)
+            flat, unflatten = jax.flatten_util.ravel_pytree(av)
             return flat
 
         algorithm = decomp.lanczos_tridiag_full_reortho(order)
         basis, tridiag = decomp.decompose_fori_loop(
-            v0_flat, matvec_flat, algorithm=algorithm
+            v0_flat, lambda v: matvec_flat(v, *parameters), algorithm=algorithm
         )
         (diag, off_diag) = tridiag
 
@@ -106,33 +107,28 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
         # Evaluate the derivative
         dfx_eigvals = jax.vmap(jax.jacfwd(matfun))(eigvals)
         sol = eigvecs @ (dfx_eigvals * eigvecs[0, :].T)
-        w1, w2 = jnp.linalg.norm(v0) * (basis.T @ sol), v0
-
-        @jax.tree_util.Partial
-        def matvec_flat_p(v_flat, *p):
-            v = v_unflatten(v_flat)
-            av = matvec(v, *p)
-            flat, unflatten = jax.flatten_util.ravel_pytree(av)
-            return flat
+        w1, w2 = dim * (basis.T @ sol), v0_flat
 
         # Return both
         cache = {
-            "matvec_flat_p": matvec_flat_p,
+            "matvec_flat": matvec_flat,
             "w1": w1,
             "w2": w2,
             "parameters": parameters,
+            "dim": dim,
         }
         return slqval, cache
 
     def quadform_bwd(cache, vjp_incoming):
-        fun = cache["matvec_flat_p"]
+        matvec_flat = cache["matvec_flat"]
         p = cache["parameters"]
         w1, w2 = cache["w1"], cache["w2"]
+        d = cache["dim"]
 
-        _fx, vjp = jax.vjp(lambda *pa: fun(w2, *pa).T @ w1, *p)
-
+        fx, vjp = jax.vjp(lambda *pa: 1 / d * matvec_flat(w2, *pa).T @ w1, *p)
+        print(fx)
         # todo: compute gradient wrt v?
-        return 0.0, *vjp(vjp_incoming)
+        return 0.0, *vjp(d * vjp_incoming)
 
     quadform.defvjp(quadform_fwd, quadform_bwd)
 
