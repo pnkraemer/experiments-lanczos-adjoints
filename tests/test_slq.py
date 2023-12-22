@@ -21,12 +21,12 @@ def test_integrand_slq_spd_value_and_grad(n=10):
     integrand = slq.integrand_slq_spd(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     key = prng.prng_key(seed=2)
-    slq_value, slq_gradient = jax.jit(jax.value_and_grad(estimate, argnums=1))(key, A)
+    slq_value, slq_gradient = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Implementation
     integrand = slq_extensions.integrand_slq_spd_value_and_grad(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
-    slq_value_and_grad = jax.jit(estimate)(key, A)
+    slq_value_and_grad = (estimate)(key, A)
 
     # Value should be extremely close
     assert np.allclose(slq_value, slq_value_and_grad[0], rtol=1e-10, atol=0.0)
@@ -51,12 +51,12 @@ def test_integrand_slq_spd_custom_vjp(n=10):
     integrand = slq.integrand_slq_spd(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     key = prng.prng_key(seed=2)
-    slq_value, slq_gradient = jax.jit(jax.value_and_grad(estimate, argnums=1))(key, A)
+    slq_value, slq_gradient = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Implementation
     integrand = slq_extensions.integrand_slq_spd_custom_vjp(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
-    slq_value_and_grad = jax.jit(jax.value_and_grad(estimate, argnums=1))(key, A)
+    slq_value_and_grad = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Value should be extremely close
     assert np.allclose(slq_value, slq_value_and_grad[0], rtol=1e-10, atol=0.0)
