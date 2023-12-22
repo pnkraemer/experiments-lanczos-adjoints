@@ -71,6 +71,8 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
 
     def quadform_fwd(v0, *parameters):
         v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
+        scale = jnp.linalg.norm(v0_flat)
+        v0_flat /= scale
 
         def matvec_flat(v_flat):
             v = v_unflatten(v_flat)

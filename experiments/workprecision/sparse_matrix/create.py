@@ -15,16 +15,20 @@ jax.config.update("jax_enable_x64", True)
 
 def problem_setup(suitesparse_matrix_name):
     M = exp_util.suite_sparse_load(suitesparse_matrix_name)
+    M = jax.experimental.sparse.random_bcoo(
+        jax.random.PRNGKey(200), shape=(500, 500), nse=0.05
+    )
 
     @jax.jit
     def matvec_(x, p):
         P = jax.experimental.sparse.BCOO((p, M.indices), shape=M.shape)
-        return P @ x
+        return P.T @ (P @ x) + x
 
     @jax.value_and_grad
     def logdet(p):
         P = jax.experimental.sparse.BCOO((p, M.indices), shape=M.shape).todense()
-        return jnp.linalg.slogdet(P)[1]
+        eye = jnp.eye(len(P))
+        return jnp.linalg.slogdet(P.T @ P + eye)[1]
 
     params = M.data
 
@@ -39,7 +43,7 @@ def problem_setup(suitesparse_matrix_name):
 def rmse_relative(reference, atol=1e-5):
     def error(x, ref):
         absolute = jnp.abs(x - ref)
-        normalize = jnp.sqrt(ref.size) * (atol + jnp.abs(ref))
+        normalize = jnp.sqrt(ref.size)  # * (atol + jnp.abs(ref))
         return jnp.linalg.norm(absolute / normalize)
 
     return lambda a: jax.tree_util.tree_map(error, a, reference)
@@ -52,9 +56,9 @@ def workprecision_avg(keys, *args, **kwargs):
     return jax.tree_util.tree_transpose(outer, inner, wps)
 
 
-def workprecision(key, os, integrand_func, *args, **kwargs):
+def workprecision(key, orders_, integrand_func, *args, **kwargs):
     wps = []
-    for order in tqdm.tqdm(os):
+    for order in tqdm.tqdm(orders_):
         integrand = integrand_func(order)
         wp = workprecision_single(key, integrand, *args, **kwargs)
         wps.append(wp)
@@ -63,7 +67,7 @@ def workprecision(key, os, integrand_func, *args, **kwargs):
         treedef_inner = jax.tree_util.tree_structure(wp)
 
     # Transpose Pytree to get WP(list()) instead of list(WP())
-    treedef_outer = jax.tree_util.tree_structure(list(os))
+    treedef_outer = jax.tree_util.tree_structure(list(orders_))
     return jax.tree_util.tree_transpose(treedef_outer, treedef_inner, wps)
 
 
@@ -77,9 +81,6 @@ def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps):
     print()
     print(error)
     print()
-    # print()
-    # print(fx, grad)
-    # print()
 
     # Run a bunch of times to evaluate the runtime
     t0 = time.perf_counter()
@@ -98,13 +99,14 @@ def estimator(integrand_func, *, nrows, nsamples):
     x_like = jnp.ones((nrows,))
     sampler = hutchinson.sampler_rademacher(x_like, num=nsamples)
     estimate_approximate = hutchinson.hutchinson(integrand_func, sampler)
+    # estimate_approximate = jax.value_and_grad(estimate_approximate, argnums=1)
     estimate_approximate = jax.jit(estimate_approximate)
     return estimate_approximate
 
 
 if __name__ == "__main__":
     # Set parameters
-    num_samples, num_reps, num_seeds = 100, 1, 1
+    num_samples, num_reps, num_seeds = 1000, 1, 1
     # step = (50 - 2) // 4
     orders = [2**i for i in range(0, 5)]
     print(orders)
@@ -114,20 +116,11 @@ if __name__ == "__main__":
     key_problem, key_estimate = jax.random.split(prng_key, num=2)
 
     # Construct a problem
-    (matvec, parameters), error_func, num_rows = problem_setup("t2dal_e")
+    (matvec, parameters), error_func, num_rows = problem_setup("1138_bus")
 
     # Run a work precision diagram
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
-    wps_ref = workprecision_avg(
-        key_estimate_all,
-        orders[:4],  # memory errors dictate small orders only
-        lambda o: slq.integrand_slq_spd(jnp.log, o, matvec),
-        parameters,
-        nsamples=num_samples,
-        nrows=num_rows,
-        nreps=num_reps,
-    )
-    print()
+
     wps_custom = workprecision_avg(
         key_estimate_all,
         orders,
@@ -137,7 +130,16 @@ if __name__ == "__main__":
         nrows=num_rows,
         nreps=num_reps,
     )
-
+    print()
+    wps_ref = workprecision_avg(
+        key_estimate_all,
+        orders[:5],  # memory errors dictate small orders only
+        lambda o: slq.integrand_slq_spd(jnp.log, o, matvec),
+        parameters,
+        nsamples=num_samples,
+        nrows=num_rows,
+        nreps=num_reps,
+    )
     directory = exp_util.matching_directory(__file__, "data/")
     os.makedirs(directory, exist_ok=True)
     jnp.save(f"{directory}/custom_vjp.npy", wps_custom, allow_pickle=True)
