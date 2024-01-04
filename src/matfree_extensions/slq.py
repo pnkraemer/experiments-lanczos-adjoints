@@ -154,20 +154,28 @@ def hutchinson_custom_vjp(integrand_fun, /, sample_fun):
         raise RuntimeError("oops")
 
     def sample_fwd(key, *parameters):
-        sampled = _sample(key, *parameters)
-        return sampled, {}
-
-    def _sample(key, *parameters):
-        samples = sample_fun(key)
-        Qs = jax.vmap(lambda vec: integrand_fun(vec, *parameters))(samples)
-        return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), Qs)
+        key_fwd, key_bwd = jax.random.split(key, num=2)
+        sampled = _sample(sample_fun, integrand_fun, key_fwd, *parameters)
+        return sampled, {"key": key_bwd, "parameters": parameters}
 
     def sample_bwd(cache, vjp_incoming):
-        print(cache)
-        return None, None
+        def integrand_fun_new(v, *p):
+            # this is basically a checkpoint?
+            _fx, vjp = jax.vjp(integrand_fun, v, *p)
+            return vjp(vjp_incoming)
+
+        key = cache["key"]
+        parameters = cache["parameters"]
+        return _sample(sample_fun, integrand_fun_new, key, *parameters)
 
     sample.defvjp(sample_fwd, sample_bwd)
     return sample
+
+
+def _sample(sample_fun, integrand_fun, key, *parameters):
+    samples = sample_fun(key)
+    Qs = jax.vmap(lambda vec: integrand_fun(vec, *parameters))(samples)
+    return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), Qs)
 
 
 def hutchinson_batch(estimate_fun, /, num):
