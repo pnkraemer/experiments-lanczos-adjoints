@@ -64,3 +64,30 @@ def test_integrand_slq_spd_custom_vjp(n=10):
     # Gradients tolerances are pretty tight
     rtol, atol = 0.1, 0.1
     assert np.allclose(slq_gradient, slq_value_and_grad[1], rtol=rtol, atol=atol)
+
+
+def test_hutchinson_custom_vjp(n=3):
+    eigvals = np.arange(0.0, 1.0 + n, step=1.0) + 1.0
+    A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+
+    def matvec(x, p):
+        return p @ x
+
+    x_like = np.ones((len(A),))
+    sampler = hutchinson.sampler_rademacher(x_like, num=1_000)
+    order = n // 2
+
+    integrand = slq.integrand_slq_spd(np.log, order, matvec)
+    estimate_ref = hutchinson.hutchinson(integrand, sampler)
+    estimate_custom = slq_extensions.hutchinson_custom_vjp(integrand, sampler)
+
+    key = prng.prng_key(seed=2)
+    custom = jax.vjp(estimate_custom, key, A)
+    ref = jax.vjp(estimate_ref, key, A)
+    print(custom[0])
+    print(ref[0])
+
+    print(custom[1](1.0))
+    print(ref[1](1.0))
+
+    assert False
