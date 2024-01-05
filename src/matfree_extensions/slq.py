@@ -154,8 +154,8 @@ def hutchinson_custom_vjp(integrand_fun, /, sample_fun):
         raise RuntimeError("oops")
 
     def sample_fwd(key, *parameters):
-        key_fwd, key_bwd = jax.random.split(key, num=2)
-        sampled = _sample(sample_fun, integrand_fun, key_fwd, *parameters)
+        _key_fwd, key_bwd = jax.random.split(key, num=2)
+        sampled = _sample(sample_fun, integrand_fun, key, *parameters)
         return sampled, {"key": key_bwd, "parameters": parameters}
 
     def sample_bwd(cache, vjp_incoming):
@@ -194,12 +194,12 @@ def integrand_slq_spd(matfun, order, matvec, /):
     """
 
     def quadform(v0, *parameters):
-        v0_flat, v_unflatten = jax.tree_util.ravel_pytree(v0)
+        v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
 
         def matvec_flat(v_flat):
             v = v_unflatten(v_flat)
             Av = matvec(v, *parameters)
-            flat, unflatten = jax.tree_util.ravel_pytree(Av)
+            flat, unflatten = jax.flatten_util.ravel_pytree(Av)
             return flat
 
         algorithm = decomp.lanczos_tridiag_full_reortho(order)

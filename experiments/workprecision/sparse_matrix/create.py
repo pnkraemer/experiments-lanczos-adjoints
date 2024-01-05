@@ -5,12 +5,10 @@ import jax
 import jax.experimental.sparse
 import jax.numpy as jnp
 import tqdm
-from matfree import hutchinson, slq, test_util
+from matfree import hutchinson
 
 from matfree_extensions import exp_util
 from matfree_extensions import slq as slq_extensions
-
-# jax.config.update("jax_enable_x64", True)
 
 
 def problem_setup(suitesparse_matrix_name):
@@ -108,7 +106,7 @@ def estimator(integrand_func, *, nrows, nsamples, nbatches):
 
 if __name__ == "__main__":
     # Set parameters
-    num_batches, num_samples_per_batch, num_reps, num_seeds = 100, 50, 1, 1
+    num_batches, num_samples_per_batch, num_reps, num_seeds = 10, 10, 1, 1
     # step = (50 - 2) // 4
     orders = [2**i for i in range(0, 5)]
     print(orders)

@@ -74,7 +74,7 @@ def test_hutchinson_custom_vjp(n=3):
         return p @ x
 
     x_like = np.ones((len(A),))
-    sampler = hutchinson.sampler_rademacher(x_like, num=1_000)
+    sampler = hutchinson.sampler_rademacher(x_like, num=10_000)
     order = n // 2
 
     integrand = slq.integrand_slq_spd(np.log, order, matvec)
@@ -82,12 +82,18 @@ def test_hutchinson_custom_vjp(n=3):
     estimate_custom = slq_extensions.hutchinson_custom_vjp(integrand, sampler)
 
     key = prng.prng_key(seed=2)
-    custom = jax.vjp(estimate_custom, key, A)
-    ref = jax.vjp(estimate_ref, key, A)
-    print(custom[0])
-    print(ref[0])
+    value_custom, vjp_custom = jax.vjp(estimate_custom, key, A)
+    value_ref, vjp_ref = jax.vjp(estimate_ref, key, A)
 
-    print(custom[1](1.0))
-    print(ref[1](1.0))
+    # The forward-passes should be identical
+    assert np.allclose(value_custom, value_ref)
 
-    assert False
+    # The backward-passes should be different...
+    vjp_custom = jax.jit(vjp_custom)
+    vjp_ref = jax.jit(vjp_ref)
+    assert not np.allclose(vjp_custom(1.0)[1], vjp_ref(1.0)[1])
+
+    # ... but approximately similar
+    print(vjp_custom(1.0)[1])
+    print(vjp_ref(1.0)[1])
+    assert np.allclose(vjp_custom(1.0)[1], vjp_ref(1.0)[1], rtol=0.25)
