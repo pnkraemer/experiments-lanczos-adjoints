@@ -62,7 +62,8 @@ def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
 
 def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
     @jax.custom_vjp
-    def quadform(_v0, *_parameters):
+    def quadform(v0, *parameters):
+        return quadform_fwd(v0, *parameters)[0]
         #
         # This function shall only be meaningful inside a VJP,
         # thus, we raise a:
@@ -86,7 +87,9 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
             v0_flat, lambda v: matvec_flat(v, *parameters), algorithm=algorithm
         )
         (diag, off_diag) = tridiag
-
+        # print(diag)
+        # print(off_diag[1:]+off_diag[:-1])
+        # print()
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
         #  use it here. Until then: an eigen-decomposition of size (order + 1)
         #  does not hurt too much...
@@ -94,7 +97,11 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
         offdiag1 = jnp.diag(off_diag, -1)
         offdiag2 = jnp.diag(off_diag, 1)
         dense_matrix = diag + offdiag1 + offdiag2
+
+        # print(dense_matrix)
         eigvals, eigvecs = jnp.linalg.eigh(dense_matrix)
+        # print(eigvals)
+        # assert False
 
         # Since Q orthogonal (orthonormal) to v0, Q v = Q[0],
         # and therefore (Q v)^T f(D) (Qv) = Q[0] * f(diag) * Q[0]
@@ -222,6 +229,6 @@ def integrand_slq_spd(matfun, order, matvec, /):
         (dim,) = v0_flat.shape
 
         fx_eigvals = jax.vmap(matfun)(eigvals)
-        return dim * jnp.linalg.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
+        return dim * jnp.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
 
     return quadform
