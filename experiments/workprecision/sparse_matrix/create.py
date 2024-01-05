@@ -10,32 +10,29 @@ from matfree import hutchinson, slq, test_util
 from matfree_extensions import exp_util
 from matfree_extensions import slq as slq_extensions
 
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
 def problem_setup(suitesparse_matrix_name):
     M = exp_util.suite_sparse_load(suitesparse_matrix_name)
-    M = jax.experimental.sparse.random_bcoo(
-        jax.random.PRNGKey(200), shape=(500, 500), nse=0.05
-    )
 
     @jax.jit
     def matvec_(x, p):
         P = jax.experimental.sparse.BCOO((p, M.indices), shape=M.shape)
-        return P.T @ (P @ x) + x
+        return P @ x  # ) + x
 
     @jax.value_and_grad
     def logdet(p):
         P = jax.experimental.sparse.BCOO((p, M.indices), shape=M.shape).todense()
-        eye = jnp.eye(len(P))
-        return jnp.linalg.slogdet(P.T @ P + eye)[1]
+        # eye = jnp.eye(len(P))
+        return jnp.linalg.slogdet(P)[1]
 
     params = M.data
 
     value_and_grad_true = logdet(params)
-    print()
-    print(value_and_grad_true)
-    print()
+    # print()
+    # # print(value_and_grad_true)
+    # print()
     error_fun = rmse_relative(value_and_grad_true)
     return (matvec_, params), error_fun, M.shape[0]
 
@@ -43,7 +40,7 @@ def problem_setup(suitesparse_matrix_name):
 def rmse_relative(reference, atol=1e-5):
     def error(x, ref):
         absolute = jnp.abs(x - ref)
-        normalize = jnp.sqrt(ref.size)  # * (atol + jnp.abs(ref))
+        normalize = jnp.sqrt(ref.size) * (atol + jnp.abs(ref))
         return jnp.linalg.norm(absolute / normalize)
 
     return lambda a: jax.tree_util.tree_map(error, a, reference)
@@ -71,16 +68,18 @@ def workprecision(key, orders_, integrand_func, *args, **kwargs):
     return jax.tree_util.tree_transpose(treedef_outer, treedef_inner, wps)
 
 
-def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps):
+def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps, nbatches):
     # Construct the estimator
-    estimate = estimator(integrand_func, nsamples=nsamples, nrows=nrows)
+    estimate = estimator(
+        integrand_func, nsamples=nsamples, nrows=nrows, nbatches=nbatches
+    )
 
     # Estimate and compute error. Precompiles.
     fx, grad = estimate(key, *args)
     error = error_func((fx, grad))
-    print()
-    print(error)
-    print()
+    # print()
+    # print(error)
+    # print()
 
     # Run a bunch of times to evaluate the runtime
     t0 = time.perf_counter()
@@ -94,19 +93,22 @@ def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps):
     return {"error": error, "wall_time": (t1 - t0) / nreps}
 
 
-def estimator(integrand_func, *, nrows, nsamples):
+def estimator(integrand_func, *, nrows, nsamples, nbatches):
     integrand_func = jax.value_and_grad(integrand_func, allow_int=True, argnums=1)
     x_like = jnp.ones((nrows,))
     sampler = hutchinson.sampler_rademacher(x_like, num=nsamples)
-    estimate_approximate = hutchinson.hutchinson(integrand_func, sampler)
+    estimate_approximate = slq_extensions.hutchinson_nograd(integrand_func, sampler)
     # estimate_approximate = jax.value_and_grad(estimate_approximate, argnums=1)
+    estimate_approximate = slq_extensions.hutchinson_batch(
+        estimate_approximate, num=nbatches
+    )
     estimate_approximate = jax.jit(estimate_approximate)
     return estimate_approximate
 
 
 if __name__ == "__main__":
     # Set parameters
-    num_samples, num_reps, num_seeds = 1000, 1, 1
+    num_batches, num_samples_per_batch, num_reps, num_seeds = 100, 50, 1, 1
     # step = (50 - 2) // 4
     orders = [2**i for i in range(0, 5)]
     print(orders)
@@ -116,7 +118,7 @@ if __name__ == "__main__":
     key_problem, key_estimate = jax.random.split(prng_key, num=2)
 
     # Construct a problem
-    (matvec, parameters), error_func, num_rows = problem_setup("1138_bus")
+    (matvec, parameters), error_func, num_rows = problem_setup("t2dal_e")
 
     # Run a work precision diagram
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
@@ -126,19 +128,21 @@ if __name__ == "__main__":
         orders,
         lambda o: slq_extensions.integrand_slq_spd_custom_vjp(jnp.log, o, matvec),
         parameters,
-        nsamples=num_samples,
+        nsamples=num_samples_per_batch,
         nrows=num_rows,
         nreps=num_reps,
+        nbatches=num_batches,
     )
     print()
     wps_ref = workprecision_avg(
         key_estimate_all,
-        orders[:5],  # memory errors dictate small orders only
-        lambda o: slq.integrand_slq_spd(jnp.log, o, matvec),
+        orders[:3],  # memory errors dictate small orders only
+        lambda o: slq_extensions.integrand_slq_spd(jnp.log, o, matvec),
         parameters,
-        nsamples=num_samples,
+        nsamples=num_samples_per_batch,
         nrows=num_rows,
         nreps=num_reps,
+        nbatches=num_batches,
     )
     directory = exp_util.matching_directory(__file__, "data/")
     os.makedirs(directory, exist_ok=True)

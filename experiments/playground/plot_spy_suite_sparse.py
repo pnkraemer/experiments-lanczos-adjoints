@@ -1,6 +1,6 @@
 """Suite-sparse playground."""
 
-
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from matfree_extensions import exp_util
@@ -18,11 +18,18 @@ exp_util.suite_sparse_download(
     rowbounds=sizebounds,
     colbounds=sizebounds,
 )
-M = exp_util.suite_sparse_load("bcsstm08", path=PATH)
 
+# matrices  = ["bcsstm09", "bcsstm21", "t2dal_e", "1138_bus"]
+matrices = ["t2dal_e"]
+fig, axes = plt.subplot_mosaic(
+    [matrices], constrained_layout=True, figsize=(len(matrices) * 3, 3)
+)
 
-fig, ax = plt.subplots(constrained_layout=True, figsize=(4, 4))
-ax.set_title(M)
-exp_util.plt_spy_coo(ax, M, cmap="seismic")
+for matrix in matrices:
+    M = exp_util.suite_sparse_load(matrix, path=PATH)
+    print(jnp.linalg.slogdet(M.todense())[1])
+    print(jnp.sum(jnp.log(jnp.abs(M.data))))
+    axes[matrix].set_title(matrix)
+    exp_util.plt_spy_coo(axes[matrix], M, cmap="viridis")
 
 plt.show()
