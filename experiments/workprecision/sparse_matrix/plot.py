@@ -1,3 +1,5 @@
+import os
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from tueplots import axes, bundles, markers
@@ -104,5 +106,8 @@ ax["eigvals"].set_title("Eigenvalues of the matrix")
 ax["eigvals"].grid(axis="y", which="major")
 ax["eigvals"].semilogy(eigvals, linestyle="None", marker="X", markersize=4, alpha=0.6)
 
-plt.savefig("./figures/wp_sparse_matrix.pdf", dpi=150)
+
+directory = exp_util.matching_directory(__file__, "figures/")
+os.makedirs(directory, exist_ok=True)
+plt.savefig(f"{directory}/figure.pdf", dpi=150)
 plt.show()
