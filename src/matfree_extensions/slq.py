@@ -1,4 +1,5 @@
 """Extensions for the Matfree package."""
+import functools
 
 import jax
 import jax.flatten_util
@@ -232,3 +233,82 @@ def integrand_slq_spd(matfun, order, matvec, /):
         return dim * jnp.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
 
     return quadform
+
+
+def integrand_slq_spd_custom_vjp_rec(matfun, order, matvec, /):
+    def quadform(v0, *parameters):
+        return _integrand_slq(matfun, order, matvec, v0, *parameters)
+
+    return quadform
+
+
+@functools.partial(jax.custom_vjp, nondiff_args=(0, 1, 2))
+def _integrand_slq(matfun, order, matvec, v0, *parameters):
+    return _integrand_slq_fwd(matfun, order, matvec, v0, *parameters)[0]
+
+
+def _integrand_slq_fwd(matfun, order, matvec, v0, *parameters):
+    v0 = jax.tree_util.tree_map(jax.lax.stop_gradient, v0)
+
+    v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
+    scale = jnp.linalg.norm(v0_flat)
+    v0_flat /= scale
+
+    @jax.tree_util.Partial
+    def matvec_flat(v_flat, *p):
+        v = v_unflatten(v_flat)
+        av = matvec(v, *p)
+        flat, unflatten = jax.flatten_util.ravel_pytree(av)
+        return flat
+
+    algorithm = decomp.lanczos_tridiag_full_reortho(order)
+    basis, tridiag = decomp.decompose_fori_loop(
+        v0_flat, lambda v: matvec_flat(v, *parameters), algorithm=algorithm
+    )
+    basis, tridiag = jax.tree_util.tree_map(jax.lax.stop_gradient, (basis, tridiag))
+    (diag, off_diag) = tridiag
+
+    # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
+    #  use it here. Until then: an eigen-decomposition of size (order + 1)
+    #  does not hurt too much...
+    diag = jnp.diag(diag)
+    offdiag1 = jnp.diag(off_diag, -1)
+    offdiag2 = jnp.diag(off_diag, 1)
+    dense_matrix = diag + offdiag1 + offdiag2
+    eigvals, eigvecs = jnp.linalg.eigh(dense_matrix)
+
+    # Since Q orthogonal (orthonormal) to v0, Q v = Q[0],
+    # and therefore (Q v)^T f(D) (Qv) = Q[0] * f(diag) * Q[0]
+    (dim,) = v0_flat.shape
+
+    # Evaluate the matrix-function
+    fx_eigvals = jax.vmap(matfun)(eigvals)
+    slqval = dim * jnp.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
+
+    # Return both
+    cache = {"v0": v0, "parameters": parameters}
+    return slqval, cache
+
+
+def _integrand_slq_bwd(matfun, order, matvec, cache, vjp_incoming):
+    p = cache["parameters"]
+    v0 = cache["v0"]
+
+    def tbd(*pa):
+        mv = matvec(v0, *pa)
+        z1 = v0 + mv  # todo: without a tree_map, this ain't workin'
+        z2 = v0 - mv  # todo: without a tree_map, this ain't workin'
+
+        # These use stop_gradient(lanczos), so differentiation should be almost free.
+        Z1 = _integrand_slq(jax.jacrev(matfun), order, matvec, z1, *pa)
+        Z2 = _integrand_slq(jax.jacrev(matfun), order, matvec, z2, *pa)
+
+        return (Z1 - Z2) / 4
+
+    _fx, vjp = jax.vjp(tbd, *p)
+
+    # todo: compute gradient wrt v?
+    return 0.0, *vjp(vjp_incoming)
+
+
+_integrand_slq.defvjp(_integrand_slq_fwd, _integrand_slq_bwd)
