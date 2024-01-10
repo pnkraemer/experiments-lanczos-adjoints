@@ -6,7 +6,7 @@ from matfree.backend import np, prng
 from matfree_extensions import slq as slq_extensions
 
 
-def test_integrand_slq_spd_value_and_grad(n=10):
+def test_slq_spd_value_and_grad_matches_autodiff(n=10):
     eigvals = np.arange(0.0, 1.0 + n, step=1.0) + 1.0
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -36,7 +36,7 @@ def test_integrand_slq_spd_value_and_grad(n=10):
     assert np.allclose(slq_gradient, slq_value_and_grad[1], rtol=rtol, atol=atol)
 
 
-def test_integrand_slq_spd_custom_vjp(n=10):
+def test_slq_spd_custom_vjp_matches_autodiff(n=10):
     eigvals = np.arange(0.0, 1.0 + n, step=1.0) + 1.0
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -66,7 +66,7 @@ def test_integrand_slq_spd_custom_vjp(n=10):
     assert np.allclose(slq_gradient, slq_value_and_grad[1], rtol=rtol, atol=atol)
 
 
-def test_hutchinson_custom_vjp(n=3):
+def test_hutchinson_custom_vjp_is_similar_but_different(n=3):
     eigvals = np.arange(0.0, 1.0 + n, step=1.0) + 1.0
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -94,12 +94,10 @@ def test_hutchinson_custom_vjp(n=3):
     assert not np.allclose(vjp_custom(1.0)[1], vjp_ref(1.0)[1])
 
     # ... but approximately similar
-    # print(vjp_custom(1.0)[1])
-    # print(vjp_ref(1.0)[1])
     assert np.allclose(vjp_custom(1.0)[1], vjp_ref(1.0)[1], rtol=0.25)
 
 
-def test_integrand_slq_spd_custom_vjp_recursive(n=10):
+def test_slq_spd_custom_vjp_recursive_matches_slq_spd_custom_vjp(n=10):
     """For full orders, recursive and custom VJPs should be identical."""
     eigvals = np.arange(0.0, 1.0 + n, step=1.0) + 1.0
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -122,11 +120,3 @@ def test_integrand_slq_spd_custom_vjp_recursive(n=10):
     grad_ref = jax.jit(jax.grad(reference2, argnums=1))(key, A)
     grad_impl = jax.jit(jax.grad(implementation, argnums=1))(key, A)
     assert np.allclose(grad_ref, grad_impl)
-
-    # todo: does stop_gradient(A) @ v yield A @ (grad(v)) as a gradient or zero?
-    #   If zero, how do we enforce the correct one?
-    # todo: should we implement SLQ-integrands as g(u, v), where u is the starting vector, and v is the right-multiplication?
-    #  in this case, we could compute the quadratic form manually (not exploiting that Uv=e_1),
-    #  with a stop_gradient(v^\top U^\top f(T) @ U) @ v, and if the gradient check from 4 lines above works,
-    #  a gradient of this expression should be the correct backward pass.
-    #  Recursively, we should be able to call this guy again and again
