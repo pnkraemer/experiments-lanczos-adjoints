@@ -196,7 +196,7 @@ def integrand_slq_spd(matfun, order, matvec, /):
     return quadform
 
 
-def integrand_slq_spd_custom_vjp_rec(matfun, order, matvec, /):
+def integrand_slq_spd_custom_vjp_recursive(matfun, order, matvec, /):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP recursively calls into quadform(), and as such, allows higher derivatives.

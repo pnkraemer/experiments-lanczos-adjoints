@@ -111,7 +111,7 @@ def test_slq_spd_custom_vjp_recursive_matches_slq_spd_custom_vjp(n=10):
 
     reference2 = slq_extensions.integrand_slq_spd_custom_vjp(np.log, order, matvec)
     reference2 = hutchinson.hutchinson(reference2, sampler)
-    implementation = slq_extensions.integrand_slq_spd_custom_vjp_rec(
+    implementation = slq_extensions.integrand_slq_spd_custom_vjp_recursive(
         np.log, order, matvec
     )
     implementation = hutchinson.hutchinson(implementation, sampler)
