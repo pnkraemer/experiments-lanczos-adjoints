@@ -1,3 +1,5 @@
+import os
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from tueplots import axes, bundles, markers
@@ -5,13 +7,16 @@ from tueplots import axes, bundles, markers
 from matfree_extensions import exp_util
 
 plt.rcParams.update(
-    bundles.icml2022(column="full", family="sans-serif", nrows=1, ncols=2)
+    bundles.icml2022(column="full", family="sans-serif", nrows=2, ncols=2)
 )
 plt.rcParams.update(axes.lines())
 plt.rcParams.update(markers.with_edge())
 
 
 directory = exp_util.matching_directory(__file__, "data/")
+
+eigvals = jnp.load(f"{directory}/eigvals.npy")
+
 custom_vjp = jnp.load(f"{directory}/custom_vjp.npy", allow_pickle=True)[()]
 custom_vjp_errors = jnp.asarray(custom_vjp["error"])
 custom_vjp_wall_times = jnp.asarray(custom_vjp["wall_time"])
@@ -40,8 +45,8 @@ def reduce_s(x):
     return jnp.mean(x, axis=1), jnp.std(x, axis=1)
 
 
-mosaic = [["value", "grad"]]
-fig, ax = plt.subplot_mosaic(mosaic, sharex=True, sharey=True, dpi=150)
+mosaic = [["value", "grad"], ["eigvals", "eigvals"]]
+fig, ax = plt.subplot_mosaic(mosaic, sharex=False, sharey=False, dpi=150)
 
 ax["value"].set_title("Log-determinant: Value")
 ax["value"].set_ylabel("Relative RMSE")
@@ -96,5 +101,13 @@ ax["grad"].legend()
 for a in ax.values():
     a.grid(which="minor", axis="both", linestyle="dotted")
 
-plt.savefig("./figures/wp_sparse_matrix.pdf", dpi=150)
+
+ax["eigvals"].set_title("Eigenvalues of the matrix")
+ax["eigvals"].grid(axis="y", which="major")
+ax["eigvals"].semilogy(eigvals, linestyle="None", marker="X", markersize=4, alpha=0.6)
+
+
+directory = exp_util.matching_directory(__file__, "figures/")
+os.makedirs(directory, exist_ok=True)
+plt.savefig(f"{directory}/figure.pdf", dpi=150)
 plt.show()

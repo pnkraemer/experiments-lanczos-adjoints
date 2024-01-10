@@ -26,13 +26,21 @@ def problem_setup(suitesparse_matrix_name):
         return jnp.linalg.slogdet(P)[1]
 
     params = M.data
+    #
+    # import matplotlib.pyplot as plt
+    #
+    eigenvalues = jnp.linalg.eigvalsh(M.todense())
+    # # print(eigvals)
+    # print(sorted(list(set([float(e) for e in eigvals]))))
+    # assert False
+    # print(set(list(eigvals)))
+    #
+    #
+    # assert False
 
     value_and_grad_true = logdet(params)
-    # print()
-    # # print(value_and_grad_true)
-    # print()
     error_fun = rmse_relative(value_and_grad_true)
-    return (matvec_, params), error_fun, M.shape[0]
+    return (matvec_, params), error_fun, M.shape[0], eigenvalues
 
 
 def rmse_relative(reference, atol=1e-5):
@@ -73,12 +81,13 @@ def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps, nba
     )
 
     # Estimate and compute error. Precompiles.
+    # with jax.disable_jit():
     fx, grad = estimate(key, *args)
     error = error_func((fx, grad))
     # print()
     # print(error)
     # print()
-
+    # assert False
     # Run a bunch of times to evaluate the runtime
     t0 = time.perf_counter()
     for _ in range(nreps):
@@ -92,14 +101,14 @@ def workprecision_single(key, integrand_func, *args, nsamples, nrows, nreps, nba
 
 
 def estimator(integrand_func, *, nrows, nsamples, nbatches):
-    integrand_func = jax.value_and_grad(integrand_func, allow_int=True, argnums=1)
+    # integrand_func = jax.value_and_grad(integrand_func, allow_int=True, argnums=1)
     x_like = jnp.ones((nrows,))
     sampler = hutchinson.sampler_rademacher(x_like, num=nsamples)
     estimate_approximate = slq_extensions.hutchinson_nograd(integrand_func, sampler)
-    # estimate_approximate = jax.value_and_grad(estimate_approximate, argnums=1)
     estimate_approximate = slq_extensions.hutchinson_batch(
         estimate_approximate, num=nbatches
     )
+    estimate_approximate = jax.value_and_grad(estimate_approximate, argnums=1)
     estimate_approximate = jax.jit(estimate_approximate)
     return estimate_approximate
 
@@ -108,7 +117,7 @@ if __name__ == "__main__":
     # Set parameters
     num_batches, num_samples_per_batch, num_reps, num_seeds = 10, 10, 1, 1
     # step = (50 - 2) // 4
-    orders = [2**i for i in range(0, 5)]
+    orders = [i for i in range(1, 24)]
     print(orders)
 
     # Set a random key
@@ -116,7 +125,10 @@ if __name__ == "__main__":
     key_problem, key_estimate = jax.random.split(prng_key, num=2)
 
     # Construct a problem
-    (matvec, parameters), error_func, num_rows = problem_setup("t2dal_e")
+    # bcsstm08:
+    # 7 eigvals > 1000, a lot at 1000, another 4 in the low hundreds, another 4 in the tens,
+    # and a lot of small ones.
+    (matvec, parameters), error_func, num_rows, eigvals = problem_setup("bcsstm08")
 
     # Run a work precision diagram
     key_estimate_all = jax.random.split(key_estimate, num=num_seeds)
@@ -134,7 +146,7 @@ if __name__ == "__main__":
     print()
     wps_ref = workprecision_avg(
         key_estimate_all,
-        orders[:3],  # memory errors dictate small orders only
+        orders[:13],  # memory errors dictate small orders only
         lambda o: slq_extensions.integrand_slq_spd(jnp.log, o, matvec),
         parameters,
         nsamples=num_samples_per_batch,
@@ -142,7 +154,9 @@ if __name__ == "__main__":
         nreps=num_reps,
         nbatches=num_batches,
     )
+
     directory = exp_util.matching_directory(__file__, "data/")
     os.makedirs(directory, exist_ok=True)
+    jnp.save(f"{directory}/eigvals.npy", eigvals)
     jnp.save(f"{directory}/custom_vjp.npy", wps_custom, allow_pickle=True)
     jnp.save(f"{directory}/reference.npy", wps_ref, allow_pickle=True)
