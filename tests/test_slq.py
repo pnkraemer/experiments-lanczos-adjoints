@@ -117,6 +117,10 @@ def test_slq_spd_custom_vjp_recursive_matches_slq_spd_custom_vjp(n=10):
     implementation = hutchinson.hutchinson(implementation, sampler)
 
     key = prng.prng_key(seed=1)
-    grad_ref = jax.jit(jax.grad(reference2, argnums=1))(key, A)
-    grad_impl = jax.jit(jax.grad(implementation, argnums=1))(key, A)
+    value_ref, grad_ref = jax.jit(jax.value_and_grad(reference2, argnums=1))(key, A)
+    value_impl, grad_impl = jax.jit(jax.value_and_grad(implementation, argnums=1))(
+        key, A
+    )
+
+    assert np.allclose(value_ref, value_impl)
     assert np.allclose(grad_ref, grad_impl)
