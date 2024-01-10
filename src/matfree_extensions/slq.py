@@ -8,6 +8,17 @@ from matfree import decomp
 
 
 def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
+    """Construct an integrand that computes the value and gradient of SLQ for SPD matrices.
+
+    This yields E[value_and_grad()], and is therefore neither forward- nor
+    reverse-mode. It is rather a "clever implementation" of what is common
+    in the GP community (clever because it requires a single backward-pass
+    over a parameter-to-scalar function instead of propagating kernel parameters forward).
+
+    Use this function if SLQ is the entire computational chain, i.e.,
+    if neither forward- nor reverse-mode are strictly required.
+    """
+
     def quadform(v0, *parameters):
         v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
         scale = jnp.linalg.norm(v0_flat)
@@ -62,6 +73,13 @@ def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
 
 
 def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
+    """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
+
+    The custom VJP efficiently computes a single backward-pass (by reusing
+    the Lanczos decomposition from the forward pass), but does not admit
+    higher derivatives.
+    """
+
     @jax.custom_vjp
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
@@ -88,9 +106,7 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
             v0_flat, lambda v: matvec_flat(v, *parameters), algorithm=algorithm
         )
         (diag, off_diag) = tridiag
-        # print(diag)
-        # print(off_diag[1:]+off_diag[:-1])
-        # print()
+
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
         #  use it here. Until then: an eigen-decomposition of size (order + 1)
         #  does not hurt too much...
@@ -99,10 +115,7 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
         offdiag2 = jnp.diag(off_diag, 1)
         dense_matrix = diag + offdiag1 + offdiag2
 
-        # print(dense_matrix)
         eigvals, eigvecs = jnp.linalg.eigh(dense_matrix)
-        # print(eigvals)
-        # assert False
 
         # Since Q orthogonal (orthonormal) to v0, Q v = Q[0],
         # and therefore (Q v)^T f(D) (Qv) = Q[0] * f(diag) * Q[0]
@@ -139,63 +152,13 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
-def hutchinson_nograd(integrand_fun, /, sample_fun):
-    def sample(key, *parameters):
-        samples = sample_fun(key)
-        samples = jax.lax.stop_gradient(samples)
-        Qs = jax.vmap(lambda vec: integrand_fun(vec, *parameters))(samples)
-        return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), Qs)
-
-    return jax.jit(sample)
-
-
-def hutchinson_custom_vjp(integrand_fun, /, sample_fun):
-    @jax.custom_vjp
-    def sample(_key, *_parameters):
-        #
-        # This function shall only be meaningful inside a VJP,
-        # thus, we raise a:
-        #
-        raise RuntimeError("oops")
-
-    def sample_fwd(key, *parameters):
-        _key_fwd, key_bwd = jax.random.split(key, num=2)
-        sampled = _sample(sample_fun, integrand_fun, key, *parameters)
-        return sampled, {"key": key_bwd, "parameters": parameters}
-
-    def sample_bwd(cache, vjp_incoming):
-        def integrand_fun_new(v, *p):
-            # this is basically a checkpoint?
-            _fx, vjp = jax.vjp(integrand_fun, v, *p)
-            return vjp(vjp_incoming)
-
-        key = cache["key"]
-        parameters = cache["parameters"]
-        return _sample(sample_fun, integrand_fun_new, key, *parameters)
-
-    sample.defvjp(sample_fwd, sample_bwd)
-    return sample
-
-
-def _sample(sample_fun, integrand_fun, key, *parameters):
-    samples = sample_fun(key)
-    Qs = jax.vmap(lambda vec: integrand_fun(vec, *parameters))(samples)
-    return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), Qs)
-
-
-def hutchinson_batch(estimate_fun, /, num):
-    def estimate_b(key, *parameters):
-        keys = jax.random.split(key, num=num)
-        estimates = jax.lax.map(lambda k: estimate_fun(k, *parameters), keys)
-        return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), estimates)
-
-    return jax.jit(estimate_b)
-
-
 def integrand_slq_spd(matfun, order, matvec, /):
     """Quadratic form for stochastic Lanczos quadrature.
 
     This function assumes a symmetric, positive definite matrix.
+
+    This is a mirror of matfree.slq.integrand_slq_spd, but can be modified
+    whenever required.
     """
 
     def quadform(v0, *parameters):
@@ -234,6 +197,13 @@ def integrand_slq_spd(matfun, order, matvec, /):
 
 
 def integrand_slq_spd_custom_vjp_rec(matfun, order, matvec, /):
+    """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
+
+    The custom VJP recursively calls into quadform(), and as such, allows higher derivatives.
+    But this comes at the price of calling Lanczos twice more in the backward pass,
+    which makes it more costly for computing gradients.
+    """
+
     def quadform(v0, *parameters):
         return _integrand_slq(matfun, order, matvec, v0, *parameters)
 
@@ -312,3 +282,62 @@ def _integrand_slq_bwd(matfun, order, matvec, cache, vjp_incoming):
 
 
 _integrand_slq.defvjp(_integrand_slq_fwd, _integrand_slq_bwd)
+
+
+def hutchinson_nograd(integrand_fun, /, sample_fun):
+    """Implement Hutchinson's estimator but stop the gradients through the samples."""
+
+    def sample(key, *parameters):
+        samples = sample_fun(key)
+        samples = jax.lax.stop_gradient(samples)
+        Qs = jax.vmap(lambda vec: integrand_fun(vec, *parameters))(samples)
+        return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), Qs)
+
+    return jax.jit(sample)
+
+
+def hutchinson_custom_vjp(integrand_fun, /, sample_fun):
+    """Implement Hutchinson's estimator but use a different key during the backward pass."""
+
+    @jax.custom_vjp
+    def sample(_key, *_parameters):
+        #
+        # This function shall only be meaningful inside a VJP,
+        # thus, we raise a:
+        #
+        raise RuntimeError("oops")
+
+    def sample_fwd(key, *parameters):
+        _key_fwd, key_bwd = jax.random.split(key, num=2)
+        sampled = _sample(sample_fun, integrand_fun, key, *parameters)
+        return sampled, {"key": key_bwd, "parameters": parameters}
+
+    def sample_bwd(cache, vjp_incoming):
+        def integrand_fun_new(v, *p):
+            # this is basically a checkpoint?
+            _fx, vjp = jax.vjp(integrand_fun, v, *p)
+            return vjp(vjp_incoming)
+
+        key = cache["key"]
+        parameters = cache["parameters"]
+        return _sample(sample_fun, integrand_fun_new, key, *parameters)
+
+    sample.defvjp(sample_fwd, sample_bwd)
+    return sample
+
+
+def _sample(sample_fun, integrand_fun, key, *parameters):
+    samples = sample_fun(key)
+    Qs = jax.vmap(lambda vec: integrand_fun(vec, *parameters))(samples)
+    return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), Qs)
+
+
+def hutchinson_batch(estimate_fun, /, num):
+    """Batched-call the results of Hutchinson's estimator."""
+
+    def estimate_b(key, *parameters):
+        keys = jax.random.split(key, num=num)
+        estimates = jax.lax.map(lambda k: estimate_fun(k, *parameters), keys)
+        return jax.tree_util.tree_map(lambda s: jnp.mean(s, axis=0), estimates)
+
+    return jax.jit(estimate_b)
