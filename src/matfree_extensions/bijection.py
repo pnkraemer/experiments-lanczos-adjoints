@@ -35,6 +35,11 @@ def shift(b, /):
     return func
 
 
+def elwise_tanh():
+    _register(jnp.tanh, jnp.arctanh)
+    return jnp.tanh
+
+
 def _register(func, func_inv, /):
     global REGISTRY_INVERSES
     REGISTRY_INVERSES[func] = func_inv

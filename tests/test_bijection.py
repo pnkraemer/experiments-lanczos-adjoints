@@ -7,6 +7,11 @@ from matfree_extensions import bijection
 
 
 @pytest_cases.case()
+def case_elementwise():
+    return bijection.elwise_tanh()
+
+
+@pytest_cases.case()
 def case_linear():
     key = jax.random.PRNGKey(seed=4141231)
     A = jax.random.normal(key, shape=(3, 3))
