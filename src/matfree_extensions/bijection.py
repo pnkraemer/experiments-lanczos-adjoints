@@ -7,10 +7,11 @@ REGISTRY_INVERSES: dict[Callable, Callable] = {}
 
 
 def invert(func, /):
-    try:
-        return REGISTRY_INVERSES[func]
-    except KeyError:
-        raise KeyError("Function not registered.")
+    return REGISTRY_INVERSES[func]
+    # try:
+    #     return REGISTRY_INVERSES[func]
+    # except KeyError:
+    #     raise KeyError("Function not registered.")
 
 
 def linear(A, /):
@@ -24,31 +25,18 @@ def linear(A, /):
     return func
 
 
+def shift(b, /):
+    def func(x, /):
+        return x + b
+
+    def func_inv(y, /):
+        return y - b
+
+    _register(func, func_inv)
+    return func
+
+
 def _register(func, func_inv, /):
     global REGISTRY_INVERSES
     REGISTRY_INVERSES[func] = func_inv
     REGISTRY_INVERSES[func_inv] = func
-
-
-#
-# def affine(x, /, params):
-#     matvec, matvec_params, b = params
-#     return matvec(x, *matvec_params) + b
-#
-#
-# def _affine_inverse(y, /, params):
-#     matvec, matvec_params, b = params
-#
-#     zeros = jnp.zeros_like(b)
-#
-#     def matvec_new(s, *p):
-#         def matvec_p(z):
-#             return matvec(z, *p)
-#
-#         return jax.scipy.linalg.gmres(matvec_p, s - b)
-#
-#     return affine(y, (matvec_new, matvec_params, zeros))
-#
-#
-# REGISTRY_INVERSES[affine] = _affine_inverse
-# REGISTRY_INVERSES[_affine_inverse] = affine

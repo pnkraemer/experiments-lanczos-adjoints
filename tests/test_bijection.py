@@ -12,6 +12,13 @@ def case_linear():
     return bijection.linear(A)
 
 
+@pytest_cases.case()
+def case_shift():
+    key = jax.random.PRNGKey(seed=6781974)
+    b = jax.random.normal(key, shape=(3,))
+    return bijection.shift(b)
+
+
 @pytest_cases.parametrize_with_cases("fun", cases=".")
 def test_invert(fun):
     key = jax.random.PRNGKey(seed=2)
