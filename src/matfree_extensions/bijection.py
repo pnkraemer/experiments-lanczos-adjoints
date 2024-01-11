@@ -3,12 +3,23 @@ from typing import Callable
 
 import jax.numpy as jnp
 
-REGISTRY_INVERSES: dict[Callable, Callable] = {}
+_REGISTRY_INVERSES: dict[Callable, Callable] = {}
+
+
+def chain(func1, func2, /):
+    def func(x, /):
+        return func2(func1(x))
+
+    def func_inv(y, /):
+        return invert(func1)(invert(func2)(y))
+
+    _register(func, func_inv)
+    return func
 
 
 def invert(func, /):
     try:
-        return REGISTRY_INVERSES[func]
+        return _REGISTRY_INVERSES[func]
     except KeyError:
         raise KeyError("Function not registered.")
 
@@ -41,6 +52,6 @@ def elwise_tanh():
 
 
 def _register(func, func_inv, /):
-    global REGISTRY_INVERSES
-    REGISTRY_INVERSES[func] = func_inv
-    REGISTRY_INVERSES[func_inv] = func
+    global _REGISTRY_INVERSES
+    _REGISTRY_INVERSES[func] = func_inv
+    _REGISTRY_INVERSES[func_inv] = func
