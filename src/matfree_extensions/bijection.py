@@ -7,11 +7,10 @@ REGISTRY_INVERSES: dict[Callable, Callable] = {}
 
 
 def invert(func, /):
-    return REGISTRY_INVERSES[func]
-    # try:
-    #     return REGISTRY_INVERSES[func]
-    # except KeyError:
-    #     raise KeyError("Function not registered.")
+    try:
+        return REGISTRY_INVERSES[func]
+    except KeyError:
+        raise KeyError("Function not registered.")
 
 
 def linear(A, /):

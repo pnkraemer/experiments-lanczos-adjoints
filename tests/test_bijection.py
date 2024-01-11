@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import pytest
 import pytest_cases
 
 from matfree_extensions import bijection
@@ -30,3 +31,11 @@ def test_invert(fun):
 
     assert jnp.allclose(x, x_again)
     assert jnp.allclose(y, y_again)
+
+
+def test_invert_raises_error_for_non_invertible_function():
+    def unknown_function(x):
+        return x
+
+    with pytest.raises(KeyError, match="not registered"):
+        bijection.invert(unknown_function)
