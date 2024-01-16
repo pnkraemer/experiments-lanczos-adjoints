@@ -4,10 +4,10 @@ import functools
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-from matfree import decomp
+from matfree import lanczos
 
 
-def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
+def integrand_spd_value_and_grad(matfun, order, matvec, /):
     """Construct an integrand that computes the value and gradient of SLQ for SPD matrices.
 
     This yields E[value_and_grad()], and is therefore neither forward- nor
@@ -30,11 +30,8 @@ def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
             flat, unflatten = jax.flatten_util.ravel_pytree(Av)
             return flat
 
-        algorithm = decomp.lanczos_tridiag_full_reortho(order)
-        basis, tridiag = decomp.decompose_fori_loop(
-            v0_flat, matvec_flat, algorithm=algorithm
-        )
-        (diag, off_diag) = tridiag
+        algorithm = lanczos.alg_tridiag_full_reortho(matvec_flat, order)
+        basis, (diag, off_diag) = algorithm(v0_flat)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
         #  use it here. Until then: an eigen-decomposition of size (order + 1)
@@ -72,7 +69,7 @@ def integrand_slq_spd_value_and_grad(matfun, order, matvec, /):
     return quadform
 
 
-def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
+def integrand_spd_custom_vjp(matfun, order, matvec, /):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
@@ -101,11 +98,8 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
             flat, unflatten = jax.flatten_util.ravel_pytree(av)
             return flat
 
-        algorithm = decomp.lanczos_tridiag_full_reortho(order)
-        basis, tridiag = decomp.decompose_fori_loop(
-            v0_flat, lambda v: matvec_flat(v, *parameters), algorithm=algorithm
-        )
-        (diag, off_diag) = tridiag
+        algorithm = lanczos.alg_tridiag_full_reortho(matvec_flat, order)
+        basis, (diag, off_diag) = algorithm(v0_flat, *parameters)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
         #  use it here. Until then: an eigen-decomposition of size (order + 1)
@@ -152,12 +146,12 @@ def integrand_slq_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
-def integrand_slq_spd(matfun, order, matvec, /):
+def integrand_spd(matfun, order, matvec, /):
     """Quadratic form for stochastic Lanczos quadrature.
 
     This function assumes a symmetric, positive definite matrix.
 
-    This is a mirror of matfree.slq.integrand_slq_spd, but can be modified
+    This is a mirror of matfree.slq.integrand_spd, but can be modified
     whenever required.
     """
 
@@ -172,8 +166,8 @@ def integrand_slq_spd(matfun, order, matvec, /):
             flat, unflatten = jax.flatten_util.ravel_pytree(Av)
             return flat
 
-        algorithm = decomp.lanczos_tridiag_full_reortho(order)
-        _, tridiag = decomp.decompose_fori_loop(
+        algorithm = lanczos.alg_tridiag_full_reortho(order)
+        _, tridiag = lanczos.decompose_fori_loop(
             v0_flat, matvec_flat, algorithm=algorithm
         )
         (diag, off_diag) = tridiag
@@ -196,7 +190,7 @@ def integrand_slq_spd(matfun, order, matvec, /):
     return quadform
 
 
-def integrand_slq_spd_custom_vjp_recursive(matfun, order, matvec, /):
+def integrand_spd_custom_vjp_recursive(matfun, order, matvec, /):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP recursively calls into quadform(), and as such, allows higher derivatives.
@@ -212,10 +206,10 @@ def integrand_slq_spd_custom_vjp_recursive(matfun, order, matvec, /):
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2))
 def _integrand_slq(matfun, order, matvec, v0, *parameters):
-    return _integrand_slq_fwd(matfun, order, matvec, v0, v0, *parameters)[0]
+    return _integrand_fwd(matfun, order, matvec, v0, v0, *parameters)[0]
 
 
-def _integrand_slq_fwd(matfun, order, matvec, v0, *parameters):
+def _integrand_fwd(matfun, order, matvec, v0, *parameters):
     v0_flat_unscaled, v_unflatten = jax.flatten_util.ravel_pytree(v0)
     scale = jnp.linalg.norm(v0_flat_unscaled)
     v0_flat = v0_flat_unscaled / scale
@@ -227,11 +221,8 @@ def _integrand_slq_fwd(matfun, order, matvec, v0, *parameters):
         return flat
 
     # Lanczos decomposition
-    algorithm = decomp.lanczos_tridiag_full_reortho(order)
-    basis, tridiag = decomp.decompose_fori_loop(
-        v0_flat, lambda v: matvec_flat(v, *parameters), algorithm=algorithm
-    )
-    (diag, off_diag) = tridiag
+    algorithm = lanczos.alg_tridiag_full_reortho(matvec_flat, order)
+    basis, (diag, off_diag) = algorithm(v0_flat, *parameters)
 
     # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
     #  use it here. Until then: an eigen-decomposition of size (order + 1)
@@ -243,7 +234,7 @@ def _integrand_slq_fwd(matfun, order, matvec, v0, *parameters):
     eigvals, eigvecs = jnp.linalg.eigh(dense_matrix)
 
     # Stop gradients through Lanczos and eigenvalues
-    basis, tridiag = jax.tree_util.tree_map(jax.lax.stop_gradient, (basis, tridiag))
+    basis, _ = jax.tree_util.tree_map(jax.lax.stop_gradient, (basis, (diag, off_diag)))
     eigvals, eigvecs = jax.tree_util.tree_map(jax.lax.stop_gradient, (eigvals, eigvecs))
 
     # Do not explot that basis @ v0_flat is e1, because that would yield
@@ -259,7 +250,7 @@ def _integrand_slq_fwd(matfun, order, matvec, v0, *parameters):
     return slqval, cache
 
 
-def _integrand_slq_bwd(matfun, order, matvec, cache, vjp_incoming):
+def _integrand_bwd(matfun, order, matvec, cache, vjp_incoming):
     parameters = cache["parameters"]
     v0 = cache["v0"]
 
@@ -270,8 +261,8 @@ def _integrand_slq_bwd(matfun, order, matvec, cache, vjp_incoming):
         z2 = v0 - mv  # todo: tree_map
 
         # These use stop_gradient(lanczos), so differentiation should be almost free.
-        Z1, _ = _integrand_slq_fwd(jax.jacrev(matfun), order, matvec, z1, *pa)
-        Z2, _ = _integrand_slq_fwd(jax.jacrev(matfun), order, matvec, z2, *pa)
+        Z1, _ = _integrand_fwd(jax.jacrev(matfun), order, matvec, z1, *pa)
+        Z2, _ = _integrand_fwd(jax.jacrev(matfun), order, matvec, z2, *pa)
         return (Z1 - Z2) / 4
 
     # _fx is irrelevant for VJPs, but useful for debugging
@@ -281,7 +272,7 @@ def _integrand_slq_bwd(matfun, order, matvec, cache, vjp_incoming):
     return 0.0, *vjp(vjp_incoming)
 
 
-_integrand_slq.defvjp(_integrand_slq_fwd, _integrand_slq_bwd)
+_integrand_slq.defvjp(_integrand_fwd, _integrand_bwd)
 
 
 def hutchinson_nograd(integrand_fun, /, sample_fun):

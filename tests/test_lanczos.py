@@ -1,6 +1,6 @@
 """Tests for the extensions."""
 import jax
-from matfree import hutchinson, slq, test_util
+from matfree import hutchinson, lanczos, test_util
 from matfree.backend import np, prng
 
 from matfree_extensions import slq as slq_extensions
@@ -18,13 +18,13 @@ def test_slq_spd_value_and_grad_matches_autodiff(n=10):
     order = n // 2
 
     # Reference
-    integrand = slq.integrand_slq_spd(np.log, order, matvec)
+    integrand = lanczos.integrand_spd(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     key = prng.prng_key(seed=2)
     slq_value, slq_gradient = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Implementation
-    integrand = slq_extensions.integrand_slq_spd_value_and_grad(np.log, order, matvec)
+    integrand = slq_extensions.integrand_spd_value_and_grad(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     slq_value_and_grad = (estimate)(key, A)
 
@@ -48,13 +48,13 @@ def test_slq_spd_custom_vjp_matches_autodiff(n=10):
     order = n // 2
 
     # Reference
-    integrand = slq.integrand_slq_spd(np.log, order, matvec)
+    integrand = lanczos.integrand_spd(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     key = prng.prng_key(seed=2)
     slq_value, slq_gradient = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Implementation
-    integrand = slq_extensions.integrand_slq_spd_custom_vjp(np.log, order, matvec)
+    integrand = slq_extensions.integrand_spd_custom_vjp(np.log, order, matvec)
     estimate = hutchinson.hutchinson(integrand, sampler)
     slq_value_and_grad = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
@@ -77,7 +77,7 @@ def test_hutchinson_custom_vjp_is_similar_but_different(n=3):
     sampler = hutchinson.sampler_rademacher(x_like, num=10_000)
     order = n // 2
 
-    integrand = slq.integrand_slq_spd(np.log, order, matvec)
+    integrand = lanczos.integrand_spd(np.log, order, matvec)
     estimate_ref = hutchinson.hutchinson(integrand, sampler)
     estimate_custom = slq_extensions.hutchinson_custom_vjp(integrand, sampler)
 
@@ -109,9 +109,9 @@ def test_slq_spd_custom_vjp_recursive_matches_slq_spd_custom_vjp(n=10):
     sampler = hutchinson.sampler_normal(x_like, num=1)
     order = n
 
-    reference2 = slq_extensions.integrand_slq_spd_custom_vjp(np.log, order, matvec)
+    reference2 = slq_extensions.integrand_spd_custom_vjp(np.log, order, matvec)
     reference2 = hutchinson.hutchinson(reference2, sampler)
-    implementation = slq_extensions.integrand_slq_spd_custom_vjp_recursive(
+    implementation = slq_extensions.integrand_spd_custom_vjp_recursive(
         np.log, order, matvec
     )
     implementation = hutchinson.hutchinson(implementation, sampler)
