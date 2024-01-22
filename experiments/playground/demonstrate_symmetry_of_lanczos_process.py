@@ -41,6 +41,11 @@ def lanczos_rev_step(matrix, vec, b, vec_next):
     return (x, b), a
 
 
+# Experiment
+# ----------
+# For the setup below, x64 precision yields a symmetric process
+# but x32 precision does not.
+
 # Set up a test-matrix
 eigvals = jnp.ones((100,), dtype=float) * 0.001
 eigvals_relevant = jnp.arange(1.0, 2.0, step=0.2)
