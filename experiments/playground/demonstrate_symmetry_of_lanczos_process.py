@@ -42,8 +42,8 @@ def lanczos_rev_step(matrix, vec, b, vec_next):
 
 
 # Set up a test-matrix
-eigvals = jnp.ones((50,), dtype=float) * 0.001
-eigvals_relevant = jnp.arange(1.0, 2.0, step=0.1)
+eigvals = jnp.ones((100,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=0.2)
 eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -56,13 +56,16 @@ v0 /= jnp.linalg.norm(v0)
 # Initialize and apply the forward recursion
 i, small_value = 0, jnp.sqrt(jnp.finfo(jnp.dtype(v0)).eps)
 (v1, offdiag), diag = lanczos_fwd_init(A, v0)
+print(f"{'->' * i}", 0.0)
 while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
+    print(f"{'->'*i}", offdiag)
     ((v1, offdiag), diag), v0 = lanczos_fwd_step(A, v1, offdiag, v0), v1
-    print(i, offdiag)
-
+print(f"{'->'*(i+1)}", offdiag)
+print()
 # Go backwards:
 # Forward recursion, but change the roles of v0 and v1
 # while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
-for j in range(i - 1, 0, -1):
+for j in range(i + 1, 0, -1):
+    print(f"{'<-'*j}", offdiag)
     ((v0, offdiag), diag), v1 = lanczos_fwd_step(A, v0, offdiag, v1), v0
-    print(j, offdiag)
+print(f"{'<-'*(j-1)}", offdiag)
