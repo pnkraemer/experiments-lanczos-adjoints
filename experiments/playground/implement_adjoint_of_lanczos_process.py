@@ -3,15 +3,8 @@ import jax
 import jax.numpy as jnp
 from matfree import test_util
 
-# todo:
-#  (i) implement the lanczos decomposition such that it
-#  returns the full decomposition plus all $a$s and $b$s
-#  (ii) compute the VJP of this decomposition in a random direction
-#  (iii) implement the custom VJP recursion
-#  (Use the content of demonstrate_symmetry below)
 
-
-def lanczos_fwd():
+def lanczos_fwd(*, custom_vjp: bool):
     def _init(matrix, vec):
         """Initialize Lanczos' algorithm.
 
@@ -54,6 +47,16 @@ def lanczos_fwd():
 
         return jnp.stack(vs), jnp.stack(diags), jnp.stack(offdiags)
 
+    def estimate_fwd(*args):
+        return estimate(*args), {}
+
+    def estimate_bwd(cache, vjp_incoming):
+        return 0.0, 0.0
+
+    if custom_vjp:
+        estimate = jax.custom_vjp(estimate)
+        estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
+
     return estimate
 
 
@@ -69,14 +72,9 @@ v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
 # Run algorithm
-algorithm = lanczos_fwd()
+algorithm = lanczos_fwd(custom_vjp=False)
 (vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
 
-print(vecs.T @ vecs)
-
-print(vecs.shape)
-print(diags.shape)
-print(offdiags.shape)
 M, init = vjp((vecs, diags, offdiags))
 print(M)
 print(init)
