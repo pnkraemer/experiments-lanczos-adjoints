@@ -33,7 +33,9 @@ def lanczos_step(matrix, vec, b, vec_previous):
     return (x, b), a
 
 
-eigvals = jnp.arange(1.0, 2.0, step=0.2)
+eigvals = jnp.ones((50,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=0.1)
+eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
 key = jax.random.PRNGKey(1)
@@ -42,6 +44,7 @@ v0 /= jnp.linalg.norm(v0)
 
 (v1, offdiag), diag = lanczos_init(A, v0)
 
-while offdiag > 100 * jnp.finfo(jnp.dtype(offdiag)).eps:
+i, small_value = 0, jnp.sqrt(jnp.finfo(jnp.dtype(offdiag)).eps)
+while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
     ((v1, offdiag), diag), v0 = lanczos_step(A, v1, offdiag, v0), v1
-    print(offdiag)
+    print(i, offdiag)
