@@ -33,14 +33,6 @@ def lanczos_fwd_step(matrix, vec, b, vec_previous):
     return (x, b), a
 
 
-def lanczos_rev_step(matrix, vec, b, vec_next):
-    a = vec.T @ (matrix @ vec)
-    r = (matrix @ vec) - a * vec - b * vec_next
-    b = jnp.linalg.norm(r)
-    x = r / b
-    return (x, b), a
-
-
 # Experiment
 # ----------
 # For the setup below, x64 precision yields a symmetric process
