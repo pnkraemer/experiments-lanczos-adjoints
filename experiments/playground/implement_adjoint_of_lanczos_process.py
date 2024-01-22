@@ -70,8 +70,13 @@ v /= jnp.linalg.norm(v)
 
 # Run algorithm
 algorithm = lanczos_fwd()
-vecs, diags, offdiags = algorithm(A, v)
+(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
+
+print(vecs.T @ vecs)
 
 print(vecs.shape)
 print(diags.shape)
 print(offdiags.shape)
+M, init = vjp((vecs, diags, offdiags))
+print(M)
+print(init)
