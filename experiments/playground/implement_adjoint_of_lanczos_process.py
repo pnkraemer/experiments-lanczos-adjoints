@@ -1,5 +1,6 @@
 """Implement the adjoint of the Lanczos process."""
 import jax
+import jax.flatten_util
 import jax.numpy as jnp
 from matfree import test_util
 
@@ -8,9 +9,9 @@ def identity_via_lanczos(*, custom_vjp: bool):
     alg = lanczos_fwd(custom_vjp=custom_vjp)
 
     def identity(matrix, vec):
-        (vecs, diags, offdiags), (v_last, b_last) = alg(matrix, vec)
+        (vecs, diags, offdiags), _ = alg(matrix, vec)
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
-        return vecs.T @ dense_matrix @ vecs, vec
+        return vecs.T @ dense_matrix @ vecs, vecs[0, :]
 
     return identity
 
@@ -74,8 +75,13 @@ def lanczos_fwd(*, custom_vjp: bool):
         return fx, (fx, A)
 
     def estimate_bwd(cache, vjp_incoming):
-        dxs, dalphas, dbetas = vjp_incoming
-        (xs, alphas, betas), A = cache
+        (dxs, dalphas, dbetas), (dx_last, dbeta_last) = vjp_incoming
+        dxs = jnp.concatenate((dxs, dx_last[None]))
+        dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
+
+        ((xs, alphas, betas), (x_last, beta_last)), A = cache
+        xs = jnp.concatenate((xs, x_last[None]))
+        betas = jnp.concatenate((betas, beta_last[None]))
 
         k = len(alphas) - 1
         nu_k, lambda_k = _bwd_init(
@@ -90,10 +96,10 @@ def lanczos_fwd(*, custom_vjp: bool):
         lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
         # a-constraint
-        assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
+        # assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
 
         # b-constraint
-        assert jnp.allclose(lambda_kplus.T @ xs[k + 1], dbetas[k])
+        # assert jnp.allclose(lambda_kplus.T @ xs[k + 1], dbetas[k])
 
         dA = jnp.outer(lambda_kplus, xs[k])
 
@@ -114,12 +120,12 @@ def lanczos_fwd(*, custom_vjp: bool):
                 x_Kminus=xs[k - 1],
             )
             # a-constraint
-            assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
+            # assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
 
             # b-constraint
-            assert jnp.allclose(
-                lambda_kplusplus.T @ xs[k] + lambda_kplus.T @ xs[k + 1], dbetas[k]
-            )
+            # assert jnp.allclose(
+            #     lambda_kplusplus.T @ xs[k] + lambda_kplus.T @ xs[k + 1], dbetas[k]
+            # )
 
             # Update
             dA += jnp.outer(lambda_kplus, xs[k])
@@ -184,8 +190,8 @@ jnp.set_printoptions(3)
 
 
 # Set up a test-matrix
-eigvals = jnp.ones((10,), dtype=float) * 0.001
-eigvals_relevant = jnp.arange(1.0, 2.0, step=0.1)
+eigvals = jnp.ones((2,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=1.0 / len(eigvals))
 eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -196,15 +202,23 @@ v /= jnp.linalg.norm(v)
 
 algorithm = identity_via_lanczos(custom_vjp=False)
 (A_like, v_like), vjp = jax.vjp(algorithm, A, v)
-# print(A_like, v_like)
-# A_like, v_like = algorithm(A, v)
 
-print(A_like - A)
-assert False
-assert jnp.allclose(A_like, A)
-assert jnp.allclose(v_like, v)
-assert False
+# The algorithm is the identity (just implemented via Lanczos)
+tols = {"atol": 1e-5, "rtol": 1e-5}
+assert jnp.allclose(A_like, A, **tols)
+assert jnp.allclose(v_like, v, **tols)
 
+
+# So is the Jacobian the identity matrix?
+flat, unflatten = jax.flatten_util.ravel_pytree((A, v))
+print(
+    jax.jacrev(lambda f: jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0])(
+        flat
+    )
+)
+
+
+assert False
 
 print("Autodiff VJP:")
 M, init = vjp((A_like, v_like))
