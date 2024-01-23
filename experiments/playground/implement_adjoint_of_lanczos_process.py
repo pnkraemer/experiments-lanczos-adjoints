@@ -36,14 +36,14 @@ def lanczos_fwd(*, custom_vjp: bool):
         small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
 
         ((v1, offdiag), diag), v0 = _fwd_init(matrix, vec), vec
-        vs, offdiags, diags = [v1], [offdiag], [diag]
+        vs, offdiags, diags = [v0], [], []
 
         i = 0
         while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
-            ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
             vs.append(v1)
             offdiags.append(offdiag)
             diags.append(diag)
+            ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
 
         return jnp.stack(vs), jnp.stack(diags), jnp.stack(offdiags)
 
@@ -54,47 +54,68 @@ def lanczos_fwd(*, custom_vjp: bool):
     def estimate_bwd(cache, vjp_incoming):
         dxs, dalphas, dbetas = vjp_incoming
         (xs, alphas, betas), A = cache
-
+        k = len(alphas)
         mu_k, nu_k, lambda_kplus = _bwd_init(
-            dx_K=dxs[-1],
-            da_K=dalphas[-1],
-            db_K=dbetas[-1],
-            b_K=betas[-1],
-            x_Kplus=xs[-1],
-            x_K=xs[-2],
+            dx_Kplus=dxs[k + 1],
+            da_K=dalphas[k],
+            db_K=dbetas[k],
+            b_K=betas[k],
+            x_Kplus=xs[k + 1],
+            x_K=xs[k],
         )
-        dA = jnp.outer(lambda_kplus, xs[-1])
+        dA = jnp.outer(lambda_kplus, xs[k])
 
         mu_kminus, nu_kminus, lambda_k = _bwd_step(
             A=A,
-            dx_Kminus=dxs[-2],
-            da_Kminus=dalphas[-2],
-            db_Kminus=dbetas[-2],
+            dx_K=dxs[k],
+            da_Kminus=dalphas[k - 1],
+            db_Kminus=dbetas[k - 1],
             lambda_kplus=lambda_kplus,
-            a_K=alphas[-1],
-            b_K=betas[-1],
+            a_K=alphas[k],
+            b_K=jnp.zeros_like(betas[k]),
             lambda_Kplusplus=jnp.zeros_like(lambda_kplus),
-            b_Kminus=betas[-2],
+            b_Kminus=betas[k - 1],
             nu_K=nu_k,
-            x_Kplus=xs[-1],
-            x_K=xs[-2],
-            x_Kminus=xs[-3],
+            x_Kplus=xs[k + 1],
+            x_K=xs[k],
+            x_Kminus=xs[k - 1],
         )
-        dA += jnp.outer(lambda_k, xs[-2])
+        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+        dA += jnp.outer(lambda_k, xs[k])
+        # print(k)
+        for k in range(len(alphas) - 1, 1, -1):
+            # print(k)
+            mu_kminus, nu_kminus, lambda_k = _bwd_step(
+                A=A,
+                dx_K=dxs[k],
+                da_Kminus=dalphas[k - 1],
+                db_Kminus=dbetas[k - 1],
+                lambda_kplus=lambda_kplus,
+                a_K=alphas[k],
+                b_K=betas[k],
+                lambda_Kplusplus=lambda_kplusplus,
+                b_Kminus=betas[k - 1],
+                nu_K=nu_k,
+                x_Kplus=xs[k + 1],
+                x_K=xs[k],
+                x_Kminus=xs[k - 1],
+            )
+            dA += jnp.outer(lambda_k, xs[k])
+            lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
         dv = lambda_kplus
         return dA, dv
 
-    def _bwd_init(*, dx_K, da_K, db_K, b_K, x_Kplus, x_K):
-        mu_K = 0.5 * (db_K * b_K - x_Kplus.T @ dx_K)
-        nu_K = da_K * b_K - x_K.T @ dx_K
-        lambda_Kplus = (dx_K + 2 * mu_K * x_Kplus + nu_K * x_K) / b_K
+    def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
+        mu_K = 0.5 * (db_K * b_K - x_Kplus.T @ dx_Kplus)
+        nu_K = da_K * b_K - x_K.T @ dx_Kplus
+        lambda_Kplus = (dx_Kplus + 2 * mu_K * x_Kplus + nu_K * x_K) / b_K
         return mu_K, nu_K, lambda_Kplus
 
     def _bwd_step(
         *,
         A,
-        dx_Kminus,
+        dx_K,
         db_Kminus,
         da_Kminus,
         lambda_kplus,
@@ -108,7 +129,7 @@ def lanczos_fwd(*, custom_vjp: bool):
         x_Kminus,
     ):
         xi = (
-            dx_Kminus
+            dx_K
             + A.T @ lambda_kplus
             - a_K * lambda_kplus
             + nu_K * x_Kplus
