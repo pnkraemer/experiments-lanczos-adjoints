@@ -7,10 +7,12 @@ from matfree import test_util
 def identity_via_lanczos(*, custom_vjp: bool):
     alg = lanczos_fwd(custom_vjp=custom_vjp)
 
-    def estimate(matrix, vec):
-        return matrix, vec
+    def identity(matrix, vec):
+        (vecs, diags, offdiags), (v_last, b_last) = alg(matrix, vec)
+        dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
+        return vecs.T @ dense_matrix @ vecs, vec
 
-    return estimate
+    return identity
 
 
 def lanczos_fwd(*, custom_vjp: bool):
@@ -19,20 +21,26 @@ def lanczos_fwd(*, custom_vjp: bool):
 
         ((v1, offdiag), diag), v0 = _fwd_init(matrix, vec), vec
         vs, offdiags, diags = [v0], [], []
+        vs.append(v1)
+        offdiags.append(offdiag)
+        diags.append(diag)
 
         i = 0
         while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
-            vs.append(v1)
-            offdiags.append(offdiag)
-            diags.append(diag)
             ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
+
             Qs = jnp.asarray(vs)
 
             # Reorthogonalisation
             v1 = v1 - Qs.T @ (Qs @ v1)
             v1 /= jnp.linalg.norm(v1)
+            vs.append(v1)
+            offdiags.append(offdiag)
+            diags.append(diag)
 
-        return jnp.stack(vs), jnp.stack(diags), jnp.stack(offdiags)
+        decomp = (jnp.stack(vs[:-1]), jnp.stack(diags), jnp.stack(offdiags[:-1]))
+        remainder = (vs[-1], offdiags[-1])
+        return decomp, remainder
 
     def _fwd_init(matrix, vec):
         """Initialize Lanczos' algorithm.
@@ -176,8 +184,8 @@ jnp.set_printoptions(3)
 
 
 # Set up a test-matrix
-eigvals = jnp.ones((12,), dtype=float) * 0.001
-eigvals_relevant = jnp.arange(1.0, 2.0, step=0.25)
+eigvals = jnp.ones((10,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=0.1)
 eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -186,23 +194,32 @@ key = jax.random.PRNGKey(1)
 v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
+algorithm = identity_via_lanczos(custom_vjp=False)
+(A_like, v_like), vjp = jax.vjp(algorithm, A, v)
+# print(A_like, v_like)
+# A_like, v_like = algorithm(A, v)
 
-algorithm = lanczos_fwd(custom_vjp=False)
-# output = algorithm(A, v)
+print(A_like - A)
+assert False
+assert jnp.allclose(A_like, A)
+assert jnp.allclose(v_like, v)
+assert False
 
 
-(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
 print("Autodiff VJP:")
-M, init = vjp((vecs, diags, offdiags))
-print(vecs.shape)
+M, init = vjp((A_like, v_like))
 print(M)
+print(A)
 # print(init)
 print()
 
 
 print("Custom VJP:")
-algorithm = lanczos_fwd(custom_vjp=True)
-(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
-M, init = vjp((vecs, diags, offdiags))
+algorithm = identity_via_lanczos(custom_vjp=True)
+(A_like, v_like), vjp = jax.vjp(algorithm, A, v)
+assert jnp.allclose(A_like, A)
+assert jnp.allclose(v_like, v)
+M, init = vjp((A_like, v_like))
 print(M)
+print(A)
 # print(init)
