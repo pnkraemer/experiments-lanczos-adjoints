@@ -5,36 +5,39 @@ import jax.numpy as jnp
 from matfree import test_util
 
 
-def identity_via_lanczos(*, custom_vjp: bool):
-    alg = lanczos_fwd(custom_vjp=custom_vjp)
+def identity_via_lanczos(matvec, *, custom_vjp: bool):
+    alg = lanczos_fwd(matvec, custom_vjp=custom_vjp)
 
-    def identity(matrix, vec):
-        (vecs, diags, offdiags), _ = alg(matrix, vec)
+    def identity(vec, *params):
+        (vecs, diags, offdiags), _ = alg(vec, *params)
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
-        return vecs.T @ dense_matrix @ vecs, vecs[0, :]
+        return vecs[0, :], vecs.T @ dense_matrix @ vecs
 
     return identity
 
 
-def lanczos_fwd(*, custom_vjp: bool):
-    def estimate(matrix, vec):
+def lanczos_fwd(matvec, *, custom_vjp: bool):
+    def estimate(vec, *params):
         small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
 
-        ((v1, offdiag), diag), v0 = _fwd_init(matrix, vec), vec
+        ((v1, offdiag), diag), v0 = _fwd_init(vec, *params), vec
         vs, offdiags, diags = [v0], [], []
+
+        # Store results
         vs.append(v1)
         offdiags.append(offdiag)
         diags.append(diag)
 
         i = 0
         while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
-            ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
-
-            Qs = jnp.asarray(vs)
+            ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
 
             # Reorthogonalisation
+            Qs = jnp.asarray(vs)
             v1 = v1 - Qs.T @ (Qs @ v1)
             v1 /= jnp.linalg.norm(v1)
+
+            # Store results
             vs.append(v1)
             offdiags.append(offdiag)
             diags.append(diag)
@@ -43,20 +46,20 @@ def lanczos_fwd(*, custom_vjp: bool):
         remainder = (vs[-1], offdiags[-1])
         return decomp, remainder
 
-    def _fwd_init(matrix, vec):
+    def _fwd_init(vec, *params):
         """Initialize Lanczos' algorithm.
 
         Solve A x_{k} = a_k x_k + b_k x_{k+1}
         for x_{k+1}, a_k, and b_k, using
         orthogonality of the x_k.
         """
-        a = vec @ (matrix @ vec)
-        r = matrix @ vec - a * vec
+        a = vec @ (matvec(vec, *params))
+        r = (matvec(vec, *params)) - a * vec
         b = jnp.linalg.norm(r)
         x = r / b
         return (x, b), a
 
-    def _fwd_step(matrix, vec, b, vec_previous):
+    def _fwd_step(vec, b, vec_previous, *params):
         """Apply Lanczos' recurrence.
 
         Solve
@@ -64,8 +67,8 @@ def lanczos_fwd(*, custom_vjp: bool):
         for x_{k+1}, a_k, and b_k, using
         orthogonality of the x_k.
         """
-        a = vec @ (matrix @ vec)
-        r = matrix @ vec - a * vec - b * vec_previous
+        a = vec @ (matvec(vec, *params))
+        r = matvec(vec, *params) - a * vec - b * vec_previous
         b = jnp.linalg.norm(r)
         x = r / b
         return (x, b), a
@@ -200,8 +203,8 @@ key = jax.random.PRNGKey(1)
 v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
-algorithm = identity_via_lanczos(custom_vjp=False)
-(A_like, v_like), vjp = jax.vjp(algorithm, A, v)
+algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
+(v_like, A_like), vjp = jax.vjp(algorithm, v, A)
 
 # The algorithm is the identity (just implemented via Lanczos)
 tols = {"atol": 1e-5, "rtol": 1e-5}
@@ -211,29 +214,9 @@ assert jnp.allclose(v_like, v, **tols)
 
 # So is the Jacobian the identity matrix?
 flat, unflatten = jax.flatten_util.ravel_pytree((A, v))
-print(
-    jax.jacrev(lambda f: jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0])(
-        flat
-    )
-)
+algorithm_flat = lambda f: jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0]
+jac = jax.jacrev(algorithm_flat)(flat)
+print(jac)
 
 
 assert False
-
-print("Autodiff VJP:")
-M, init = vjp((A_like, v_like))
-print(M)
-print(A)
-# print(init)
-print()
-
-
-print("Custom VJP:")
-algorithm = identity_via_lanczos(custom_vjp=True)
-(A_like, v_like), vjp = jax.vjp(algorithm, A, v)
-assert jnp.allclose(A_like, A)
-assert jnp.allclose(v_like, v)
-M, init = vjp((A_like, v_like))
-print(M)
-print(A)
-# print(init)
