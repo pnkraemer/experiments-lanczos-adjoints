@@ -144,7 +144,6 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             assert jnp.allclose(
                 lambda_kplusplus.T @ xs[k] + lambda_kplus.T @ xs[k + 1], dbetas[k]
             )
-
             # Update
             dA += jnp.outer(lambda_k, xs[k - 1])
 
