@@ -11,7 +11,7 @@ def identity_via_lanczos(matvec, *, custom_vjp: bool):
     def identity(vec, *params):
         (vecs, diags, offdiags), _ = alg(vec, *params)
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
-        return vecs[0, :], vecs.T @ dense_matrix @ vecs
+        return vecs[0, :], sym(vecs.T @ dense_matrix @ vecs)
 
     return identity
 
@@ -73,16 +73,20 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
         x = r / b
         return (x, b), a
 
-    def estimate_fwd(*args):
-        fx = estimate(*args)
-        return fx, (fx, A)
+    def estimate_fwd(vec, *params):
+        fx = estimate(vec, *params)
+        return fx, (fx, *params)
 
     def estimate_bwd(cache, vjp_incoming):
         (dxs, dalphas, dbetas), (dx_last, dbeta_last) = vjp_incoming
+
         dxs = jnp.concatenate((dxs, dx_last[None]))
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
 
-        ((xs, alphas, betas), (x_last, beta_last)), A = cache
+        # print(jax.tree_util.tree_map(jnp.shape, cache))
+
+        ((xs, alphas, betas), (x_last, beta_last)), *params = cache
+        # print(*params)
         xs = jnp.concatenate((xs, x_last[None]))
         betas = jnp.concatenate((betas, beta_last[None]))
 
@@ -108,7 +112,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
 
         for k in range(len(alphas) - 1, 0, -1):
             nu_k, lambda_k = _bwd_step(
-                A=A,
+                *params,
                 dx_K=dxs[k],
                 da_Kminus=dalphas[k - 1],
                 db_Kminus=dbetas[k - 1],
@@ -137,22 +141,21 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
 
         lambda_1 = (
             betas[0] * lambda_kplusplus
-            - A.T @ lambda_kplus
+            - matvec(lambda_kplus, *params)
             + alphas[0] * lambda_kplus
             - nu_k * xs[1]
         )
         dv = -lambda_1
         return dA, dv
 
-    def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
+    def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
         mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
         nu_K = da_K * b_K - x_K.T @ dx_Kplus
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
         return nu_K, lambda_Kplus
 
     def _bwd_step(
-        *,
-        A,
+        *params,
         dx_K,
         db_Kminus,
         da_Kminus,
@@ -168,7 +171,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
     ):
         xi = (
             dx_K
-            + A.T @ lambda_kplus
+            + matvec(lambda_kplus, *params)
             - a_K * lambda_kplus
             - b_K * lambda_Kplusplus
             + nu_K * x_Kplus
@@ -203,20 +206,25 @@ key = jax.random.PRNGKey(1)
 v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
-algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
-(v_like, A_like), vjp = jax.vjp(algorithm, v, A)
 
-# The algorithm is the identity (just implemented via Lanczos)
-tols = {"atol": 1e-5, "rtol": 1e-5}
-assert jnp.allclose(A_like, A, **tols)
-assert jnp.allclose(v_like, v, **tols)
+def sym(x):
+    return jnp.triu(x) - jnp.diag(0.5 * jnp.diag(x))
 
+
+algorithm = identity_via_lanczos(lambda s, p: (p + p.T) @ s, custom_vjp=False)
+A = sym(A)
 
 # So is the Jacobian the identity matrix?
-flat, unflatten = jax.flatten_util.ravel_pytree((A, v))
+flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
 algorithm_flat = lambda f: jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0]
+assert jnp.allclose(flat, algorithm_flat(flat))
+
+
+# Flattened Jacobian: is it the identity matrix?
 jac = jax.jacrev(algorithm_flat)(flat)
+
 print(jac)
 
 
-assert False
+# print(jax.jacrev(algorithm, argnums=(0, 1))(v, A))
+# assert False
