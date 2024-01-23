@@ -17,7 +17,7 @@ def identity_via_lanczos(matvec, *, custom_vjp: bool):
         v0 = vecs[0]
 
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
-        return v0, sym(vecs.T @ dense_matrix @ vecs)
+        return v0, (vecs.T @ dense_matrix @ vecs)
 
     return identity
 
@@ -86,13 +86,21 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
     def estimate_bwd(cache, vjp_incoming):
         (dxs, dalphas, dbetas), (dx_last, dbeta_last) = vjp_incoming
 
+        # todo (to debug the dA value):
+        #  check that _all_ input gradients are used! (common error)
+        #  verify the maths
+        #  once the gradients are the same
+        #  (or at least they would lead to the correct reduction
+        #  after summing up the rows/columns in the jacobian matrix)
+        #  derive the parameter-derivative (on paper) so we can use
+        #  the correct derivative wrt a _symmetric_ matrix (not any matrix)
+
         dxs = jnp.concatenate((dxs, dx_last[None]))
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
 
         ((xs, alphas, betas), (x_last, beta_last)), *params = cache
         xs = jnp.concatenate((xs, x_last[None]))
         betas = jnp.concatenate((betas, beta_last[None]))
-        print("dxk_all", dxs)
 
         k = len(alphas) - 1
         nu_k, lambda_k = _bwd_init(
@@ -103,15 +111,16 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             x_Kplus=xs[k + 1],
             x_K=xs[k],
         )
+        dA = jnp.outer(lambda_k, xs[k])
         lambda_kplus = jnp.zeros_like(lambda_k)
         lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+
         # a-constraint
         assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
 
         # b-constraint
         assert jnp.allclose(lambda_kplus.T @ xs[k + 1], dbetas[k])
 
-        dA = jnp.outer(lambda_kplus, xs[k])
         for k in range(len(alphas) - 1, 0, -1):
             nu_k, lambda_k = _bwd_step(
                 *params,
@@ -137,7 +146,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             )
 
             # Update
-            dA += jnp.outer(lambda_kplus, xs[k])
+            dA += jnp.outer(lambda_k, xs[k - 1])
 
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
@@ -152,7 +161,6 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
         return dv, dA
 
     def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
-        print("dxk", dx_Kplus)
         mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
         nu_K = da_K * b_K - x_K.T @ dx_Kplus
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
@@ -173,7 +181,6 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
         x_K,
         x_Kminus,
     ):
-        print("dxk", dx_K)
         xi = (
             dx_K
             + matvec(lambda_kplus, *params)
@@ -193,7 +200,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
     return estimate
 
 
-jnp.set_printoptions(2)
+jnp.set_printoptions(4)
 
 # todo: verify the maths, and then revisit to verify the implementation.
 
@@ -209,8 +216,8 @@ v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
 
-algorithm = identity_via_lanczos(lambda s, p: (p + p.T) @ s, custom_vjp=True)
-A = sym(A)
+algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
+# A = sym(A)
 
 # So is the Jacobian the identity matrix?
 flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
@@ -222,11 +229,11 @@ def algorithm_flat(f):
 
 fx, vjp = jax.vjp(algorithm_flat, flat)
 
-e1 = jnp.eye(len(fx))[0]
-e1 = jnp.arange(1.0, len(fx) + 1.0)
-_ = vjp(e1)
-assert False
-print(algorithm_flat(flat))
+# e1 = jnp.eye(len(fx))[0]
+# e1 = jnp.arange(1.0, len(fx) + 1.0)
+# _ = vjp(e1)
+# assert False
+# print(algorithm_flat(flat))
 
 
 assert jnp.allclose(flat, algorithm_flat(flat))
