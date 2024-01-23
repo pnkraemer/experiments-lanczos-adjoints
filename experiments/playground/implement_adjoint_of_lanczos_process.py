@@ -49,25 +49,67 @@ def lanczos_fwd(*, custom_vjp: bool):
 
     def estimate_fwd(*args):
         fx = estimate(*args)
-        return fx, fx
+        return fx, (fx, A)
 
     def estimate_bwd(cache, vjp_incoming):
         dxs, dalphas, dbetas = vjp_incoming
-        (xs, alphas, betas) = cache
+        (xs, alphas, betas), A = cache
 
         mu_k, nu_k, lambda_kplus = _bwd_init(
-            dxs[-1], dalphas[-1], dbetas[-1], betas[-1], xs[-1], xs[-2]
+            dx_K=dxs[-1],
+            da_K=dalphas[-1],
+            db_K=dbetas[-1],
+            b_K=betas[-1],
+            x_Kplus=xs[-1],
+            x_K=xs[-2],
         )
-
         dA = jnp.outer(lambda_kplus, xs[-1])
+
+        mu_kminus, nu_kminus, lambda_k = _bwd_init_2nd(
+            A=A,
+            dx_Kminus=dxs[-2],
+            da_Kminus=dalphas[-2],
+            db_Kminus=dbetas[-2],
+            lambda_kplus=lambda_kplus,
+            a_K=alphas[-1],
+            b_Kminus=betas[-2],
+            nu_K=nu_k,
+            x_Kplus=xs[-1],
+            x_K=xs[-2],
+            x_Kminus=xs[-3],
+        )
+        dA += jnp.outer(lambda_k, xs[-2])
+
         dv = lambda_kplus
         return dA, dv
 
-    def _bwd_init(dx, da, db, b, xplus, x):
-        mu = 0.5 * (db * b - xplus.T @ dx)
-        nu = da * b - x.T @ dx
-        lambda_ = (dx + 2 * mu * xplus + nu * x) / b
-        return mu, nu, lambda_
+    def _bwd_init(*, dx_K, da_K, db_K, b_K, x_Kplus, x_K):
+        mu_K = 0.5 * (db_K * b_K - x_Kplus.T @ dx_K)
+        nu_K = da_K * b_K - x_K.T @ dx_K
+        lambda_Kplus = (dx_K + 2 * mu_K * x_Kplus + nu_K * x_K) / b_K
+        return mu_K, nu_K, lambda_Kplus
+
+    def _bwd_init_2nd(
+        *,
+        A,
+        dx_Kminus,
+        db_Kminus,
+        da_Kminus,
+        lambda_kplus,
+        a_K,
+        b_Kminus,
+        nu_K,
+        x_Kplus,
+        x_K,
+        x_Kminus,
+    ):
+        xi = dx_Kminus + A.T @ lambda_kplus - a_K * lambda_kplus + nu_K * x_Kplus
+        mu_Kminus = 0.5 * (
+            b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
+        )
+        nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
+        lambda_K = (xi + 2 * mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
+        return mu_Kminus, nu_Kminus, lambda_K
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
