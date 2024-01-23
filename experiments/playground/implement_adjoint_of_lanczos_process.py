@@ -4,7 +4,36 @@ import jax.numpy as jnp
 from matfree import test_util
 
 
+def identity_via_lanczos(*, custom_vjp: bool):
+    alg = lanczos_fwd(custom_vjp=custom_vjp)
+
+    def estimate(matrix, vec):
+        return matrix, vec
+
+    return estimate
+
+
 def lanczos_fwd(*, custom_vjp: bool):
+    def estimate(matrix, vec):
+        small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
+
+        ((v1, offdiag), diag), v0 = _fwd_init(matrix, vec), vec
+        vs, offdiags, diags = [v0], [], []
+
+        i = 0
+        while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
+            vs.append(v1)
+            offdiags.append(offdiag)
+            diags.append(diag)
+            ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
+            Qs = jnp.asarray(vs)
+
+            # Reorthogonalisation
+            v1 = v1 - Qs.T @ (Qs @ v1)
+            v1 /= jnp.linalg.norm(v1)
+
+        return jnp.stack(vs), jnp.stack(diags), jnp.stack(offdiags)
+
     def _fwd_init(matrix, vec):
         """Initialize Lanczos' algorithm.
 
@@ -32,21 +61,6 @@ def lanczos_fwd(*, custom_vjp: bool):
         x = r / b
         return (x, b), a
 
-    def estimate(matrix, vec):
-        small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
-
-        ((v1, offdiag), diag), v0 = _fwd_init(matrix, vec), vec
-        vs, offdiags, diags = [v0], [], []
-
-        i = 0
-        while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
-            vs.append(v1)
-            offdiags.append(offdiag)
-            diags.append(diag)
-            ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
-
-        return jnp.stack(vs), jnp.stack(diags), jnp.stack(offdiags)
-
     def estimate_fwd(*args):
         fx = estimate(*args)
         return fx, (fx, A)
@@ -56,7 +70,7 @@ def lanczos_fwd(*, custom_vjp: bool):
         (xs, alphas, betas), A = cache
 
         k = len(alphas) - 1
-        nu_k, lambda_kplus = _bwd_init(
+        nu_k, lambda_k = _bwd_init(
             dx_Kplus=dxs[k + 1],
             da_K=dalphas[k],
             db_K=dbetas[k],
@@ -64,8 +78,17 @@ def lanczos_fwd(*, custom_vjp: bool):
             x_Kplus=xs[k + 1],
             x_K=xs[k],
         )
-        lambda_kplusplus = jnp.zeros_like(lambda_kplus)
+        lambda_kplus = jnp.zeros_like(lambda_k)
+        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+
+        # a-constraint
+        assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
+
+        # b-constraint
+        assert jnp.allclose(lambda_kplus.T @ xs[k + 1], dbetas[k])
+
         dA = jnp.outer(lambda_kplus, xs[k])
+
         for k in range(len(alphas) - 1, 0, -1):
             nu_k, lambda_k = _bwd_step(
                 A=A,
@@ -82,9 +105,18 @@ def lanczos_fwd(*, custom_vjp: bool):
                 x_K=xs[k],
                 x_Kminus=xs[k - 1],
             )
-            dA += jnp.outer(lambda_k, xs[k])
+            # a-constraint
+            assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
+
+            # b-constraint
+            assert jnp.allclose(
+                lambda_kplusplus.T @ xs[k] + lambda_kplus.T @ xs[k + 1], dbetas[k]
+            )
+
+            # Update
+            dA += jnp.outer(lambda_kplus, xs[k])
+
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
-            print(lambda_k)
 
         lambda_1 = (
             betas[0] * lambda_kplusplus
@@ -138,9 +170,14 @@ def lanczos_fwd(*, custom_vjp: bool):
 
 jnp.set_printoptions(3)
 
+# todo: make an identity function
+#  to measure whether the autodiff gradients
+#  of lanczos make sense
+
+
 # Set up a test-matrix
-eigvals = jnp.ones((50,), dtype=float) * 0.001
-eigvals_relevant = jnp.arange(1.0, 2.0, step=0.1)
+eigvals = jnp.ones((12,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=0.25)
 eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -149,18 +186,23 @@ key = jax.random.PRNGKey(1)
 v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
-# Run algorithm
-algorithm = lanczos_fwd(custom_vjp=True)
-(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
-
-M, init = vjp((vecs, diags, offdiags))
-# print(M)
-print(init)
-print()
 
 algorithm = lanczos_fwd(custom_vjp=False)
-(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
+# output = algorithm(A, v)
 
+
+(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
+print("Autodiff VJP:")
 M, init = vjp((vecs, diags, offdiags))
-# print(M)
-print(init)
+print(vecs.shape)
+print(M)
+# print(init)
+print()
+
+
+print("Custom VJP:")
+algorithm = lanczos_fwd(custom_vjp=True)
+(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
+M, init = vjp((vecs, diags, offdiags))
+print(M)
+# print(init)
