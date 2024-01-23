@@ -48,10 +48,16 @@ def lanczos_fwd(*, custom_vjp: bool):
         return jnp.stack(vs), jnp.stack(diags), jnp.stack(offdiags)
 
     def estimate_fwd(*args):
-        return estimate(*args), {}
+        fx = estimate(*args)
+        return fx, (fx, args)
 
     def estimate_bwd(cache, vjp_incoming):
-        return 0.0, 0.0
+        dvs, dalphas, dbetas = vjp_incoming
+        print(dvs.shape)
+        dv = dvs[-1]
+        print(jax.tree_util.tree_map(jnp.shape, cache))
+        (vs, alphas, betas), (A_like, v_like) = cache
+        return jnp.zeros_like(A_like), jnp.zeros_like(v_like)
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
