@@ -54,7 +54,8 @@ def lanczos_fwd(*, custom_vjp: bool):
     def estimate_bwd(cache, vjp_incoming):
         dxs, dalphas, dbetas = vjp_incoming
         (xs, alphas, betas), A = cache
-        k = len(alphas)
+        print("alphas", alphas)
+        k = len(alphas) - 1
         mu_k, nu_k, lambda_kplus = _bwd_init(
             dx_Kplus=dxs[k + 1],
             da_K=dalphas[k],
@@ -64,8 +65,7 @@ def lanczos_fwd(*, custom_vjp: bool):
             x_K=xs[k],
         )
         dA = jnp.outer(lambda_kplus, xs[k])
-
-        mu_kminus, nu_kminus, lambda_k = _bwd_step(
+        mu_k, nu_k, lambda_k = _bwd_step(
             A=A,
             dx_K=dxs[k],
             da_Kminus=dalphas[k - 1],
@@ -83,9 +83,10 @@ def lanczos_fwd(*, custom_vjp: bool):
         lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
         dA += jnp.outer(lambda_k, xs[k])
         # print(k)
-        for k in range(len(alphas) - 1, 1, -1):
+        for k in range(len(alphas) - 2, 0, -1):
+            print(k)
             # print(k)
-            mu_kminus, nu_kminus, lambda_k = _bwd_step(
+            mu_k, nu_k, lambda_k = _bwd_step(
                 A=A,
                 dx_K=dxs[k],
                 da_Kminus=dalphas[k - 1],
@@ -103,6 +104,7 @@ def lanczos_fwd(*, custom_vjp: bool):
             dA += jnp.outer(lambda_k, xs[k])
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
+        print(alphas[0])
         lambda_1 = (
             betas[0] * lambda_kplusplus
             - A.T @ lambda_kplus
@@ -134,18 +136,17 @@ def lanczos_fwd(*, custom_vjp: bool):
         x_K,
         x_Kminus,
     ):
+        print("alpha", a_K)
         xi = (
             dx_K
             + A.T @ lambda_kplus
             - a_K * lambda_kplus
-            + nu_K * x_Kplus
             - b_K * lambda_Kplusplus
+            + nu_K * x_Kplus
         )
-        mu_Kminus = 0.5 * (
-            b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
-        )
+        mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
         nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
-        lambda_K = (xi + 2 * mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
+        lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
         return mu_Kminus, nu_Kminus, lambda_K
 
     if custom_vjp:
@@ -154,6 +155,8 @@ def lanczos_fwd(*, custom_vjp: bool):
 
     return estimate
 
+
+jnp.set_printoptions(2)
 
 # Set up a test-matrix
 eigvals = jnp.ones((50,), dtype=float) * 0.001
@@ -171,5 +174,13 @@ algorithm = lanczos_fwd(custom_vjp=True)
 (vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
 
 M, init = vjp((vecs, diags, offdiags))
-print(M)
+# print(M)
+print(init)
+print()
+
+algorithm = lanczos_fwd(custom_vjp=False)
+(vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
+
+M, init = vjp((vecs, diags, offdiags))
+# print(M)
 print(init)
