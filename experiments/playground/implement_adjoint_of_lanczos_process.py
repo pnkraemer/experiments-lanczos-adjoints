@@ -5,7 +5,7 @@ from matfree import test_util
 
 
 def lanczos_fwd(*, custom_vjp: bool):
-    def _init(matrix, vec):
+    def _fwd_init(matrix, vec):
         """Initialize Lanczos' algorithm.
 
         Solve A x_{k} = a_k x_k + b_k x_{k+1}
@@ -18,7 +18,7 @@ def lanczos_fwd(*, custom_vjp: bool):
         x = r / b
         return (x, b), a
 
-    def _step(matrix, vec, b, vec_previous):
+    def _fwd_step(matrix, vec, b, vec_previous):
         """Apply Lanczos' recurrence.
 
         Solve
@@ -35,12 +35,12 @@ def lanczos_fwd(*, custom_vjp: bool):
     def estimate(matrix, vec):
         small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
 
-        ((v1, offdiag), diag), v0 = _init(matrix, vec), vec
+        ((v1, offdiag), diag), v0 = _fwd_init(matrix, vec), vec
         vs, offdiags, diags = [v1], [offdiag], [diag]
 
         i = 0
         while (offdiag > small_value) and (i := (i + 1)) < len(eigvals):
-            ((v1, offdiag), diag), v0 = _step(A, v1, offdiag, v0), v1
+            ((v1, offdiag), diag), v0 = _fwd_step(A, v1, offdiag, v0), v1
             vs.append(v1)
             offdiags.append(offdiag)
             diags.append(diag)
@@ -49,15 +49,25 @@ def lanczos_fwd(*, custom_vjp: bool):
 
     def estimate_fwd(*args):
         fx = estimate(*args)
-        return fx, (fx, args)
+        return fx, fx
 
     def estimate_bwd(cache, vjp_incoming):
-        dvs, dalphas, dbetas = vjp_incoming
-        print(dvs.shape)
-        dv = dvs[-1]
-        print(jax.tree_util.tree_map(jnp.shape, cache))
-        (vs, alphas, betas), (A_like, v_like) = cache
-        return jnp.zeros_like(A_like), jnp.zeros_like(v_like)
+        dxs, dalphas, dbetas = vjp_incoming
+        (xs, alphas, betas) = cache
+
+        mu_k, nu_k, lambda_kplus = _bwd_init(
+            dxs[-1], dalphas[-1], dbetas[-1], betas[-1], xs[-1], xs[-2]
+        )
+
+        dA = jnp.outer(lambda_kplus, xs[-1])
+        dv = lambda_kplus
+        return dA, dv
+
+    def _bwd_init(dx, da, db, b, xplus, x):
+        mu = 0.5 * (db * b - xplus.T @ dx)
+        nu = da * b - x.T @ dx
+        lambda_ = (dx + 2 * mu * xplus + nu * x) / b
+        return mu, nu, lambda_
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
@@ -78,7 +88,7 @@ v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
 # Run algorithm
-algorithm = lanczos_fwd(custom_vjp=False)
+algorithm = lanczos_fwd(custom_vjp=True)
 (vecs, diags, offdiags), vjp = jax.vjp(algorithm, A, v)
 
 M, init = vjp((vecs, diags, offdiags))
