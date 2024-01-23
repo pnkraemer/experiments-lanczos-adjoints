@@ -5,13 +5,19 @@ import jax.numpy as jnp
 from matfree import test_util
 
 
+def sym(x):
+    return jnp.triu(x) - jnp.diag(0.5 * jnp.diag(x))
+
+
 def identity_via_lanczos(matvec, *, custom_vjp: bool):
     alg = lanczos_fwd(matvec, custom_vjp=custom_vjp)
 
     def identity(vec, *params):
         (vecs, diags, offdiags), _ = alg(vec, *params)
+        v0 = vecs[0]
+
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
-        return vecs[0, :], sym(vecs.T @ dense_matrix @ vecs)
+        return v0, sym(vecs.T @ dense_matrix @ vecs)
 
     return identity
 
@@ -42,7 +48,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             offdiags.append(offdiag)
             diags.append(diag)
 
-        decomp = (jnp.stack(vs[:-1]), jnp.stack(diags), jnp.stack(offdiags[:-1]))
+        decomp = (jnp.asarray(vs[:-1]), jnp.asarray(diags), jnp.asarray(offdiags[:-1]))
         remainder = (vs[-1], offdiags[-1])
         return decomp, remainder
 
@@ -146,7 +152,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             - nu_k * xs[1]
         )
         dv = -lambda_1
-        return dA, dv
+        return dv, dA
 
     def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
         mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
@@ -188,11 +194,12 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
     return estimate
 
 
-jnp.set_printoptions(3)
+jnp.set_printoptions(2)
 
 # todo: make an identity function
 #  to measure whether the autodiff gradients
-#  of lanczos make sense
+#  of lanczos make sense. They really should!
+#  no need to start verifying the fancy code until this happens.
 
 
 # Set up a test-matrix
@@ -207,21 +214,27 @@ v = jax.random.normal(key, shape=jnp.shape(eigvals))
 v /= jnp.linalg.norm(v)
 
 
-def sym(x):
-    return jnp.triu(x) - jnp.diag(0.5 * jnp.diag(x))
-
-
-algorithm = identity_via_lanczos(lambda s, p: (p + p.T) @ s, custom_vjp=False)
+algorithm = identity_via_lanczos(lambda s, p: (p + p.T) @ s, custom_vjp=True)
 A = sym(A)
 
 # So is the Jacobian the identity matrix?
 flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
-algorithm_flat = lambda f: jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0]
+
+
+def algorithm_flat(f):
+    return jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0]
+
+
+print(flat)
+print(algorithm_flat(flat))
+
+
 assert jnp.allclose(flat, algorithm_flat(flat))
 
 
 # Flattened Jacobian: is it the identity matrix?
 jac = jax.jacrev(algorithm_flat)(flat)
+
 
 print(jac)
 
