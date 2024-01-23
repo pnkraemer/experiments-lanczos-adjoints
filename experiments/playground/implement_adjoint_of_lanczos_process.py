@@ -196,11 +196,7 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
 
 jnp.set_printoptions(2)
 
-# todo: make an identity function
-#  to measure whether the autodiff gradients
-#  of lanczos make sense. They really should!
-#  no need to start verifying the fancy code until this happens.
-
+# todo: verify the maths, and then revisit to verify the implementation.
 
 # Set up a test-matrix
 eigvals = jnp.ones((2,), dtype=float) * 0.001
