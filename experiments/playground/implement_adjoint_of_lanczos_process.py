@@ -103,7 +103,13 @@ def lanczos_fwd(*, custom_vjp: bool):
             dA += jnp.outer(lambda_k, xs[k])
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
-        dv = lambda_kplus
+        lambda_1 = (
+            betas[0] * lambda_kplusplus
+            - A.T @ lambda_kplus
+            + alphas[0] * lambda_kplus
+            - nu_k * xs[1]
+        )
+        dv = -lambda_1
         return dA, dv
 
     def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
