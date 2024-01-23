@@ -54,7 +54,7 @@ def lanczos_fwd(*, custom_vjp: bool):
     def estimate_bwd(cache, vjp_incoming):
         dxs, dalphas, dbetas = vjp_incoming
         (xs, alphas, betas), A = cache
-        print("alphas", alphas)
+
         k = len(alphas) - 1
         mu_k, nu_k, lambda_kplus = _bwd_init(
             dx_Kplus=dxs[k + 1],
@@ -64,28 +64,9 @@ def lanczos_fwd(*, custom_vjp: bool):
             x_Kplus=xs[k + 1],
             x_K=xs[k],
         )
+        lambda_kplusplus = jnp.zeros_like(lambda_kplus)
         dA = jnp.outer(lambda_kplus, xs[k])
-        mu_k, nu_k, lambda_k = _bwd_step(
-            A=A,
-            dx_K=dxs[k],
-            da_Kminus=dalphas[k - 1],
-            db_Kminus=dbetas[k - 1],
-            lambda_kplus=lambda_kplus,
-            a_K=alphas[k],
-            b_K=jnp.zeros_like(betas[k]),
-            lambda_Kplusplus=jnp.zeros_like(lambda_kplus),
-            b_Kminus=betas[k - 1],
-            nu_K=nu_k,
-            x_Kplus=xs[k + 1],
-            x_K=xs[k],
-            x_Kminus=xs[k - 1],
-        )
-        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
-        dA += jnp.outer(lambda_k, xs[k])
-        # print(k)
-        for k in range(len(alphas) - 2, 0, -1):
-            print(k)
-            # print(k)
+        for k in range(len(alphas) - 1, 0, -1):
             mu_k, nu_k, lambda_k = _bwd_step(
                 A=A,
                 dx_K=dxs[k],
@@ -103,8 +84,6 @@ def lanczos_fwd(*, custom_vjp: bool):
             )
             dA += jnp.outer(lambda_k, xs[k])
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
-
-        print(alphas[0])
         lambda_1 = (
             betas[0] * lambda_kplusplus
             - A.T @ lambda_kplus
@@ -115,9 +94,9 @@ def lanczos_fwd(*, custom_vjp: bool):
         return dA, dv
 
     def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
-        mu_K = 0.5 * (db_K * b_K - x_Kplus.T @ dx_Kplus)
+        mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
         nu_K = da_K * b_K - x_K.T @ dx_Kplus
-        lambda_Kplus = (dx_Kplus + 2 * mu_K * x_Kplus + nu_K * x_K) / b_K
+        lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
         return mu_K, nu_K, lambda_Kplus
 
     def _bwd_step(
@@ -136,7 +115,6 @@ def lanczos_fwd(*, custom_vjp: bool):
         x_K,
         x_Kminus,
     ):
-        print("alpha", a_K)
         xi = (
             dx_K
             + A.T @ lambda_kplus
@@ -156,7 +134,7 @@ def lanczos_fwd(*, custom_vjp: bool):
     return estimate
 
 
-jnp.set_printoptions(2)
+jnp.set_printoptions(3)
 
 # Set up a test-matrix
 eigvals = jnp.ones((50,), dtype=float) * 0.001
