@@ -65,13 +65,15 @@ def lanczos_fwd(*, custom_vjp: bool):
         )
         dA = jnp.outer(lambda_kplus, xs[-1])
 
-        mu_kminus, nu_kminus, lambda_k = _bwd_init_2nd(
+        mu_kminus, nu_kminus, lambda_k = _bwd_step(
             A=A,
             dx_Kminus=dxs[-2],
             da_Kminus=dalphas[-2],
             db_Kminus=dbetas[-2],
             lambda_kplus=lambda_kplus,
             a_K=alphas[-1],
+            b_K=betas[-1],
+            lambda_Kplusplus=jnp.zeros_like(lambda_kplus),
             b_Kminus=betas[-2],
             nu_K=nu_k,
             x_Kplus=xs[-1],
@@ -89,7 +91,7 @@ def lanczos_fwd(*, custom_vjp: bool):
         lambda_Kplus = (dx_K + 2 * mu_K * x_Kplus + nu_K * x_K) / b_K
         return mu_K, nu_K, lambda_Kplus
 
-    def _bwd_init_2nd(
+    def _bwd_step(
         *,
         A,
         dx_Kminus,
@@ -97,13 +99,21 @@ def lanczos_fwd(*, custom_vjp: bool):
         da_Kminus,
         lambda_kplus,
         a_K,
+        b_K,
+        lambda_Kplusplus,
         b_Kminus,
         nu_K,
         x_Kplus,
         x_K,
         x_Kminus,
     ):
-        xi = dx_Kminus + A.T @ lambda_kplus - a_K * lambda_kplus + nu_K * x_Kplus
+        xi = (
+            dx_Kminus
+            + A.T @ lambda_kplus
+            - a_K * lambda_kplus
+            + nu_K * x_Kplus
+            - b_K * lambda_Kplusplus
+        )
         mu_Kminus = 0.5 * (
             b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
         )
