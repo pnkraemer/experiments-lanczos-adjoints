@@ -5,16 +5,20 @@ import jax.numpy as jnp
 from matfree import test_util
 
 
-def sym(x):
-    return jnp.triu(x) - jnp.diag(0.5 * jnp.diag(x))
-
-
+# uncomment as soon as parameter-derivatives are unlocked
+# def sym(x):
+#     return jnp.triu(x) - jnp.diag(0.5 * jnp.diag(x))
+#
+#
 def identity_via_lanczos(matvec, *, custom_vjp: bool):
     alg = lanczos_fwd(matvec, custom_vjp=custom_vjp)
 
     def identity(vec, *params):
-        (vecs, diags, offdiags), _ = alg(vec, *params)
+        (vecs, diags, offdiags), (r, _) = alg(vec, *params)
         v0 = vecs[0]
+
+        # todo: check whether r is orthogonal to the others.
+        #  if not: why is it returned?? Is it even well-defined?
 
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
         return v0, (vecs.T @ dense_matrix @ vecs)
@@ -81,25 +85,24 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
 
     def estimate_fwd(vec, *params):
         fx = estimate(vec, *params)
-        return fx, (fx, *params)
+        return fx, (fx, (vec, *params))
 
     def estimate_bwd(cache, vjp_incoming):
         (dxs, dalphas, dbetas), (dx_last, dbeta_last) = vjp_incoming
-
-        # todo (to debug the dA value):
-        #  check that _all_ input gradients are used! (common error)
-        #  verify the maths
+        # todo:
         #  once the gradients are the same
-        #  (or at least they would lead to the correct reduction
-        #  after summing up the rows/columns in the jacobian matrix)
         #  derive the parameter-derivative (on paper) so we can use
         #  the correct derivative wrt a _symmetric_ matrix (not any matrix)
 
         dxs = jnp.concatenate((dxs, dx_last[None]))
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
+        # print("dxs", dxs)
+        # print("dbetas", dbetas)
+        # print("dalphas", dalphas)
+        ((xs, alphas, betas), (x_last, beta_last)), (a, *params) = cache
 
-        ((xs, alphas, betas), (x_last, beta_last)), *params = cache
         xs = jnp.concatenate((xs, x_last[None]))
+
         betas = jnp.concatenate((betas, beta_last[None]))
 
         k = len(alphas) - 1
@@ -112,14 +115,18 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             x_K=xs[k],
         )
         dA = jnp.outer(lambda_k, xs[k])
-        lambda_kplus = jnp.zeros_like(lambda_k)
-        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
         # a-constraint
-        assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
+        assert jnp.allclose(lambda_k.T @ xs[k], dalphas[k])
 
         # b-constraint
-        assert jnp.allclose(lambda_kplus.T @ xs[k + 1], dbetas[k])
+        # todo: this constraint fails because x_k and x_kplus are not orthogonal!
+        #  I don't know why, to be fair. But it's got something to do with
+        #  the stacking of xs and x_last and handling of corner cases in the maths
+        assert jnp.allclose(lambda_k.T @ xs[k + 1], dbetas[k])
+
+        lambda_kplus = jnp.zeros_like(lambda_k)
+        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
         for k in range(len(alphas) - 1, 0, -1):
             nu_k, lambda_k = _bwd_step(
@@ -149,20 +156,34 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
 
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
+        # todo: If dA is correct, this line must be incorrect!
+        #  verify by checking that all alphas, betas, etc. are used!
+        # print("dx", dxs[0])
         lambda_1 = (
-            -dxs[0]
-            + betas[0] * lambda_kplusplus
+            betas[0] * lambda_kplusplus
             - matvec(lambda_kplus, *params)
             + alphas[0] * lambda_kplus
             - nu_k * xs[1]
+            - dxs[0]
         )
         dv = -lambda_1
         return dv, dA
 
     def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
+        # print("da", da_K)
+        # print("db", db_K)
+        # print("dx", dx_Kplus)
+        # print()
+        # print(db_K)
+        # print(da_K)
+        # print(x_Kplus.T @ x_K)
         mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
         nu_K = da_K * b_K - x_K.T @ dx_Kplus
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
+        # print(lambda_Kplus.T @ x_Kplus)
+        # print(db_K)
+        # print((mu_K + dx_Kplus.T @ x_Kplus) / b_K)
+        # assert False
         return nu_K, lambda_Kplus
 
     def _bwd_step(
@@ -180,6 +201,10 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
         x_K,
         x_Kminus,
     ):
+        # print("da", da_Kminus)
+        # print("db", db_Kminus)
+        # print("dx", dx_K)
+        # print()
         xi = (
             dx_K
             + matvec(lambda_kplus, *params)
@@ -210,40 +235,61 @@ eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
 # Set up an initial vector
-key = jax.random.PRNGKey(1)
-v = jax.random.normal(key, shape=jnp.shape(eigvals))
+# key = jax.random.PRNGKey(1)
+# v = jax.random.normal(key, shape=jnp.shape(eigvals))
+v = jnp.asarray([3.0, 4.0])
 v /= jnp.linalg.norm(v)
 
-
-algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
+# uncomment as soon as parametric matvecs are implemented!
 # A = sym(A)
 
 # So is the Jacobian the identity matrix?
 flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
 
+# Verify that the "identity" operator is indeed correct.
+algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=True)
 
+
+# Flatten the algorithm to get a single Jacobian "matrix"!
 def algorithm_flat(f):
     return jax.flatten_util.ravel_pytree(algorithm(*unflatten(f)))[0]
-
-
-fx, vjp = jax.vjp(algorithm_flat, flat)
-
-# e1 = jnp.eye(len(fx))[0]
-# e1 = jnp.arange(1.0, len(fx) + 1.0)
-# _ = vjp(e1)
-# assert False
-# print(algorithm_flat(flat))
 
 
 assert jnp.allclose(flat, algorithm_flat(flat))
 
 
+# Compute a VJP into a single direction. Compare this
+# by choosing the custom_vjp flags above as true/false
+fx, vjp = jax.vjp(algorithm_flat, flat)
+# e1 = jax.random.normal(jax.random.PRNGKey(4), shape=jnp.shape(flat))
+e1 = jnp.arange(1.0, 1.0 + len(fx))
+e1 /= jnp.linalg.norm(e1)
+
+fasjd = vjp(e1)
+print(fasjd)
+# print(v)
+
+
+print()
+print()
+print()
+print()
+print()
+print()
+print()
+print()
+print()
+print()
+
 # Flattened Jacobian: is it the identity matrix?
 jac = jax.jacrev(algorithm_flat)(flat)
 
 
+# todo:
+#  now, the sensitivities of the 'identity' wrt each component is reasonable,
+#  but the sensitivity of the output-matrix wrt the input vector differs from autodiff
+#  next: investigate why this value is nonzero to start with...
+#  update: the "dA" vjps are correct (well, they coincide with autodiff)
+#  the "dv" ones need a bit more work (likely because they depend "too strongly" on A?)...
+#  use either the vjp in a random direction or the identity-matrix check to verify!
 print(jac)
-
-
-# print(jax.jacrev(algorithm, argnums=(0, 1))(v, A))
-# assert False
