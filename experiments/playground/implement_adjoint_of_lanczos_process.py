@@ -2,7 +2,7 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-from matfree import test_util
+from matfree import lanczos, test_util
 
 # While debugging:
 jax.config.update("jax_disable_jit", True)
@@ -16,18 +16,21 @@ jax.config.update("jax_enable_x64", True)
 #
 def identity_via_lanczos(matvec, *, custom_vjp: bool):
     # Lanczos algorithm
-    decompose = lanczos_fwd(matvec, custom_vjp=custom_vjp)
+    # decompose = lanczos_fwd(matvec, custom_vjp=custom_vjp)
 
     def identity(vec, matrix):
+        # Use a matfree-reference
+        decompose = lanczos.alg_tridiag_full_reortho(matvec, len(vec) - 1)
+
         # Lanczos-decompose
-        (vecs, diags, offdiags), (r, b_) = decompose(vec, matrix)
+        (vecs, (diags, offdiags)) = decompose(vec, matrix)
         v0 = vecs[0]
 
         # Verify the orthogonality
         shapes = (vecs.shape, matrix.shape)
-        assert jnp.allclose(vecs @ vecs.T, jnp.eye(len(vecs))), shapes
-        assert jnp.allclose(vecs @ r, 0), (vecs @ r, shapes)
-        assert jnp.allclose(r.T @ r, 1.0), (r.T @ r, shapes)
+        # assert jnp.allclose(vecs @ vecs.T, jnp.eye(len(vecs))), shapes
+        # assert jnp.allclose(vecs @ r, 0), (vecs @ r, shapes)
+        # assert jnp.allclose(r.T @ r, 1.0), (r.T @ r, shapes)
 
         # Reconstruct the original matrix
         # (if full-rank Lanczos, this should imply an identity-Jacobian)
@@ -225,8 +228,8 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
 jnp.set_printoptions(2)
 
 # Set up a test-matrix
-eigvals = jnp.ones((5,), dtype=float) * 0.001
-eigvals_relevant = jnp.arange(1.0, 2.0, step=1.0 / len(eigvals))[:-1]
+eigvals = jnp.ones((3,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=1.0 / len(eigvals))
 eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -241,7 +244,7 @@ v /= jnp.linalg.norm(v)
 flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
 
 # Verify that the "identity" operator is indeed correct.
-algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=True)
+algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
 
 
 # Flatten the algorithm to get a single Jacobian "matrix"!
@@ -257,6 +260,7 @@ assert jnp.allclose(flat, algorithm_flat(flat))
 fx, vjp = jax.vjp(algorithm_flat, flat)
 e1 = jnp.arange(1.0, 1.0 + len(fx))
 e1 /= jnp.linalg.norm(e1)
+print(e1)
 
 fasjd = vjp(e1)
 print(fasjd)  # compare this value across custom_vjp flags!
@@ -264,4 +268,5 @@ print(fasjd)  # compare this value across custom_vjp flags!
 # Flattened Jacobian: is it the identity matrix?
 # Only works when run as python -O experiments/....py
 # because the asserts fail.
-jac = jax.jacrev(algorithm_flat)(flat)
+jac = jax.jacfwd(algorithm_flat)(flat)
+print(jac)
