@@ -185,6 +185,10 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
             - nu_k * xs[1]
             - dxs[0]
         )
+
+        # todo: if we all non-normalised vectors, divide dv by the norm (accordingly)
+        #  if we do not allow those, do not return x1.
+        #  in either case, revisit the maths and this implementation!
         dv = -lambda_1 + (lambda_1.T @ vector) * vector
         return dv, dA
 
@@ -245,7 +249,7 @@ v /= jnp.linalg.norm(v)
 flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
 
 # Verify that the "identity" operator is indeed correct.
-algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=True)
+algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
 # algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
 
 
@@ -267,6 +271,7 @@ print(jnp.eye(len(v)) - jnp.outer(v, v))
 fx, vjp = jax.vjp(algorithm_flat, flat)
 e1 = jnp.arange(1.0, 1.0 + len(fx))
 e1 /= jnp.linalg.norm(e1)
+e1 = jnp.flip(e1)
 
 fasjd = vjp(e1)
 print(*fasjd)  # compare this value across custom_vjp flags!
