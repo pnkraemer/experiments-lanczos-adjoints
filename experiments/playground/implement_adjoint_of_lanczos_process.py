@@ -4,6 +4,9 @@ import jax.flatten_util
 import jax.numpy as jnp
 from matfree import test_util
 
+jax.config.update("jax_disable_jit", True)
+jax.config.update("jax_enable_x64", True)
+
 
 # uncomment as soon as parameter-derivatives are unlocked
 # def sym(x):
@@ -14,11 +17,21 @@ def identity_via_lanczos(matvec, *, custom_vjp: bool):
     alg = lanczos_fwd(matvec, custom_vjp=custom_vjp)
 
     def identity(vec, *params):
-        (vecs, diags, offdiags), (r, _) = alg(vec, *params)
+        (vecs, diags, offdiags), (r, b_) = alg(vec, *params)
         v0 = vecs[0]
 
-        # todo: check whether r is orthogonal to the others.
-        #  if not: why is it returned?? Is it even well-defined?
+        # Verify the correct shapes
+        kplus, n = jnp.shape(vecs)
+        assert jnp.shape(diags) == (kplus,)
+        assert jnp.shape(offdiags) == (kplus - 1,)
+        assert jnp.shape(r) == (n,)
+        assert jnp.shape(b_) == ()
+
+        # Verify the orthogonality
+        shapes = (vecs.shape, params[0].shape)
+        assert jnp.allclose(vecs @ vecs.T, jnp.eye(len(vecs))), shapes
+        assert jnp.allclose(vecs @ r, 0), (vecs @ r, shapes)
+        assert jnp.allclose(r.T @ r, 1.0), (r.T @ r, shapes)
 
         dense_matrix = jnp.diag(diags) + jnp.diag(offdiags, 1) + jnp.diag(offdiags, -1)
         return v0, (vecs.T @ dense_matrix @ vecs)
@@ -224,20 +237,18 @@ def lanczos_fwd(matvec, *, custom_vjp: bool):
     return estimate
 
 
-jnp.set_printoptions(4)
-
-# todo: verify the maths, and then revisit to verify the implementation.
+jnp.set_printoptions(2)
 
 # Set up a test-matrix
-eigvals = jnp.ones((2,), dtype=float) * 0.001
-eigvals_relevant = jnp.arange(1.0, 2.0, step=1.0 / len(eigvals))
+eigvals = jnp.ones((5,), dtype=float) * 0.001
+eigvals_relevant = jnp.arange(1.0, 2.0, step=1.0 / len(eigvals))[:-1]
 eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
 A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
 # Set up an initial vector
 # key = jax.random.PRNGKey(1)
 # v = jax.random.normal(key, shape=jnp.shape(eigvals))
-v = jnp.asarray([3.0, 4.0])
+v = jnp.arange(1.0, 1.0 + len(eigvals))
 v /= jnp.linalg.norm(v)
 
 # uncomment as soon as parametric matvecs are implemented!
@@ -247,7 +258,7 @@ v /= jnp.linalg.norm(v)
 flat, unflatten = jax.flatten_util.ravel_pytree((v, A))
 
 # Verify that the "identity" operator is indeed correct.
-algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=True)
+algorithm = identity_via_lanczos(lambda s, p: p @ s, custom_vjp=False)
 
 
 # Flatten the algorithm to get a single Jacobian "matrix"!
@@ -282,7 +293,7 @@ print()
 print()
 
 # Flattened Jacobian: is it the identity matrix?
-jac = jax.jacrev(algorithm_flat)(flat)
+# jac = jax.jacrev(algorithm_flat)(flat)
 
 
 # todo:
@@ -292,4 +303,4 @@ jac = jax.jacrev(algorithm_flat)(flat)
 #  update: the "dA" vjps are correct (well, they coincide with autodiff)
 #  the "dv" ones need a bit more work (likely because they depend "too strongly" on A?)...
 #  use either the vjp in a random direction or the identity-matrix check to verify!
-print(jac)
+# print(jac)
