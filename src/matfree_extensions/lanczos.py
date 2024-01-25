@@ -187,14 +187,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         zeros = jnp.zeros_like(lambda_k)
         lambdas = (zeros, lambda_k)
 
-        # loop_over = (
-        #     reversed(dxs[1:-1]),
-        #     reversed(dalphas[:-1]),
-        #     reversed(dbetas[:-1]),
-        #     zip(reversed(xs[2:]), reversed(xs[1:-1]), reversed(xs[:-2])),
-        #     reversed(alphas[1:]),
-        #     zip(reversed(betas[1:]), reversed(betas[:-1])),
-        # )
+        # Scan over the remaining inputs
+
         loop_over = (
             dxs[1:-1],
             dalphas[:-1],
@@ -219,6 +213,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             reverse=True,
         )
 
+        # Conclude the final step:
+
         lambda_1, dA_increment = _bwd_final(
             params=params,
             lambdas=lambdas,
@@ -229,6 +225,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             dx_K=dxs[0],
         )
 
+        # Compute the gradients
         dA = jnp.sum(dAs, axis=0) + dA_increment
         dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
         return dv, dA
