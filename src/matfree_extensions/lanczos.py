@@ -86,35 +86,40 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
 
 def tridiag(matvec, krylov_depth, /):
     def estimate(vec, *params):
+        # Pre-allocate
+        vectors = jnp.zeros((krylov_depth + 1, len(vec)))
+        offdiags = jnp.zeros((krylov_depth,))
+        diags = jnp.zeros((krylov_depth,))
+
+        # Normalize (not all Lanczos implementations do that)
+        v0 = vec / jnp.linalg.norm(vec)
+        vectors = vectors.at[0].set(v0)
+
         # Lanczos initialisation
-        ((v1, offdiag), diag), v0 = _fwd_init(vec, *params)
-        vs, offdiags, diags = [v0], [], []
+        ((v1, offdiag), diag) = _fwd_init(v0, *params)
 
         # Store results
-        vs.append(v1)
-        offdiags.append(offdiag)
-        diags.append(diag)
+        k = 0
+        vectors = vectors.at[k + 1].set(v1)
+        offdiags = offdiags.at[k].set(offdiag)
+        diags = diags.at[k].set(diag)
 
-        for _ in range(krylov_depth):
+        for k in range(1, krylov_depth):
             # Lanczos step
             ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
 
             # Reorthogonalisation
-            Qs = jnp.asarray(vs)
-            v1 = v1 - Qs.T @ (Qs @ v1)
+            v1 = v1 - vectors.T @ (vectors @ v1)
             v1 /= jnp.linalg.norm(v1)
 
             # Store results
-            vs.append(v1)
-            offdiags.append(offdiag)
-            diags.append(diag)
+            vectors = vectors.at[k + 1].set(v1)
+            offdiags = offdiags.at[k].set(offdiag)
+            diags = diags.at[k].set(diag)
 
-        decomp = (
-            jnp.asarray(vs[:-1]),
-            (jnp.asarray(diags), jnp.asarray(offdiags[:-1])),
-        )
-        remainder = (vs[-1], offdiags[-1])
-        return decomp, remainder
+        decomposition = vectors[:-1], (diags, offdiags[:-1])
+        remainder = vectors[-1], offdiags[-1]
+        return decomposition, remainder
 
     def _fwd_init(vec, *params):
         """Initialize Lanczos' algorithm.
@@ -123,12 +128,11 @@ def tridiag(matvec, krylov_depth, /):
         for x_{k+1}, a_k, and b_k, using
         orthogonality of the x_k.
         """
-        vec /= jnp.linalg.norm(vec)
         a = vec @ (matvec(vec, *params))
         r = (matvec(vec, *params)) - a * vec
         b = jnp.linalg.norm(r)
         x = r / b
-        return ((x, b), a), vec
+        return ((x, b), a)
 
     def _fwd_step(vec, b, vec_previous, *params):
         """Apply Lanczos' recurrence.

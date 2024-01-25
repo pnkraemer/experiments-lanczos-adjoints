@@ -14,7 +14,7 @@ def test_full_rank_reconstruction_is_exact():
     vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
 
     # Run Lanczos approximation
-    algorithm = lanczos.tridiag(lambda s, p: p @ s, len(vector) - 1)
+    algorithm = lanczos.tridiag(lambda s, p: p @ s, len(vector))
     (lanczos_vectors, tridiag), _ = algorithm(vector, matrix)
 
     # Reconstruct the original matrix from the full-order approximation
