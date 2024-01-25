@@ -3,7 +3,6 @@ import functools
 
 import jax.flatten_util
 import jax.numpy as jnp
-import pytest_cases
 from matfree import test_util
 
 from matfree_extensions import lanczos
@@ -21,8 +20,6 @@ def test_vjp(n=5, krylov_order=4):
 
     # Set up an initial vector
     vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
-    # todo: remove this scaling!
-    vector /= jnp.linalg.norm(vector)
 
     # Flatten the inputs
     flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))

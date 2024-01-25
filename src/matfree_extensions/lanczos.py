@@ -243,7 +243,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         dA += dA_increment
 
         # todo: if we all non-normalised vectors, divide dv by the norm (accordingly)
-        dv = -lambda_1 + (lambda_1.T @ xs[0]) * xs[0]
+        dv = (-lambda_1 + (lambda_1.T @ xs[0]) * xs[0]) / jnp.linalg.norm(vector)
         return dv, dA
 
     def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
