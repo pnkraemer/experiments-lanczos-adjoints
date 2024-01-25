@@ -182,8 +182,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             da_K=dalphas[-1],
             db_K=dbetas[-1],
             b_K=betas[-1],
-            x_Kplus=xs[-1],
-            x_K=xs[-2],
+            x_Ks=(xs[-1], xs[-2]),
         )
         zeros = jnp.zeros_like(lambda_k)
         lambdas = (zeros, lambda_k)
@@ -192,18 +191,14 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         for k in range(len(alphas) - 1, 0, -1):
             nu, lambda_k, dA_increment = _bwd_step(
                 *params,
-                lambda_Kplusplus=lambdas[0],
-                lambda_kplus=lambdas[1],
+                lambdas=lambdas,
                 nu_K=nu,
                 dx_K=dxs[k],
                 da_Kminus=dalphas[k - 1],
                 db_Kminus=dbetas[k - 1],
                 a_K=alphas[k],
-                b_K=betas[k],
-                b_Kminus=betas[k - 1],
-                x_Kplus=xs[k + 1],
-                x_K=xs[k],
-                x_Kminus=xs[k - 1],
+                b_Ks=(betas[k], betas[k - 1]),
+                x_Ks=(xs[k + 1], xs[k], xs[k - 1]),
             )
             # todo: for multiple parameters, this should be a tree_add!
             dA += dA_increment
@@ -219,27 +214,21 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
         return dv, dA
 
-    def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
+    def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Ks):
+        # Read inputs
+        x_Kplus, x_K = x_Ks
+
+        # Apply formula
         mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
         nu_K = da_K * b_K - x_K.T @ dx_Kplus
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
         return nu_K, lambda_Kplus
 
-    def _bwd_step(
-        *params,
-        dx_K,
-        db_Kminus,
-        da_Kminus,
-        lambda_kplus,
-        a_K,
-        b_K,
-        lambda_Kplusplus,
-        b_Kminus,
-        nu_K,
-        x_Kplus,
-        x_K,
-        x_Kminus,
-    ):
+    def _bwd_step(*params, lambdas, dx_K, db_Kminus, da_Kminus, a_K, b_Ks, nu_K, x_Ks):
+        lambda_Kplusplus, lambda_kplus = lambdas
+        x_Kplus, x_K, x_Kminus = x_Ks
+        b_K, b_Kminus = b_Ks
+
         Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
         (dA_increment,) = vjp(x_K)
         xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
