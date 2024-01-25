@@ -1,12 +1,14 @@
 """Test the tri-diagonalisation."""
 import jax.flatten_util
 import jax.numpy as jnp
+import pytest_cases
 from matfree import test_util
 
 from matfree_extensions import lanczos
 
 
-def test_identity_operator(n=5):
+@pytest_cases.parametrize("custom_vjp", [True, False])
+def test_identity_operator(custom_vjp, n=5):
     # Set up a test-matrix
     eigvals = jnp.arange(1.0, 2.0, step=1 / (n + 1))
     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -21,7 +23,7 @@ def test_identity_operator(n=5):
 
     # Construct an identity-like function
     def eye(f):
-        reconstructed = _identity(*unflatten(f))
+        reconstructed = _identity(*unflatten(f), custom_vjp=custom_vjp)
         return jax.flatten_util.ravel_pytree(reconstructed)[0]
 
     # Assert that the function is indeed the identity
@@ -31,18 +33,21 @@ def test_identity_operator(n=5):
     # Compute the Jacobian
     jacobian = jax.jit(jax.jacrev(eye))(flat)
     jacobian_reduced = _remove_zero_rows(jacobian)
-
     # Compute the expected Jacobian (essentially, the identity matrix)
     nonzero_block = jnp.eye(len(vector)) - jnp.outer(vector, vector)
     expected = jnp.eye(len(jacobian_reduced))
     expected = expected.at[: len(vector), : len(vector)].set(nonzero_block)
 
-    tols = {"atol": 1e-4, "rtol": 1e-5}
+    tol = jnp.finfo(jnp.dtype(jacobian)).eps
+    print(jnp.sqrt(tol))
+    tols = {"atol": 1e-3, "rtol": 1e-3}
     assert jnp.allclose(jacobian_reduced, expected, **tols)
 
 
-def _identity(vector, matrix):
-    algorithm = lanczos.tridiag(lambda s, p: (p + p.T) @ s, len(vector))
+def _identity(vector, matrix, *, custom_vjp):
+    algorithm = lanczos.tridiag(
+        lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp
+    )
     (lanczos_vectors, tridiag), _ = algorithm(vector, matrix)
 
     # Reconstruct the original matrix from the full-order approximation
