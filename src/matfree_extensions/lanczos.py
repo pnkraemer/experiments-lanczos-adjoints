@@ -188,15 +188,22 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         lambdas = (zeros, lambda_k)
         dA = 0.0  # todo: for multiple parameters, this should be a tree_zeros!
 
-        for k in reversed(range(1, len(alphas))):
+        loop_over = (
+            reversed(range(1, len(alphas))),
+            reversed(alphas[1:]),
+            reversed(dxs[1:-1]),
+            reversed(dalphas[:-1]),
+            reversed(dbetas[:-1]),
+        )
+        for k, a_k, dx_k, da_k, db_k in zip(*loop_over):
             nu, lambda_k, dA_increment = _bwd_step(
                 *params,
                 lambdas=lambdas,
                 nu_K=nu,
-                dx_K=dxs[k],
-                da_Kminus=dalphas[k - 1],
-                db_Kminus=dbetas[k - 1],
-                a_K=alphas[k],
+                dx_K=dx_k,
+                da_Kminus=da_k,
+                db_Kminus=db_k,
+                a_K=a_k,
                 b_Ks=(betas[k], betas[k - 1]),
                 x_Ks=(xs[k + 1], xs[k], xs[k - 1]),
             )
