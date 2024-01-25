@@ -86,6 +86,67 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
 
 def tridiag_adaptive(matvec, /):
     def estimate(vec, *params):
-        return jnp.ones((1,)), (jnp.ones((1,)), jnp.ones((1,)))
+        small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
+
+        # Lanczos initialisation
+        ((v1, offdiag), diag), v0 = _fwd_init(vec, *params)
+
+        v0 /= jnp.linalg.norm(v0)
+        vs, offdiags, diags = [v0], [], []
+
+        # Store results
+        vs.append(v1)
+        offdiags.append(offdiag)
+        diags.append(diag)
+
+        i = 0
+        while (offdiag > small_value) and (i := (i + 1)) < len(vec):
+            # Lanczos step
+            ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
+
+            # Reorthogonalisation
+            Qs = jnp.asarray(vs)
+            v1 = v1 - Qs.T @ (Qs @ v1)
+            v1 /= jnp.linalg.norm(v1)
+
+            # Store results
+            vs.append(v1)
+            offdiags.append(offdiag)
+            diags.append(diag)
+
+        decomp = (
+            jnp.asarray(vs[:-1]),
+            (jnp.asarray(diags), jnp.asarray(offdiags[:-1])),
+        )
+        remainder = (vs[-1], offdiags[-1])
+        return decomp, remainder
+
+    def _fwd_init(vec, *params):
+        """Initialize Lanczos' algorithm.
+
+        Solve A x_{k} = a_k x_k + b_k x_{k+1}
+        for x_{k+1}, a_k, and b_k, using
+        orthogonality of the x_k.
+        """
+        vec /= jnp.linalg.norm(vec)
+        a = vec @ (matvec(vec, *params))
+        r = (matvec(vec, *params)) - a * vec
+        b = jnp.linalg.norm(r)
+        x = r / b
+        return ((x, b), a), vec
+
+    def _fwd_step(vec, b, vec_previous, *params):
+        """Apply Lanczos' recurrence.
+
+        Solve
+        A x_{k} = b_{k-1} x_{k-1} + a_k x_k + b_k x_{k+1}
+        for x_{k+1}, a_k, and b_k, using
+        orthogonality of the x_k.
+        """
+        a = vec @ (matvec(vec, *params))
+        r = matvec(vec, *params) - a * vec - b * vec_previous
+        b = jnp.linalg.norm(r)
+        x = r / b
+        return (x, b), a
 
     return estimate
