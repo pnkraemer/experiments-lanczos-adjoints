@@ -189,8 +189,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             x_Kplus=xs[k + 1],
             x_K=xs[k],
         )
-        _, vjp = jax.vjp(lambda *p: matvec(lambda_k, *p), *params)
-        (dA,) = vjp(xs[k])
+        # _, vjp = jax.vjp(lambda *p: matvec(lambda_k, *p), *params)
+        # (dA,) = vjp(xs[k])
         # dA = jnp.outer(lambda_k, xs[k])
 
         # a-constraint
@@ -198,12 +198,12 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
         # b-constraint
         # assert jnp.allclose(lambda_k.T @ xs[k + 1], dbetas[k])
-
+        dA = 0.0
         lambda_kplus = jnp.zeros_like(lambda_k)
         lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
         for k in range(len(alphas) - 1, 0, -1):
-            nu_k, lambda_k = _bwd_step(
+            nu_k, lambda_k, dA_increment = _bwd_step(
                 *params,
                 dx_K=dxs[k],
                 da_Kminus=dalphas[k - 1],
@@ -218,6 +218,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
                 x_K=xs[k],
                 x_Kminus=xs[k - 1],
             )
+            dA += dA_increment
             # a-constraint
             # assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
 
@@ -227,19 +228,20 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             # )
             # Update
             # dA += jnp.outer(lambda_k, xs[k - 1])
-            _, vjp = jax.vjp(lambda *p: matvec(lambda_k, *p), *params)
-            (new,) = vjp(xs[k - 1])
-            dA += new
 
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
+        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
+        (dA_increment,) = vjp(xs[0])
         lambda_1 = (
             betas[0] * lambda_kplusplus
-            - matvec(lambda_kplus, *params)
+            - Av
             + alphas[0] * lambda_kplus
             - nu_k * xs[1]
             - dxs[0]
         )
+        dA += dA_increment
+
         # todo: if we all non-normalised vectors, divide dv by the norm (accordingly)
         dv = -lambda_1 + (lambda_1.T @ xs[0]) * xs[0]
         return dv, dA
@@ -265,17 +267,13 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         x_K,
         x_Kminus,
     ):
-        xi = (
-            dx_K
-            + matvec(lambda_kplus, *params)
-            - a_K * lambda_kplus
-            - b_K * lambda_Kplusplus
-            + nu_K * x_Kplus
-        )
+        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
+        (dA_increment,) = vjp(x_K)
+        xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
         mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
         nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
         lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
-        return nu_Kminus, lambda_K
+        return nu_Kminus, lambda_K, dA_increment
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)

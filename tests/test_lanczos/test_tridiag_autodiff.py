@@ -9,6 +9,10 @@ from matfree_extensions import lanczos
 
 @pytest_cases.parametrize("custom_vjp", [True, False])
 def test_identity_operator(custom_vjp, n=5):
+    """Test that the reverse-mode Jacobian of an identity-like operation is the identity.
+
+    "Identity operation": full-rank Lanczos decomposition and full reconstruction.
+    """
     # Set up a test-matrix
     eigvals = jnp.arange(1.0, 2.0, step=1 / (n + 1))
     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -33,13 +37,14 @@ def test_identity_operator(custom_vjp, n=5):
     # Compute the Jacobian
     jacobian = jax.jit(jax.jacrev(eye))(flat)
     jacobian_reduced = _remove_zero_rows(jacobian)
+
     # Compute the expected Jacobian (essentially, the identity matrix)
+    # The nonzero block is the Jacobian of the normalisation of the input vector
     nonzero_block = jnp.eye(len(vector)) - jnp.outer(vector, vector)
     expected = jnp.eye(len(jacobian_reduced))
     expected = expected.at[: len(vector), : len(vector)].set(nonzero_block)
 
-    tol = jnp.finfo(jnp.dtype(jacobian)).eps
-    print(jnp.sqrt(tol))
+    # Assert that the Jacobian has the expected form.
     tols = {"atol": 1e-3, "rtol": 1e-3}
     assert jnp.allclose(jacobian_reduced, expected, **tols)
 
