@@ -104,8 +104,21 @@ def tridiag(matvec, krylov_depth, /):
         offdiags = offdiags.at[k].set(offdiag)
         diags = diags.at[k].set(diag)
 
-        for k in range(1, krylov_depth):
-            # Lanczos step
+        # Run Lanczos-loop
+        body_fun = _prepare_lanczos_body(*params)
+        init = (v1, offdiag, v0), (vectors, diags, offdiags)
+        _, (vectors, diags, offdiags) = jax.lax.fori_loop(
+            lower=1, upper=krylov_depth, body_fun=body_fun, init_val=init
+        )
+
+        # Reorganise the outputs
+        decomposition = vectors[:-1], (diags, offdiags[:-1])
+        remainder = vectors[-1], offdiags[-1]
+        return decomposition, remainder
+
+    def _prepare_lanczos_body(*params):
+        def step(i, val):
+            (v1, offdiag, v0), (vectors, diags, offdiags) = val
             ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
 
             # Reorthogonalisation
@@ -113,13 +126,13 @@ def tridiag(matvec, krylov_depth, /):
             v1 /= jnp.linalg.norm(v1)
 
             # Store results
-            vectors = vectors.at[k + 1].set(v1)
-            offdiags = offdiags.at[k].set(offdiag)
-            diags = diags.at[k].set(diag)
+            vectors = vectors.at[i + 1].set(v1)
+            offdiags = offdiags.at[i].set(offdiag)
+            diags = diags.at[i].set(diag)
 
-        decomposition = vectors[:-1], (diags, offdiags[:-1])
-        remainder = vectors[-1], offdiags[-1]
-        return decomposition, remainder
+            return (v1, offdiag, v0), (vectors, diags, offdiags)
+
+        return step
 
     def _fwd_init(vec, *params):
         """Initialize Lanczos' algorithm.
