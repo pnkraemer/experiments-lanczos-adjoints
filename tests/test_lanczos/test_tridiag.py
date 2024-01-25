@@ -1,5 +1,6 @@
 """Test the tri-diagonalisation."""
 import jax.numpy as jnp
+import pytest_cases
 from matfree import test_util
 
 from matfree_extensions import lanczos
@@ -31,9 +32,12 @@ def test_full_rank_reconstruction_is_exact():
     assert jnp.allclose(lanczos_vectors.T @ lanczos_vectors, eye, **tols)
 
 
-def test_mid_rank_reconstruction_satisfies_decomposition():
-    eigvals = jnp.ones((12,), dtype=float) * 0.001
-    eigvals_relevant = jnp.arange(1.0, 2.0, step=0.2)
+# anything 0 <= k < n works; k=n is full reconstruction and the (q, b) values become meaningless
+@pytest_cases.parametrize("krylov_depth", [0, 5, 11])
+@pytest_cases.parametrize("n", [12])
+def test_mid_rank_reconstruction_satisfies_decomposition(n, krylov_depth):
+    eigvals = jnp.ones((n,), dtype=float) * 0.001
+    eigvals_relevant = jnp.arange(1.0, 2.0, step=1 / (krylov_depth + 1))
     eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 
@@ -51,10 +55,6 @@ def test_mid_rank_reconstruction_satisfies_decomposition():
     tols = {"atol": 1e-5, "rtol": 1e-5}
     e_K = jnp.eye(krylov_depth)[-1]
     assert jnp.allclose(matrix @ Q.T, Q.T @ T + jnp.outer(e_K, q * b).T, **tols)
-
-
-def test_zero_rank_reconstruction_does_not_fail():
-    pass
 
 
 def _dense_tridiag(diagonal, off_diagonal):
