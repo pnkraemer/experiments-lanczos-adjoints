@@ -207,37 +207,17 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
         def body_fun(carry, x):
             nu_, lambdas_ = carry
-            nu_, lambda_k, da_increment = _bwd_step(
-                nu_, lambdas_, inputs=x, params=params
-            )
+            output_ = _bwd_step(nu_, lambdas_, inputs=x, params=params)
+            nu_, lambda_k, da_increment = output_
             lambdas_ = (lambdas_[1], lambda_k)
             return (nu_, lambdas_), da_increment
 
         (nu, lambdas), dAs = jax.lax.scan(
-            body_fun, init=init_val, xs=loop_over, reverse=True
+            body_fun,
+            init=init_val,
+            xs=loop_over,
+            reverse=True,
         )
-        dA = jnp.sum(dAs, axis=0)
-
-        #
-        #
-        # # for a_k, dx_k, da_k, db_k, b_ks, x_ks in zip(*loop_over):
-        # for inputs in zip(*loop_over):
-        #     nu, lambda_k, dA_increment = _bwd_step(
-        #         nu,
-        #         lambdas,
-        #         inputs=inputs,
-        #         # dx_K=dx_k,
-        #         # da_Kminus=da_k,
-        #         # db_Kminus=db_k,
-        #         # a_K=a_k,
-        #         # b_Ks=b_ks,
-        #         # x_Ks=x_ks,
-        #         params=params,
-        #     )
-        #     lambdas = (lambdas[1], lambda_k)
-        #
-        #     # todo: for multiple parameters, this should be a tree_add!
-        #     dA += dA_increment
 
         lambda_1, dA_increment = _bwd_final(
             params=params,
@@ -249,7 +229,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             dx_K=dxs[0],
         )
 
-        dA += dA_increment
+        dA = jnp.sum(dAs, axis=0) + dA_increment
         dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
         return dv, dA
 
