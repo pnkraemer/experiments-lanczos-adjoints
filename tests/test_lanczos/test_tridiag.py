@@ -32,7 +32,25 @@ def test_full_rank_reconstruction_is_exact():
 
 
 def test_mid_rank_reconstruction_satisfies_decomposition():
-    pass
+    eigvals = jnp.ones((12,), dtype=float) * 0.001
+    eigvals_relevant = jnp.arange(1.0, 2.0, step=0.2)
+    eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
+    matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+
+    # Set up an initial vector
+    vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
+
+    # Run Lanczos approximation
+    krylov_depth = len(eigvals_relevant)
+    algorithm = lanczos.tridiag(lambda s, p: p @ s, krylov_depth)
+    (lanczos_vectors, tridiag), (q, b) = algorithm(vector, matrix)
+
+    # Verify the decomposition
+    Q = lanczos_vectors
+    T = _dense_tridiag(*tridiag)
+    tols = {"atol": 1e-5, "rtol": 1e-5}
+    e_K = jnp.eye(krylov_depth)[-1]
+    assert jnp.allclose(matrix @ Q.T, Q.T @ T + jnp.outer(e_K, q * b).T, **tols)
 
 
 def test_zero_rank_reconstruction_does_not_fail():

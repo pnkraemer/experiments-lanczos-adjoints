@@ -132,7 +132,7 @@ def tridiag(matvec, krylov_depth, /):
         r = (matvec(vec, *params)) - a * vec
         b = jnp.linalg.norm(r)
         x = r / b
-        return ((x, b), a)
+        return (x, b), a
 
     def _fwd_step(vec, b, vec_previous, *params):
         """Apply Lanczos' recurrence.
