@@ -198,7 +198,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         )
         for a_k, dx_k, da_k, db_k, b_ks, x_ks in zip(*loop_over):
             nu, lambda_k, dA_increment = _bwd_step(
-                *params,
+                params=params,
                 lambdas=lambdas,
                 nu_K=nu,
                 dx_K=dx_k,
@@ -214,7 +214,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             dA += dA_increment
 
         lambda_1, dA_increment = _bwd_final(
-            *params,
+            params=params,
             lambdas=lambdas,
             nu_K=nu,
             b_K=betas[0],
@@ -237,7 +237,9 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
         return nu_K, lambda_Kplus
 
-    def _bwd_step(*params, lambdas, dx_K, db_Kminus, da_Kminus, a_K, b_Ks, nu_K, x_Ks):
+    def _bwd_step(
+        *, params, lambdas, dx_K, db_Kminus, da_Kminus, a_K, b_Ks, nu_K, x_Ks
+    ):
         lambda_Kplusplus, lambda_kplus = lambdas
         x_Kplus, x_K, x_Kminus = x_Ks
         b_K, b_Kminus = b_Ks
@@ -251,7 +253,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
         return nu_Kminus, lambda_K, dA_increment
 
-    def _bwd_final(*params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
+    def _bwd_final(*, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
         x1, x0 = x_Ks
         lambda_Kplus, lambda_K = lambdas
 
