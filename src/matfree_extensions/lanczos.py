@@ -1,5 +1,6 @@
 """Extensions for the Matfree package."""
 
+import functools
 
 import jax
 import jax.flatten_util
@@ -105,34 +106,18 @@ def tridiag(matvec, krylov_depth, /):
         diags = diags.at[k].set(diag)
 
         # Run Lanczos-loop
-        body_fun = _prepare_lanczos_body(*params)
         init = (v1, offdiag, v0), (vectors, diags, offdiags)
         _, (vectors, diags, offdiags) = jax.lax.fori_loop(
-            lower=1, upper=krylov_depth, body_fun=body_fun, init_val=init
+            lower=1,
+            upper=krylov_depth,
+            body_fun=functools.partial(_fwd_step, params),
+            init_val=init,
         )
 
         # Reorganise the outputs
         decomposition = vectors[:-1], (diags, offdiags[:-1])
         remainder = vectors[-1], offdiags[-1]
         return decomposition, remainder
-
-    def _prepare_lanczos_body(*params):
-        def step(i, val):
-            (v1, offdiag, v0), (vectors, diags, offdiags) = val
-            ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
-
-            # Reorthogonalisation
-            v1 = v1 - vectors.T @ (vectors @ v1)
-            v1 /= jnp.linalg.norm(v1)
-
-            # Store results
-            vectors = vectors.at[i + 1].set(v1)
-            offdiags = offdiags.at[i].set(offdiag)
-            diags = diags.at[i].set(diag)
-
-            return (v1, offdiag, v0), (vectors, diags, offdiags)
-
-        return step
 
     def _fwd_init(vec, *params):
         """Initialize Lanczos' algorithm.
@@ -147,7 +132,22 @@ def tridiag(matvec, krylov_depth, /):
         x = r / b
         return (x, b), a
 
-    def _fwd_step(vec, b, vec_previous, *params):
+    def _fwd_step(params, i, val):
+        (v1, offdiag, v0), (vectors, diags, offdiags) = val
+        ((v1, offdiag), diag), v0 = _fwd_step_apply(v1, offdiag, v0, *params), v1
+
+        # Reorthogonalisation
+        v1 = v1 - vectors.T @ (vectors @ v1)
+        v1 /= jnp.linalg.norm(v1)
+
+        # Store results
+        vectors = vectors.at[i + 1].set(v1)
+        offdiags = offdiags.at[i].set(offdiag)
+        diags = diags.at[i].set(diag)
+
+        return (v1, offdiag, v0), (vectors, diags, offdiags)
+
+    def _fwd_step_apply(vec, b, vec_previous, *params):
         """Apply Lanczos' recurrence.
 
         Solve

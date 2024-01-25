@@ -1,4 +1,5 @@
 """Test the tri-diagonalisation."""
+
 import jax.numpy as jnp
 import pytest_cases
 from matfree import test_util
