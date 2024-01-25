@@ -186,32 +186,58 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         )
         zeros = jnp.zeros_like(lambda_k)
         lambdas = (zeros, lambda_k)
-        dA = 0.0  # todo: for multiple parameters, this should be a tree_zeros!
 
+        # loop_over = (
+        #     reversed(dxs[1:-1]),
+        #     reversed(dalphas[:-1]),
+        #     reversed(dbetas[:-1]),
+        #     zip(reversed(xs[2:]), reversed(xs[1:-1]), reversed(xs[:-2])),
+        #     reversed(alphas[1:]),
+        #     zip(reversed(betas[1:]), reversed(betas[:-1])),
+        # )
         loop_over = (
-            reversed(alphas[1:]),
-            reversed(dxs[1:-1]),
-            reversed(dalphas[:-1]),
-            reversed(dbetas[:-1]),
-            zip(reversed(betas[1:]), reversed(betas[:-1])),
-            zip(reversed(xs[2:]), reversed(xs[1:-1]), reversed(xs[:-2])),
+            dxs[1:-1],
+            dalphas[:-1],
+            dbetas[:-1],
+            (xs[2:], xs[1:-1], xs[:-2]),
+            alphas[1:],
+            (betas[1:], betas[:-1]),
         )
-        for a_k, dx_k, da_k, db_k, b_ks, x_ks in zip(*loop_over):
-            nu, lambda_k, dA_increment = _bwd_step(
-                params=params,
-                lambdas=lambdas,
-                nu_K=nu,
-                dx_K=dx_k,
-                da_Kminus=da_k,
-                db_Kminus=db_k,
-                a_K=a_k,
-                b_Ks=b_ks,
-                x_Ks=x_ks,
-            )
-            lambdas = (lambdas[1], lambda_k)
+        init_val = (nu, lambdas)
 
-            # todo: for multiple parameters, this should be a tree_add!
-            dA += dA_increment
+        def body_fun(carry, x):
+            nu_, lambdas_ = carry
+            nu_, lambda_k, da_increment = _bwd_step(
+                nu_, lambdas_, inputs=x, params=params
+            )
+            lambdas_ = (lambdas_[1], lambda_k)
+            return (nu_, lambdas_), da_increment
+
+        (nu, lambdas), dAs = jax.lax.scan(
+            body_fun, init=init_val, xs=loop_over, reverse=True
+        )
+        dA = jnp.sum(dAs, axis=0)
+
+        #
+        #
+        # # for a_k, dx_k, da_k, db_k, b_ks, x_ks in zip(*loop_over):
+        # for inputs in zip(*loop_over):
+        #     nu, lambda_k, dA_increment = _bwd_step(
+        #         nu,
+        #         lambdas,
+        #         inputs=inputs,
+        #         # dx_K=dx_k,
+        #         # da_Kminus=da_k,
+        #         # db_Kminus=db_k,
+        #         # a_K=a_k,
+        #         # b_Ks=b_ks,
+        #         # x_Ks=x_ks,
+        #         params=params,
+        #     )
+        #     lambdas = (lambdas[1], lambda_k)
+        #
+        #     # todo: for multiple parameters, this should be a tree_add!
+        #     dA += dA_increment
 
         lambda_1, dA_increment = _bwd_final(
             params=params,
@@ -237,9 +263,9 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
         return nu_K, lambda_Kplus
 
-    def _bwd_step(
-        *, params, lambdas, dx_K, db_Kminus, da_Kminus, a_K, b_Ks, nu_K, x_Ks
-    ):
+    def _bwd_step(nu_K, lambdas, /, *, inputs, params):
+        dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
+
         lambda_Kplusplus, lambda_kplus = lambdas
         x_Kplus, x_K, x_Kminus = x_Ks
         b_K, b_Kminus = b_Ks
