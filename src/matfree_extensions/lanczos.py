@@ -204,10 +204,14 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             dA += dA_increment
             lambdas = (lambdas[1], lambda_k)
 
-        Av, vjp = jax.vjp(lambda *p: matvec(lambdas[1], *p), *params)
-        (dA_increment,) = vjp(xs[0])
-        lambda_1 = (
-            betas[0] * lambdas[0] - Av + alphas[0] * lambdas[1] - nu * xs[1] - dxs[0]
+        lambda_1, dA_increment = _bwd_final(
+            *params,
+            lambdas=lambdas,
+            nu_K=nu,
+            b_K=betas[0],
+            a_K=alphas[0],
+            x_Ks=(xs[1], xs[0]),
+            dx_K=dxs[0],
         )
 
         dA += dA_increment
@@ -231,11 +235,22 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
         Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
         (dA_increment,) = vjp(x_K)
+
         xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
         mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
         nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
         lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
         return nu_Kminus, lambda_K, dA_increment
+
+    def _bwd_final(*params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
+        x1, x0 = x_Ks
+        lambda_Kplus, lambda_K = lambdas
+
+        Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
+        (dA_increment,) = vjp(x0)
+
+        lambda_1 = b_K * lambda_Kplus - Av + a_K * lambda_K - nu_K * x1 - dx_K
+        return lambda_1, dA_increment
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
