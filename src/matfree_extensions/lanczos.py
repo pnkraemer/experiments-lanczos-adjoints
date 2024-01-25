@@ -82,3 +82,10 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     quadform.defvjp(quadform_fwd, quadform_bwd)
 
     return quadform
+
+
+def tridiag_adaptive(matvec, /):
+    def estimate(vec, *params):
+        return jnp.ones((1,)), (jnp.ones((1,)), jnp.ones((1,)))
+
+    return estimate
