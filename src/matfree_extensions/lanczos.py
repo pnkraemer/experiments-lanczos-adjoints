@@ -85,7 +85,7 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
-def tridiag(matvec, krylov_depth, /):
+def tridiag(matvec, krylov_depth, /, *, custom_vjp):
     def estimate(vec, *params):
         # Pre-allocate
         vectors = jnp.zeros((krylov_depth + 1, len(vec)))
@@ -160,5 +160,123 @@ def tridiag(matvec, krylov_depth, /):
         b = jnp.linalg.norm(r)
         x = r / b
         return (x, b), a
+
+    def estimate_fwd(vec, *params):
+        value = estimate(vec, *params)
+        return value, (value, (vec, *params))
+
+    def estimate_bwd(cache, vjp_incoming):
+        (dxs, (dalphas, dbetas)), (dx_last, dbeta_last) = vjp_incoming
+        # todo:
+        #  once the gradients are the same
+        #  derive the parameter-derivative (on paper) so we can use
+        #  the correct derivative wrt a _symmetric_ matrix (not any matrix)
+
+        dxs = jnp.concatenate((dxs, dx_last[None]))
+        dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
+        ((xs, (alphas, betas)), (x_last, beta_last)), (vector, *params) = cache
+
+        xs = jnp.concatenate((xs, x_last[None]))
+
+        betas = jnp.concatenate((betas, beta_last[None]))
+
+        k = len(alphas) - 1
+        nu_k, lambda_k = _bwd_init(
+            dx_Kplus=dxs[k + 1],
+            da_K=dalphas[k],
+            db_K=dbetas[k],
+            b_K=betas[k],
+            x_Kplus=xs[k + 1],
+            x_K=xs[k],
+        )
+        # _, vjp = jax.vjp(lambda *p: matvec(lambda_k, *p), *params)
+        # (dA,) = vjp(xs[k])
+        # dA = jnp.outer(lambda_k, xs[k])
+
+        # a-constraint
+        # assert jnp.allclose(lambda_k.T @ xs[k], dalphas[k])
+
+        # b-constraint
+        # assert jnp.allclose(lambda_k.T @ xs[k + 1], dbetas[k])
+        dA = 0.0
+        lambda_kplus = jnp.zeros_like(lambda_k)
+        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+
+        for k in range(len(alphas) - 1, 0, -1):
+            nu_k, lambda_k, dA_increment = _bwd_step(
+                *params,
+                dx_K=dxs[k],
+                da_Kminus=dalphas[k - 1],
+                db_Kminus=dbetas[k - 1],
+                lambda_kplus=lambda_kplus,
+                a_K=alphas[k],
+                b_K=betas[k],
+                lambda_Kplusplus=lambda_kplusplus,
+                b_Kminus=betas[k - 1],
+                nu_K=nu_k,
+                x_Kplus=xs[k + 1],
+                x_K=xs[k],
+                x_Kminus=xs[k - 1],
+            )
+            dA += dA_increment
+            # a-constraint
+            # assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
+
+            # b-constraint
+            # assert jnp.allclose(
+            #     lambda_kplusplus.T @ xs[k] + lambda_kplus.T @ xs[k + 1], dbetas[k]
+            # )
+            # Update
+            # dA += jnp.outer(lambda_k, xs[k - 1])
+
+            lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+
+        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
+        (dA_increment,) = vjp(xs[0])
+        lambda_1 = (
+            betas[0] * lambda_kplusplus
+            - Av
+            + alphas[0] * lambda_kplus
+            - nu_k * xs[1]
+            - dxs[0]
+        )
+        dA += dA_increment
+
+        # todo: if we all non-normalised vectors, divide dv by the norm (accordingly)
+        dv = -lambda_1 + (lambda_1.T @ xs[0]) * xs[0]
+        return dv, dA
+
+    def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
+        mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
+        nu_K = da_K * b_K - x_K.T @ dx_Kplus
+        lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
+        return nu_K, lambda_Kplus
+
+    def _bwd_step(
+        *params,
+        dx_K,
+        db_Kminus,
+        da_Kminus,
+        lambda_kplus,
+        a_K,
+        b_K,
+        lambda_Kplusplus,
+        b_Kminus,
+        nu_K,
+        x_Kplus,
+        x_K,
+        x_Kminus,
+    ):
+        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
+        (dA_increment,) = vjp(x_K)
+        xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
+        mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
+        nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
+        lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
+        return nu_Kminus, lambda_K, dA_increment
+
+    if custom_vjp:
+        estimate = jax.custom_vjp(estimate)
+        estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
 
     return estimate
