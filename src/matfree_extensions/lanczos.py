@@ -166,61 +166,53 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         return value, (value, (vec, *params))
 
     def estimate_bwd(cache, vjp_incoming):
+        # Read incoming gradients and stack related quantities
         (dxs, (dalphas, dbetas)), (dx_last, dbeta_last) = vjp_incoming
-
         dxs = jnp.concatenate((dxs, dx_last[None]))
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
+
+        # Read the cache and stack related quantities
         ((xs, (alphas, betas)), (x_last, beta_last)), (vector, *params) = cache
-
         xs = jnp.concatenate((xs, x_last[None]))
-
         betas = jnp.concatenate((betas, beta_last[None]))
 
-        k = len(alphas) - 1
-        nu_k, lambda_k = _bwd_init(
-            dx_Kplus=dxs[k + 1],
-            da_K=dalphas[k],
-            db_K=dbetas[k],
-            b_K=betas[k],
-            x_Kplus=xs[k + 1],
-            x_K=xs[k],
+        # Initialise the states
+        nu, lambda_k = _bwd_init(
+            dx_Kplus=dxs[-1],
+            da_K=dalphas[-1],
+            db_K=dbetas[-1],
+            b_K=betas[-1],
+            x_Kplus=xs[-1],
+            x_K=xs[-2],
         )
-
-        # todo: for multiple parameters, this should be a tree_zeros!
-        dA = 0.0
-
-        lambda_kplus = jnp.zeros_like(lambda_k)
-        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+        zeros = jnp.zeros_like(lambda_k)
+        lambdas = (zeros, lambda_k)
+        dA = 0.0  # todo: for multiple parameters, this should be a tree_zeros!
 
         for k in range(len(alphas) - 1, 0, -1):
-            nu_k, lambda_k, dA_increment = _bwd_step(
+            nu, lambda_k, dA_increment = _bwd_step(
                 *params,
+                lambda_Kplusplus=lambdas[0],
+                lambda_kplus=lambdas[1],
+                nu_K=nu,
                 dx_K=dxs[k],
                 da_Kminus=dalphas[k - 1],
                 db_Kminus=dbetas[k - 1],
-                lambda_kplus=lambda_kplus,
                 a_K=alphas[k],
                 b_K=betas[k],
-                lambda_Kplusplus=lambda_kplusplus,
                 b_Kminus=betas[k - 1],
-                nu_K=nu_k,
                 x_Kplus=xs[k + 1],
                 x_K=xs[k],
                 x_Kminus=xs[k - 1],
             )
-
             # todo: for multiple parameters, this should be a tree_add!
             dA += dA_increment
-            lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
+            lambdas = (lambdas[1], lambda_k)
 
-        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
+        Av, vjp = jax.vjp(lambda *p: matvec(lambdas[1], *p), *params)
         (dA_increment,) = vjp(xs[0])
         lambda_1 = (
-            betas[0] * lambda_kplusplus
-            - Av
-            + alphas[0] * lambda_kplus
-            - nu_k * xs[1]
-            - dxs[0]
+            betas[0] * lambdas[0] - Av + alphas[0] * lambdas[1] - nu * xs[1] - dxs[0]
         )
 
         dA += dA_increment
