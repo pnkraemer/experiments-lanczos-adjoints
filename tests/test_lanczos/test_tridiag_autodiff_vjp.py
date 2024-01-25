@@ -8,7 +8,7 @@ from matfree import test_util
 from matfree_extensions import lanczos
 
 
-def test_vjp(n=5, krylov_order=4):
+def test_vjp(n=10, krylov_order=4):
     """Test that the custom VJP yields the same output as autodiff."""
     # Set up a test-matrix
     eigvals = jax.random.uniform(jax.random.PRNGKey(2), shape=(n,)) + 1.0
@@ -36,7 +36,6 @@ def test_vjp(n=5, krylov_order=4):
     # Compute both VJPs
     fx_ref, vjp_ref = jax.vjp(reference, flat)
     fx_imp, vjp_imp = jax.vjp(implementation, flat)
-
     # Assert that the forward-passes are identical
     assert jnp.allclose(fx_ref, fx_imp)
 
@@ -44,7 +43,7 @@ def test_vjp(n=5, krylov_order=4):
     for seed in [4, 5, 6]:
         key = jax.random.PRNGKey(seed)
         dnu = jax.random.normal(key, shape=jnp.shape(reference(flat)))
-        assert jnp.allclose(*vjp_ref(dnu), *vjp_imp(dnu), atol=1e-3, rtol=1e-3)
+        assert jnp.allclose(*vjp_ref(dnu), *vjp_imp(dnu), atol=1e-4, rtol=1e-4)
 
 
 def _sym(m):
