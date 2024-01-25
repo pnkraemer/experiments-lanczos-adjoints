@@ -84,14 +84,10 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
-def tridiag_adaptive(matvec, /):
+def tridiag(matvec, krylov_depth, /):
     def estimate(vec, *params):
-        small_value = jnp.sqrt(jnp.finfo(jnp.dtype(vec)).eps)
-
         # Lanczos initialisation
         ((v1, offdiag), diag), v0 = _fwd_init(vec, *params)
-
-        v0 /= jnp.linalg.norm(v0)
         vs, offdiags, diags = [v0], [], []
 
         # Store results
@@ -99,8 +95,7 @@ def tridiag_adaptive(matvec, /):
         offdiags.append(offdiag)
         diags.append(diag)
 
-        i = 0
-        while (offdiag > small_value) and (i := (i + 1)) < len(vec):
+        for _ in range(krylov_depth):
             # Lanczos step
             ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
 
