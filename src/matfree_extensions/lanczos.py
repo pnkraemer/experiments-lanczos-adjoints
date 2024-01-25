@@ -166,95 +166,105 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         return value, (value, (vec, *params))
 
     def estimate_bwd(cache, vjp_incoming):
+        # Read incoming gradients and stack related quantities
         (dxs, (dalphas, dbetas)), (dx_last, dbeta_last) = vjp_incoming
-
         dxs = jnp.concatenate((dxs, dx_last[None]))
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
+
+        # Read the cache and stack related quantities
         ((xs, (alphas, betas)), (x_last, beta_last)), (vector, *params) = cache
-
         xs = jnp.concatenate((xs, x_last[None]))
-
         betas = jnp.concatenate((betas, beta_last[None]))
 
-        k = len(alphas) - 1
-        nu_k, lambda_k = _bwd_init(
-            dx_Kplus=dxs[k + 1],
-            da_K=dalphas[k],
-            db_K=dbetas[k],
-            b_K=betas[k],
-            x_Kplus=xs[k + 1],
-            x_K=xs[k],
+        # Initialise the states
+        nu, lambda_k = _bwd_init(
+            dx_Kplus=dxs[-1],
+            da_K=dalphas[-1],
+            db_K=dbetas[-1],
+            b_K=betas[-1],
+            x_Ks=(xs[-1], xs[-2]),
+        )
+        zeros = jnp.zeros_like(lambda_k)
+        lambdas = (zeros, lambda_k)
+
+        # Scan over the remaining inputs
+
+        loop_over = (
+            dxs[1:-1],
+            dalphas[:-1],
+            dbetas[:-1],
+            (xs[2:], xs[1:-1], xs[:-2]),
+            alphas[1:],
+            (betas[1:], betas[:-1]),
+        )
+        init_val = (nu, lambdas)
+
+        def body_fun(carry, x):
+            nu_, lambdas_ = carry
+            output_ = _bwd_step(nu_, lambdas_, inputs=x, params=params)
+            nu_, lambda_k, da_increment = output_
+            lambdas_ = (lambdas_[1], lambda_k)
+            return (nu_, lambdas_), da_increment
+
+        (nu, lambdas), dAs = jax.lax.scan(
+            body_fun,
+            init=init_val,
+            xs=loop_over,
+            reverse=True,
         )
 
-        # todo: for multiple parameters, this should be a tree_zeros!
-        dA = 0.0
+        # Conclude the final step:
 
-        lambda_kplus = jnp.zeros_like(lambda_k)
-        lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
-
-        for k in range(len(alphas) - 1, 0, -1):
-            nu_k, lambda_k, dA_increment = _bwd_step(
-                *params,
-                dx_K=dxs[k],
-                da_Kminus=dalphas[k - 1],
-                db_Kminus=dbetas[k - 1],
-                lambda_kplus=lambda_kplus,
-                a_K=alphas[k],
-                b_K=betas[k],
-                lambda_Kplusplus=lambda_kplusplus,
-                b_Kminus=betas[k - 1],
-                nu_K=nu_k,
-                x_Kplus=xs[k + 1],
-                x_K=xs[k],
-                x_Kminus=xs[k - 1],
-            )
-
-            # todo: for multiple parameters, this should be a tree_add!
-            dA += dA_increment
-            lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
-
-        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
-        (dA_increment,) = vjp(xs[0])
-        lambda_1 = (
-            betas[0] * lambda_kplusplus
-            - Av
-            + alphas[0] * lambda_kplus
-            - nu_k * xs[1]
-            - dxs[0]
+        lambda_1, dA_increment = _bwd_final(
+            params=params,
+            lambdas=lambdas,
+            nu_K=nu,
+            b_K=betas[0],
+            a_K=alphas[0],
+            x_Ks=(xs[1], xs[0]),
+            dx_K=dxs[0],
         )
 
-        dA += dA_increment
+        # Compute the gradients
+        dA = jnp.sum(dAs, axis=0) + dA_increment
         dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
         return dv, dA
 
-    def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
+    def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Ks):
+        # Read inputs
+        x_Kplus, x_K = x_Ks
+
+        # Apply formula
         mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
         nu_K = da_K * b_K - x_K.T @ dx_Kplus
         lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
         return nu_K, lambda_Kplus
 
-    def _bwd_step(
-        *params,
-        dx_K,
-        db_Kminus,
-        da_Kminus,
-        lambda_kplus,
-        a_K,
-        b_K,
-        lambda_Kplusplus,
-        b_Kminus,
-        nu_K,
-        x_Kplus,
-        x_K,
-        x_Kminus,
-    ):
+    def _bwd_step(nu_K, lambdas, /, *, inputs, params):
+        dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
+
+        lambda_Kplusplus, lambda_kplus = lambdas
+        x_Kplus, x_K, x_Kminus = x_Ks
+        b_K, b_Kminus = b_Ks
+
         Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
         (dA_increment,) = vjp(x_K)
+
         xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
         mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
         nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
         lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
         return nu_Kminus, lambda_K, dA_increment
+
+    def _bwd_final(*, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
+        x1, x0 = x_Ks
+        lambda_Kplus, lambda_K = lambdas
+
+        Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
+        (dA_increment,) = vjp(x0)
+
+        lambda_1 = b_K * lambda_Kplus - Av + a_K * lambda_K - nu_K * x1 - dx_K
+        return lambda_1, dA_increment
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
