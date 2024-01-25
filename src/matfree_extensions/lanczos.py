@@ -186,7 +186,9 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             x_K=xs[k],
         )
 
+        # todo: for multiple parameters, this should be a tree_zeros!
         dA = 0.0
+
         lambda_kplus = jnp.zeros_like(lambda_k)
         lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
@@ -206,6 +208,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
                 x_K=xs[k],
                 x_Kminus=xs[k - 1],
             )
+
+            # todo: for multiple parameters, this should be a tree_add!
             dA += dA_increment
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
