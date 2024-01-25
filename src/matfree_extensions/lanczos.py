@@ -167,10 +167,6 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
     def estimate_bwd(cache, vjp_incoming):
         (dxs, (dalphas, dbetas)), (dx_last, dbeta_last) = vjp_incoming
-        # todo:
-        #  once the gradients are the same
-        #  derive the parameter-derivative (on paper) so we can use
-        #  the correct derivative wrt a _symmetric_ matrix (not any matrix)
 
         dxs = jnp.concatenate((dxs, dx_last[None]))
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
@@ -189,15 +185,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             x_Kplus=xs[k + 1],
             x_K=xs[k],
         )
-        # _, vjp = jax.vjp(lambda *p: matvec(lambda_k, *p), *params)
-        # (dA,) = vjp(xs[k])
-        # dA = jnp.outer(lambda_k, xs[k])
 
-        # a-constraint
-        # assert jnp.allclose(lambda_k.T @ xs[k], dalphas[k])
-
-        # b-constraint
-        # assert jnp.allclose(lambda_k.T @ xs[k + 1], dbetas[k])
         dA = 0.0
         lambda_kplus = jnp.zeros_like(lambda_k)
         lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
@@ -219,16 +207,6 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
                 x_Kminus=xs[k - 1],
             )
             dA += dA_increment
-            # a-constraint
-            # assert jnp.allclose(lambda_kplus.T @ xs[k], dalphas[k])
-
-            # b-constraint
-            # assert jnp.allclose(
-            #     lambda_kplusplus.T @ xs[k] + lambda_kplus.T @ xs[k + 1], dbetas[k]
-            # )
-            # Update
-            # dA += jnp.outer(lambda_k, xs[k - 1])
-
             lambda_kplusplus, lambda_kplus = lambda_kplus, lambda_k
 
         Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
@@ -240,10 +218,9 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             - nu_k * xs[1]
             - dxs[0]
         )
-        dA += dA_increment
 
-        # todo: if we all non-normalised vectors, divide dv by the norm (accordingly)
-        dv = (-lambda_1 + (lambda_1.T @ xs[0]) * xs[0]) / jnp.linalg.norm(vector)
+        dA += dA_increment
+        dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
         return dv, dA
 
     def _bwd_init(dx_Kplus, da_K, db_K, b_K, x_Kplus, x_K):
