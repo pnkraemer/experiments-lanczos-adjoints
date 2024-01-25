@@ -9,7 +9,7 @@ import jax.numpy as jnp
 
 from matfree_extensions import lanczos
 
-n = 1_000
+n = 10_000
 seed = 1
 
 
@@ -23,7 +23,7 @@ vector = jax.random.normal(jax.random.PRNGKey(seed + 1), shape=(n,))
 flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))
 
 krylov_depth = 1
-while (krylov_depth := 2 * krylov_depth) < n:
+while (krylov_depth := 2 * (krylov_depth)) < n:
     print("Krylov-depth:", krylov_depth)
 
     # Construct an vector-to-vector decomposition function
@@ -39,29 +39,39 @@ while (krylov_depth := 2 * krylov_depth) < n:
     implementation = jax.jit(functools.partial(decompose, custom_vjp=True))
 
     # Compute both VJPs
-    fx_ref, vjp_ref = jax.vjp(reference, flat)
-    fx_imp, vjp_imp = jax.vjp(implementation, flat)
-    # Assert that the forward-passes are identical
-    assert jnp.allclose(fx_ref, fx_imp)
 
-    # Assert that the VJPs into a bunch of random directions are identical
+    # Compute a VJP into a random direction
+    # (This ignores potential symmetry/orthogonality constraints of the outputs.
+    # But we only care about speed at this point, so it is fine.)
     key = jax.random.PRNGKey(seed + 2)
     dnu = jax.random.normal(key, shape=jnp.shape(reference(flat)))
 
-    # assert jnp.allclose(*vjp_ref(dnu), *vjp_imp(dnu), atol=1e-4, rtol=1e-4)
-
-    t0 = time.perf_counter()
-    for _ in range(2):
-        _ = vjp_ref(dnu)[0].block_until_ready()
-    t1 = time.perf_counter()
-    time_autodiff = (t1 - t0) / 2
-    print("Time (AutoDiff):", time_autodiff)
-
+    fx_imp, vjp_imp = jax.vjp(implementation, flat)
+    vjp_imp = jax.jit(vjp_imp)
+    _ = vjp_imp(dnu)[0].block_until_ready()
     t0 = time.perf_counter()
     for _ in range(2):
         _ = vjp_imp(dnu)[0].block_until_ready()
     t1 = time.perf_counter()
     time_custom = (t1 - t0) / 2
-    print("Time (custom VJP):", time_custom)
-    print("Ratio:", time_custom / time_autodiff)
+    print("Time (custom VJP):\n\t", time_custom)
+
+    if krylov_depth < 150:
+        fx_ref, vjp_ref = jax.vjp(reference, flat)
+        vjp_ref = jax.jit(vjp_ref)
+
+        _ = vjp_ref(dnu)[0].block_until_ready()
+
+        t0 = time.perf_counter()
+        for _ in range(2):
+            _ = vjp_ref(dnu)[0].block_until_ready()
+        t1 = time.perf_counter()
+        time_autodiff = (t1 - t0) / 2
+        print("Time (AutoDiff):\n\t", time_autodiff)
+
+        diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
+        diff = jnp.linalg.norm(diff / jnp.abs(vjp_imp(dnu)[0])) / jnp.sqrt(diff.size)
+        print("Norm of output difference:\n\t", diff)
+        print("Ratio (small is good):\n\t", time_custom / time_autodiff)
+
     print()
