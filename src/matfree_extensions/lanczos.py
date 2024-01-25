@@ -82,3 +82,83 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     quadform.defvjp(quadform_fwd, quadform_bwd)
 
     return quadform
+
+
+def tridiag(matvec, krylov_depth, /):
+    def estimate(vec, *params):
+        # Pre-allocate
+        vectors = jnp.zeros((krylov_depth + 1, len(vec)))
+        offdiags = jnp.zeros((krylov_depth,))
+        diags = jnp.zeros((krylov_depth,))
+
+        # Normalize (not all Lanczos implementations do that)
+        v0 = vec / jnp.linalg.norm(vec)
+        vectors = vectors.at[0].set(v0)
+
+        # Lanczos initialisation
+        ((v1, offdiag), diag) = _fwd_init(v0, *params)
+
+        # Store results
+        k = 0
+        vectors = vectors.at[k + 1].set(v1)
+        offdiags = offdiags.at[k].set(offdiag)
+        diags = diags.at[k].set(diag)
+
+        # Run Lanczos-loop
+        body_fun = _prepare_lanczos_body(*params)
+        init = (v1, offdiag, v0), (vectors, diags, offdiags)
+        _, (vectors, diags, offdiags) = jax.lax.fori_loop(
+            lower=1, upper=krylov_depth, body_fun=body_fun, init_val=init
+        )
+
+        # Reorganise the outputs
+        decomposition = vectors[:-1], (diags, offdiags[:-1])
+        remainder = vectors[-1], offdiags[-1]
+        return decomposition, remainder
+
+    def _prepare_lanczos_body(*params):
+        def step(i, val):
+            (v1, offdiag, v0), (vectors, diags, offdiags) = val
+            ((v1, offdiag), diag), v0 = _fwd_step(v1, offdiag, v0, *params), v1
+
+            # Reorthogonalisation
+            v1 = v1 - vectors.T @ (vectors @ v1)
+            v1 /= jnp.linalg.norm(v1)
+
+            # Store results
+            vectors = vectors.at[i + 1].set(v1)
+            offdiags = offdiags.at[i].set(offdiag)
+            diags = diags.at[i].set(diag)
+
+            return (v1, offdiag, v0), (vectors, diags, offdiags)
+
+        return step
+
+    def _fwd_init(vec, *params):
+        """Initialize Lanczos' algorithm.
+
+        Solve A x_{k} = a_k x_k + b_k x_{k+1}
+        for x_{k+1}, a_k, and b_k, using
+        orthogonality of the x_k.
+        """
+        a = vec @ (matvec(vec, *params))
+        r = (matvec(vec, *params)) - a * vec
+        b = jnp.linalg.norm(r)
+        x = r / b
+        return (x, b), a
+
+    def _fwd_step(vec, b, vec_previous, *params):
+        """Apply Lanczos' recurrence.
+
+        Solve
+        A x_{k} = b_{k-1} x_{k-1} + a_k x_k + b_k x_{k+1}
+        for x_{k+1}, a_k, and b_k, using
+        orthogonality of the x_k.
+        """
+        a = vec @ (matvec(vec, *params))
+        r = matvec(vec, *params) - a * vec - b * vec_previous
+        b = jnp.linalg.norm(r)
+        x = r / b
+        return (x, b), a
+
+    return estimate
