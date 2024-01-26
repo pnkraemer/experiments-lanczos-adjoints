@@ -1,20 +1,38 @@
-"""Implement a first small benchmark."""
+"""Measure the vjp-wall-time for a sparse matrix."""
 
 
 import functools
 import time
 
+import jax.experimental.sparse
 import jax.flatten_util
 import jax.numpy as jnp
 
-from matfree_extensions import lanczos
+from matfree_extensions import exp_util, lanczos
 
-n = 10_000
+# n = 10_000
 seed = 1
 
 
 # Set up a test-matrix
-params = jax.random.uniform(jax.random.PRNGKey(seed), shape=(n,))
+# "t2dal_e" is diagonal, spd, and nicely small (5_000x5_000)
+# "bloweybq" is not diagonal, spd, and nicely large
+# "t3dl_e" is diagonal, spd, and nicely large (20_000x20_000)
+matrix_which = "t3dl_e"
+path = "./data/matrices/"
+M = exp_util.suite_sparse_load(matrix_which, path=path)
+
+params, params_unflatten = jax.flatten_util.ravel_pytree(M.data)
+
+
+@jax.jit
+def matvec(x, p):
+    pp = params_unflatten(p)
+    P = jax.experimental.sparse.BCOO((pp, M.indices), shape=M.shape)
+    return P @ x
+
+
+n = M.shape[0]
 
 # Set up an initial vector
 vector = jax.random.normal(jax.random.PRNGKey(seed + 1), shape=(n,))
@@ -23,14 +41,12 @@ vector = jax.random.normal(jax.random.PRNGKey(seed + 1), shape=(n,))
 flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))
 
 krylov_depth = 1
-while (krylov_depth := 2 * (krylov_depth)) < n:
+while (krylov_depth := 2 * krylov_depth) < 64:
     print("Krylov-depth:", krylov_depth)
 
     # Construct an vector-to-vector decomposition function
     def decompose(f, *, custom_vjp):
-        algorithm = lanczos.tridiag(
-            lambda s, p: p * s, krylov_depth, custom_vjp=custom_vjp
-        )
+        algorithm = lanczos.tridiag(matvec, krylov_depth, custom_vjp=custom_vjp)
         output = algorithm(*unflatten(f))
         return jax.flatten_util.ravel_pytree(output)[0]
 
@@ -47,6 +63,15 @@ while (krylov_depth := 2 * (krylov_depth)) < n:
     dnu = jax.random.normal(key, shape=jnp.shape(reference(flat)))
 
     fx_imp, vjp_imp = jax.vjp(implementation, flat)
+
+    _ = implementation(flat).block_until_ready()
+    t0 = time.perf_counter()
+    for _ in range(2):
+        _ = implementation(flat).block_until_ready()
+    t1 = time.perf_counter()
+    time_fwdpass = (t1 - t0) / 2
+    print("Time (forward pass):\n\t", time_fwdpass)
+
     vjp_imp = jax.jit(vjp_imp)
     _ = vjp_imp(dnu)[0].block_until_ready()
     t0 = time.perf_counter()
@@ -71,7 +96,9 @@ while (krylov_depth := 2 * (krylov_depth)) < n:
 
         diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
         diff = jnp.linalg.norm(diff / jnp.abs(vjp_imp(dnu)[0])) / jnp.sqrt(diff.size)
-        print("Norm of output difference:\n\t", diff)
-        print("Ratio (small is good):\n\t", time_custom / time_autodiff)
+        print("Norm of VJP-difference:\n\t", diff)
+        print(
+            "Ratio of VJP run times (small is good):\n\t", time_custom / time_autodiff
+        )
 
     print()
