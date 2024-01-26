@@ -1,7 +1,7 @@
 """Measure the vjp-wall-time for a sparse matrix."""
 
-
 import functools
+import os
 import time
 
 import jax.experimental.sparse
@@ -40,9 +40,18 @@ vector = jax.random.normal(jax.random.PRNGKey(seed + 1), shape=(n,))
 # Flatten the inputs
 flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))
 
+krylov_depths = []
+times_fwdpass = []
+times_custom = []
+times_autodiff = []
+norms_of_differences = []
+
 krylov_depth = 1
-while (krylov_depth := 2 * krylov_depth) < 64:
+# while (krylov_depth := 2 * krylov_depth) < 64:
+for krylov_depth in jnp.arange(1, 51, step=10):
+    krylov_depth = int(krylov_depth)
     print("Krylov-depth:", krylov_depth)
+    krylov_depths.append(krylov_depth)
 
     # Construct an vector-to-vector decomposition function
     def decompose(f, *, custom_vjp):
@@ -70,6 +79,7 @@ while (krylov_depth := 2 * krylov_depth) < 64:
         _ = implementation(flat).block_until_ready()
     t1 = time.perf_counter()
     time_fwdpass = (t1 - t0) / 2
+    times_fwdpass.append(time_fwdpass)
     print("Time (forward pass):\n\t", time_fwdpass)
 
     vjp_imp = jax.jit(vjp_imp)
@@ -79,6 +89,7 @@ while (krylov_depth := 2 * krylov_depth) < 64:
         _ = vjp_imp(dnu)[0].block_until_ready()
     t1 = time.perf_counter()
     time_custom = (t1 - t0) / 2
+    times_custom.append(time_custom)
     print("Time (custom VJP):\n\t", time_custom)
 
     if krylov_depth < 150:
@@ -92,13 +103,27 @@ while (krylov_depth := 2 * krylov_depth) < 64:
             _ = vjp_ref(dnu)[0].block_until_ready()
         t1 = time.perf_counter()
         time_autodiff = (t1 - t0) / 2
+        times_autodiff.append(time_autodiff)
         print("Time (AutoDiff):\n\t", time_autodiff)
 
         diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
         diff = jnp.linalg.norm(diff / jnp.abs(vjp_imp(dnu)[0])) / jnp.sqrt(diff.size)
+        norms_of_differences.append(diff)
         print("Norm of VJP-difference:\n\t", diff)
         print(
             "Ratio of VJP run times (small is good):\n\t", time_custom / time_autodiff
         )
 
     print()
+
+
+directory = exp_util.matching_directory(__file__, "data/")
+os.makedirs(directory, exist_ok=True)
+jnp.save(f"{directory}/{matrix_which}_krylov_depths.npy", jnp.asarray(krylov_depths))
+jnp.save(f"{directory}/{matrix_which}_times_fwdpass.npy", jnp.asarray(times_fwdpass))
+jnp.save(f"{directory}/{matrix_which}_times_custom.npy", jnp.asarray(times_custom))
+jnp.save(f"{directory}/{matrix_which}_times_autodiff.npy", jnp.asarray(times_autodiff))
+jnp.save(
+    f"{directory}/{matrix_which}_norms_of_differences.npy",
+    jnp.asarray(norms_of_differences),
+)
