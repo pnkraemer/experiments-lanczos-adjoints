@@ -16,7 +16,7 @@ def test_full_rank_reconstruction_is_exact():
     vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
 
     # Run Lanczos approximation
-    algorithm = lanczos.tridiag(lambda s, p: p @ s, len(vector))
+    algorithm = lanczos.tridiag(lambda s, p: p @ s, len(vector), custom_vjp=True)
     (lanczos_vectors, tridiag), _ = algorithm(vector, matrix)
 
     # Reconstruct the original matrix from the full-order approximation
@@ -47,7 +47,7 @@ def test_mid_rank_reconstruction_satisfies_decomposition(n, krylov_depth):
 
     # Run Lanczos approximation
     krylov_depth = len(eigvals_relevant)
-    algorithm = lanczos.tridiag(lambda s, p: p @ s, krylov_depth)
+    algorithm = lanczos.tridiag(lambda s, p: p @ s, krylov_depth, custom_vjp=True)
     (lanczos_vectors, tridiag), (q, b) = algorithm(vector, matrix)
 
     # Verify the decomposition

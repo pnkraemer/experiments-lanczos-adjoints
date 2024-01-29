@@ -237,10 +237,15 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         x_Kplus, x_K = x_Ks
 
         # Apply formula
-        mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
-        nu_K = da_K * b_K - x_K.T @ dx_Kplus
-        lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
-        return nu_K, lambda_Kplus
+        # mu_K = db_K * b_K - x_Kplus.T @ dx_Kplus
+        # nu_K = da_K * b_K - x_K.T @ dx_Kplus
+        # lambda_Kplus = (dx_Kplus + mu_K * x_Kplus + nu_K * x_K) / b_K
+        # return nu_K, lambda_Kplus
+        xi = dx_Kplus / b_K
+        mu_K = db_K - x_Kplus.T @ xi
+        nu_K = da_K - x_K.T @ xi
+        lambda_Kplus = xi + mu_K * x_Kplus + nu_K * x_K
+        return nu_K * b_K, lambda_Kplus
 
     def _bwd_step(nu_K, lambdas, /, *, inputs, params):
         dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
@@ -252,11 +257,18 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
         (dA_increment,) = vjp(x_K)
 
+        # Apply formula
+        # xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
+        # mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
+        # nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
+        # lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
+        # return nu_Kminus, lambda_K, dA_increment
         xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
-        mu_Kminus = b_Kminus * (db_Kminus - lambda_kplus @ x_Kminus) - x_K.T @ xi
-        nu_Kminus = b_Kminus * da_Kminus - x_Kminus.T @ xi
-        lambda_K = (xi + mu_Kminus * x_K + nu_Kminus * x_Kminus) / b_Kminus
-        return nu_Kminus, lambda_K, dA_increment
+        xi /= b_Kminus
+        mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
+        nu_Kminus = da_Kminus - x_Kminus.T @ xi
+        lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
+        return nu_Kminus * b_Kminus, lambda_K, dA_increment
 
     def _bwd_final(*, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
         x1, x0 = x_Ks
