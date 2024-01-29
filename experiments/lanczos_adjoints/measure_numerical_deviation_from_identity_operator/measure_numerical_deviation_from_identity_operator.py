@@ -77,10 +77,13 @@ def root_mean_square_error(x, y, /):
 
 
 if __name__ == "__main__":
-    output = evaluate_numerical_deviation_from_identity(custom_vjp=False, n=2)
-    received, expected = output
-    rmse = root_mean_square_error(received, expected)
+    # Currently, the accuracy of the custom vjp sucks.
+    # I suspect a loss of something "orthogonality"-like.
+    custom_vjp = True
+    for n in [4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52]:
+        output = evaluate_numerical_deviation_from_identity(custom_vjp=custom_vjp, n=n)
+        received, expected = output
+        rmse = root_mean_square_error(received, expected)
 
-    print(received - received.T)
-    print()
-    print(rmse)
+        print()
+        print(f"custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
