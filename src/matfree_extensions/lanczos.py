@@ -87,79 +87,7 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
 
 def tridiag(matvec, krylov_depth, /, *, custom_vjp):
     def estimate(vec, *params):
-        # Pre-allocate
-        vectors = jnp.zeros((krylov_depth + 1, len(vec)))
-        offdiags = jnp.zeros((krylov_depth,))
-        diags = jnp.zeros((krylov_depth,))
-
-        # Normalize (not all Lanczos implementations do that)
-        v0 = vec / jnp.linalg.norm(vec)
-        vectors = vectors.at[0].set(v0)
-
-        # Lanczos initialisation
-        ((v1, offdiag), diag) = _fwd_init(v0, *params)
-
-        # Store results
-        k = 0
-        vectors = vectors.at[k + 1].set(v1)
-        offdiags = offdiags.at[k].set(offdiag)
-        diags = diags.at[k].set(diag)
-
-        # Run Lanczos-loop
-        init = (v1, offdiag, v0), (vectors, diags, offdiags)
-        _, (vectors, diags, offdiags) = jax.lax.fori_loop(
-            lower=1,
-            upper=krylov_depth,
-            body_fun=functools.partial(_fwd_step, params),
-            init_val=init,
-        )
-
-        # Reorganise the outputs
-        decomposition = vectors[:-1], (diags, offdiags[:-1])
-        remainder = vectors[-1], offdiags[-1]
-        return decomposition, remainder
-
-    def _fwd_init(vec, *params):
-        """Initialize Lanczos' algorithm.
-
-        Solve A x_{k} = a_k x_k + b_k x_{k+1}
-        for x_{k+1}, a_k, and b_k, using
-        orthogonality of the x_k.
-        """
-        a = vec @ (matvec(vec, *params))
-        r = (matvec(vec, *params)) - a * vec
-        b = jnp.linalg.norm(r)
-        x = r / b
-        return (x, b), a
-
-    def _fwd_step(params, i, val):
-        (v1, offdiag, v0), (vectors, diags, offdiags) = val
-        ((v1, offdiag), diag), v0 = _fwd_step_apply(v1, offdiag, v0, *params), v1
-
-        # Reorthogonalisation
-        v1 = v1 - vectors.T @ (vectors @ v1)
-        v1 /= jnp.linalg.norm(v1)
-
-        # Store results
-        vectors = vectors.at[i + 1].set(v1)
-        offdiags = offdiags.at[i].set(offdiag)
-        diags = diags.at[i].set(diag)
-
-        return (v1, offdiag, v0), (vectors, diags, offdiags)
-
-    def _fwd_step_apply(vec, b, vec_previous, *params):
-        """Apply Lanczos' recurrence.
-
-        Solve
-        A x_{k} = b_{k-1} x_{k-1} + a_k x_k + b_k x_{k+1}
-        for x_{k+1}, a_k, and b_k, using
-        orthogonality of the x_k.
-        """
-        a = vec @ (matvec(vec, *params))
-        r = matvec(vec, *params) - a * vec - b * vec_previous
-        b = jnp.linalg.norm(r)
-        x = r / b
-        return (x, b), a
+        return forward(matvec, krylov_depth, vec, *params)
 
     def estimate_fwd(vec, *params):
         value = estimate(vec, *params)
@@ -178,101 +106,195 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         xs = jnp.concatenate((xs, x_last[None]))
         betas = jnp.concatenate((betas, beta_last[None]))
 
-        # Initialise the states
-        nu, lambda_k = _bwd_init(
-            dx_Kplus=dxs[-1],
-            da_K=dalphas[-1],
-            db_K=dbetas[-1],
-            b_K=betas[-1],
-            x_Ks=(xs[-1], xs[-2]),
-        )
-        zeros = jnp.zeros_like(lambda_k)
-        lambdas = (zeros, lambda_k)
-
-        # Scan over the remaining inputs
-
-        loop_over = (
-            dxs[1:-1],
-            dalphas[:-1],
-            dbetas[:-1],
-            (xs[2:], xs[1:-1], xs[:-2]),
-            alphas[1:],
-            (betas[1:], betas[:-1]),
-        )
-        init_val = (nu, lambdas)
-
-        def body_fun(carry, x):
-            nu_, lambdas_ = carry
-            output_ = _bwd_step(nu_, lambdas_, inputs=x, params=params)
-            nu_, lambda_k, da_increment = output_
-            lambdas_ = (lambdas_[1], lambda_k)
-            return (nu_, lambdas_), da_increment
-
-        (nu, lambdas), dAs = jax.lax.scan(
-            body_fun,
-            init=init_val,
-            xs=loop_over,
-            reverse=True,
-        )
-
-        # Conclude the final step:
-
-        lambda_1, dA_increment = _bwd_final(
+        return adjoint(
+            matvec,
+            alphas=alphas,
+            betas=betas,
+            dalphas=dalphas,
+            dbetas=dbetas,
+            dxs=dxs,
             params=params,
-            lambdas=lambdas,
-            nu_K=nu,
-            b_K=betas[0],
-            a_K=alphas[0],
-            x_Ks=(xs[1], xs[0]),
-            dx_K=dxs[0],
+            vector=vector,
+            xs=xs,
         )
-
-        # Compute the gradients
-        dA = jnp.sum(dAs, axis=0) + dA_increment
-        dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
-        return dv, dA
-
-    def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Ks):
-        # Read inputs
-        x_Kplus, x_K = x_Ks
-
-        # Apply formula
-        xi = dx_Kplus / b_K
-        mu_K = db_K - x_Kplus.T @ xi
-        nu_K = da_K - x_K.T @ xi
-        lambda_Kplus = xi + mu_K * x_Kplus + nu_K * x_K
-        return nu_K * b_K, lambda_Kplus
-
-    def _bwd_step(nu_K, lambdas, /, *, inputs, params):
-        dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
-
-        lambda_Kplusplus, lambda_kplus = lambdas
-        x_Kplus, x_K, x_Kminus = x_Ks
-        b_K, b_Kminus = b_Ks
-
-        Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
-        (dA_increment,) = vjp(x_K)
-
-        # Apply formula
-        xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
-        xi /= b_Kminus
-        mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
-        nu_Kminus = da_Kminus - x_Kminus.T @ xi
-        lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
-        return nu_Kminus * b_Kminus, lambda_K, dA_increment
-
-    def _bwd_final(*, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
-        x1, x0 = x_Ks
-        lambda_Kplus, lambda_K = lambdas
-
-        Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
-        (dA_increment,) = vjp(x0)
-
-        lambda_1 = b_K * lambda_Kplus - Av + a_K * lambda_K - nu_K * x1 - dx_K
-        return lambda_1, dA_increment
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
         estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
 
     return estimate
+
+
+def forward(matvec, krylov_depth, vec, *params):
+    # Pre-allocate
+    vectors = jnp.zeros((krylov_depth + 1, len(vec)))
+    offdiags = jnp.zeros((krylov_depth,))
+    diags = jnp.zeros((krylov_depth,))
+
+    # Normalize (not all Lanczos implementations do that)
+    v0 = vec / jnp.linalg.norm(vec)
+    vectors = vectors.at[0].set(v0)
+
+    # Lanczos initialisation
+    ((v1, offdiag), diag) = _fwd_init(matvec, v0, *params)
+
+    # Store results
+    k = 0
+    vectors = vectors.at[k + 1].set(v1)
+    offdiags = offdiags.at[k].set(offdiag)
+    diags = diags.at[k].set(diag)
+
+    # Run Lanczos-loop
+    init = (v1, offdiag, v0), (vectors, diags, offdiags)
+    _, (vectors, diags, offdiags) = jax.lax.fori_loop(
+        lower=1,
+        upper=krylov_depth,
+        body_fun=functools.partial(_fwd_step, matvec, params),
+        init_val=init,
+    )
+
+    # Reorganise the outputs
+    decomposition = vectors[:-1], (diags, offdiags[:-1])
+    remainder = vectors[-1], offdiags[-1]
+    return decomposition, remainder
+
+
+def _fwd_init(matvec, vec, *params):
+    """Initialize Lanczos' algorithm.
+
+    Solve A x_{k} = a_k x_k + b_k x_{k+1}
+    for x_{k+1}, a_k, and b_k, using
+    orthogonality of the x_k.
+    """
+    a = vec @ (matvec(vec, *params))
+    r = (matvec(vec, *params)) - a * vec
+    b = jnp.linalg.norm(r)
+    x = r / b
+    return (x, b), a
+
+
+def _fwd_step(matvec, params, i, val):
+    (v1, offdiag, v0), (vectors, diags, offdiags) = val
+    ((v1, offdiag), diag), v0 = _fwd_step_apply(matvec, v1, offdiag, v0, *params), v1
+
+    # Reorthogonalisation
+    v1 = v1 - vectors.T @ (vectors @ v1)
+    v1 /= jnp.linalg.norm(v1)
+
+    # Store results
+    vectors = vectors.at[i + 1].set(v1)
+    offdiags = offdiags.at[i].set(offdiag)
+    diags = diags.at[i].set(diag)
+
+    return (v1, offdiag, v0), (vectors, diags, offdiags)
+
+
+def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
+    """Apply Lanczos' recurrence.
+
+    Solve
+    A x_{k} = b_{k-1} x_{k-1} + a_k x_k + b_k x_{k+1}
+    for x_{k+1}, a_k, and b_k, using
+    orthogonality of the x_k.
+    """
+    a = vec @ (matvec(vec, *params))
+    r = matvec(vec, *params) - a * vec - b * vec_previous
+    b = jnp.linalg.norm(r)
+    x = r / b
+    return (x, b), a
+
+
+def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
+    # Initialise the states
+    nu, lambda_k = _bwd_init(
+        dx_Kplus=dxs[-1],
+        da_K=dalphas[-1],
+        db_K=dbetas[-1],
+        b_K=betas[-1],
+        x_Ks=(xs[-1], xs[-2]),
+    )
+    zeros = jnp.zeros_like(lambda_k)
+    lambdas = (zeros, lambda_k)
+
+    # Scan over the remaining inputs
+    loop_over = (
+        dxs[1:-1],
+        dalphas[:-1],
+        dbetas[:-1],
+        (xs[2:], xs[1:-1], xs[:-2]),
+        alphas[1:],
+        (betas[1:], betas[:-1]),
+    )
+    init_val = (nu, lambdas)
+
+    def body_fun(carry, x):
+        nu_, lambdas_ = carry
+        output_ = _bwd_step(matvec, nu_, lambdas_, inputs=x, params=params)
+        nu_, lambda_k, da_increment = output_
+        lambdas_ = (lambdas_[1], lambda_k)
+        return (nu_, lambdas_), da_increment
+
+    (nu, lambdas), dAs = jax.lax.scan(
+        body_fun,
+        init=init_val,
+        xs=loop_over,
+        reverse=True,
+    )
+    # Conclude the final step:
+    # todo: also return all lambdas
+    lambda_1, dA_increment = _bwd_final(
+        matvec,
+        params=params,
+        lambdas=lambdas,
+        nu_K=nu,
+        b_K=betas[0],
+        a_K=alphas[0],
+        x_Ks=(xs[1], xs[0]),
+        dx_K=dxs[0],
+    )
+    # Compute the gradients
+    dA = jnp.sum(dAs, axis=0) + dA_increment
+    dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
+    return dv, dA
+
+
+def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Ks):
+    # Read inputs
+    x_Kplus, x_K = x_Ks
+
+    # Apply formula
+    xi = dx_Kplus / b_K
+    mu_K = db_K - x_Kplus.T @ xi
+    nu_K = da_K - x_K.T @ xi
+    lambda_Kplus = xi + mu_K * x_Kplus + nu_K * x_K
+    return nu_K * b_K, lambda_Kplus
+
+
+def _bwd_step(matvec, nu_K, lambdas, /, *, inputs, params):
+    dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
+
+    lambda_Kplusplus, lambda_kplus = lambdas
+    x_Kplus, x_K, x_Kminus = x_Ks
+    b_K, b_Kminus = b_Ks
+
+    Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
+    (dA_increment,) = vjp(x_K)
+
+    # Apply formula
+    xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
+    xi /= b_Kminus
+    mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
+    nu_Kminus = da_Kminus - x_Kminus.T @ xi
+    lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
+    return nu_Kminus * b_Kminus, lambda_K, dA_increment
+
+
+def _bwd_final(matvec, *, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
+    x1, x0 = x_Ks
+    lambda_Kplus, lambda_K = lambdas
+
+    Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
+    (dA_increment,) = vjp(x0)
+
+    lambda_1 = b_K * lambda_Kplus - Av + a_K * lambda_K - nu_K * x1 - dx_K
+    return lambda_1, dA_increment
