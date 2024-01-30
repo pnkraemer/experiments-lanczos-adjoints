@@ -241,6 +241,7 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         reverse=True,
     )
     # Conclude the final step:
+    # todo: also return all lambdas
     lambda_1, dA_increment = _bwd_final(
         matvec,
         params=params,
