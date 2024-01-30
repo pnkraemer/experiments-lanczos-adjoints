@@ -106,7 +106,17 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         xs = jnp.concatenate((xs, x_last[None]))
         betas = jnp.concatenate((betas, beta_last[None]))
 
-        return adjoint(matvec, alphas, betas, dalphas, dbetas, dxs, params, vector, xs)
+        return adjoint(
+            matvec,
+            alphas=alphas,
+            betas=betas,
+            dalphas=dalphas,
+            dbetas=dbetas,
+            dxs=dxs,
+            params=params,
+            vector=vector,
+            xs=xs,
+        )
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
@@ -194,7 +204,7 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(matvec, alphas, betas, dalphas, dbetas, dxs, params, vector, xs):
+def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     # Initialise the states
     nu, lambda_k = _bwd_init(
         dx_Kplus=dxs[-1],
@@ -205,6 +215,7 @@ def adjoint(matvec, alphas, betas, dalphas, dbetas, dxs, params, vector, xs):
     )
     zeros = jnp.zeros_like(lambda_k)
     lambdas = (zeros, lambda_k)
+
     # Scan over the remaining inputs
     loop_over = (
         dxs[1:-1],
