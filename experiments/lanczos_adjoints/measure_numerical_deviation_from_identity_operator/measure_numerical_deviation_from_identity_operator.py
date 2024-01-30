@@ -77,13 +77,17 @@ def root_mean_square_error(x, y, /):
 
 
 if __name__ == "__main__":
-    # Currently, the accuracy of the custom vjp sucks.
-    # I suspect a loss of something "orthogonality"-like.
-    custom_vjp = True
-    for n in [4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52]:
-        output = evaluate_numerical_deviation_from_identity(custom_vjp=custom_vjp, n=n)
-        received, expected = output
-        rmse = root_mean_square_error(received, expected)
+    # For x64=True, the loss of "orthogonality" (or whatever happens)
+    # ain't terrible, but is clearly visible.
+    jax.config.update("jax_enable_x64", True)
 
-        print()
-        print(f"custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
+    for custom_vjp in [True, False]:
+        for n in [4, 8, 12, 16, 20, 24, 28, 32]:
+            output = evaluate_numerical_deviation_from_identity(
+                custom_vjp=custom_vjp, n=n
+            )
+            received, expected = output
+            rmse = root_mean_square_error(received, expected)
+
+            print()
+            print(f"custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
