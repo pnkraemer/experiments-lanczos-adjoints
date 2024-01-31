@@ -36,7 +36,11 @@ def test_full_rank_reconstruction_is_exact():
 # anything 0 <= k < n works; k=n is full reconstruction and the (q, b) values become meaningless
 @pytest_cases.parametrize("krylov_depth", [0, 5, 11])
 @pytest_cases.parametrize("n", [12])
-def test_mid_rank_reconstruction_satisfies_decomposition(n, krylov_depth):
+@pytest_cases.parametrize("reortho", [True, False])
+@pytest_cases.parametrize("custom_vjp", [True, False])
+def test_mid_rank_reconstruction_satisfies_decomposition(
+    n, krylov_depth, reortho, custom_vjp
+):
     eigvals = jnp.ones((n,), dtype=float) * 0.001
     eigvals_relevant = jnp.arange(1.0, 2.0, step=1 / (krylov_depth + 1))
     eigvals = eigvals.at[: len(eigvals_relevant)].set(eigvals_relevant)
@@ -47,7 +51,9 @@ def test_mid_rank_reconstruction_satisfies_decomposition(n, krylov_depth):
 
     # Run Lanczos approximation
     krylov_depth = len(eigvals_relevant)
-    algorithm = lanczos.tridiag(lambda s, p: p @ s, krylov_depth, custom_vjp=True)
+    algorithm = lanczos.tridiag(
+        lambda s, p: p @ s, krylov_depth, reortho=reortho, custom_vjp=custom_vjp
+    )
     (lanczos_vectors, tridiag), (q, b) = algorithm(vector, matrix)
 
     # Verify the decomposition
