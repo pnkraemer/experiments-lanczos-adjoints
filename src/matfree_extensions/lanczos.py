@@ -203,7 +203,7 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
 
 def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
     def adjoint_step(xi_and_lambda, inputs):
-        return _bwd_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
+        return _adjoint_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
 
     # Scan over all input gradients and output values
     loop_over = {
@@ -230,7 +230,7 @@ def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas,
     return (grad_initvec, grad_matvec), (lambda_1, lambdas)
 
 
-def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
+def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     # Read inputs
     (xplus, x) = xs
 
