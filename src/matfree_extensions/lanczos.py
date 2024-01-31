@@ -80,9 +80,9 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
-def tridiag(matvec, krylov_depth, /, *, custom_vjp):
+def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
     def estimate(vec, *params):
-        return forward(matvec, krylov_depth, vec, *params)
+        return forward(matvec, krylov_depth, vec, *params, reortho=reortho)
 
     def estimate_fwd(vec, *params):
         value = estimate(vec, *params)
@@ -122,7 +122,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
     return estimate
 
 
-def forward(matvec, krylov_depth, vec, *params):
+def forward(matvec, krylov_depth, vec, *params, reortho):
     # Pre-allocate
     vectors = jnp.zeros((krylov_depth + 1, len(vec)))
     offdiags = jnp.zeros((krylov_depth,))
@@ -143,10 +143,11 @@ def forward(matvec, krylov_depth, vec, *params):
 
     # Run Lanczos-loop
     init = (v1, offdiag, v0), (vectors, diags, offdiags)
+    step_fun = functools.partial(_fwd_step, matvec, params, reortho=reortho)
     _, (vectors, diags, offdiags) = jax.lax.fori_loop(
         lower=1,
         upper=krylov_depth,
-        body_fun=functools.partial(_fwd_step, matvec, params),
+        body_fun=step_fun,
         init_val=init,
     )
 
@@ -170,13 +171,14 @@ def _fwd_init(matvec, vec, *params):
     return (x, b), a
 
 
-def _fwd_step(matvec, params, i, val):
+def _fwd_step(matvec, params, i, val, *, reortho: bool):
     (v1, offdiag, v0), (vectors, diags, offdiags) = val
     ((v1, offdiag), diag), v0 = _fwd_step_apply(matvec, v1, offdiag, v0, *params), v1
 
     # Reorthogonalisation
-    v1 = v1 - vectors.T @ (vectors @ v1)
-    v1 /= jnp.linalg.norm(v1)
+    if reortho:
+        v1 = v1 - vectors.T @ (vectors @ v1)
+        v1 /= jnp.linalg.norm(v1)
 
     # Store results
     vectors = vectors.at[i + 1].set(v1)
