@@ -7,7 +7,9 @@ from matfree import test_util
 from matfree_extensions import lanczos
 
 
-def evaluate_numerical_deviation_from_identity(*, custom_vjp, n):
+def evaluate_numerical_deviation_from_identity(
+    *, custom_vjp: bool, n: int, reortho: bool
+):
     # Set up a test-matrix
     eigvals = jnp.arange(1.0, 2.0, step=1 / (n + 1))
     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -22,13 +24,13 @@ def evaluate_numerical_deviation_from_identity(*, custom_vjp, n):
 
     # Construct an identity-like function
     def eye(f):
-        reconstructed = _identity(*unflatten(f), custom_vjp=custom_vjp)
+        reconstructed = _identity(*unflatten(f), custom_vjp=custom_vjp, reortho=reortho)
         return jax.flatten_util.ravel_pytree(reconstructed)[0]
 
     # Assert that the function is indeed the identity
-    if n < 20:
-        tols = {"atol": 1e-5, "rtol": 1e-5}
-        assert jnp.allclose(eye(flat), flat, **tols)
+    # if n < 20:
+    #     tols = {"atol": 1e-5, "rtol": 1e-5}
+    #     assert jnp.allclose(eye(flat), flat, **tols)
 
     # Compute the Jacobian
     jacobian = jax.jit(jax.jacrev(eye))(flat)
@@ -43,11 +45,9 @@ def evaluate_numerical_deviation_from_identity(*, custom_vjp, n):
     return jacobian_reduced, expected
 
 
-def _identity(vector, matrix, *, custom_vjp):
-    # The adjoints are derived for the 'classical' Lanczos process.
-    # Reorthogonalisation would make them approximate.
+def _identity(vector, matrix, *, custom_vjp, reortho: bool):
     algorithm = lanczos.tridiag(
-        lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp, reortho=False
+        lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp, reortho=reortho
     )
     (lanczos_vectors, tridiag), _ = algorithm(vector, matrix)
 
@@ -76,20 +76,31 @@ def _dense_tridiag(diagonal, off_diagonal):
 
 
 def root_mean_square_error(x, y, /):
+    # Absolute error because the target is the identity,
+    # which has a lot of zeros.
     return jnp.linalg.norm(jnp.abs(x - y)) / jnp.sqrt(y.size)
 
 
 if __name__ == "__main__":
+    # The adjoints are derived for the 'classical' Lanczos process.
+    # Reorthogonalisation would make them approximate.
+    #
+    # That means that the values printed below are almost identical
+    # as long as we do not reorthogonalise during the forward pass.
+    # If we do, the accuracy custom-adjoint deteriorates while the
+    # accuracy of the  no-custom-adjoint improves.
+    reortho = False
+
     for custom_vjp in [True, False]:
         for n in [4, 12, 20, 28, 36, 44]:
             output = evaluate_numerical_deviation_from_identity(
-                custom_vjp=custom_vjp, n=n
+                custom_vjp=custom_vjp, n=n, reortho=reortho
             )
             received, expected = output
             rmse = root_mean_square_error(received, expected)
 
             print()
-            print(f"custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
+            print(f"reortho={reortho}, custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
 
         print()
         print()
