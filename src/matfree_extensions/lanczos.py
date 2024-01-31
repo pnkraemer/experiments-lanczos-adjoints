@@ -206,106 +206,7 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
 
 def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     # Initialise the states
-    nu, lambda_k = _bwd_init(
-        dx_Kplus=dxs[-1],
-        da_K=dalphas[-1],
-        db_K=dbetas[-1],
-        b_K=betas[-1],
-        x_Ks=(xs[-1], xs[-2]),
-    )
-    print("lambda", lambda_k)
-    zeros = jnp.zeros_like(lambda_k)
-    lambdas = (zeros, lambda_k)
-
-    # Scan over the remaining inputs
-    loop_over = (
-        dxs[1:-1],
-        dalphas[:-1],
-        dbetas[:-1],
-        (xs[2:], xs[1:-1], xs[:-2]),
-        alphas[1:],
-        (betas[1:], betas[:-1]),
-    )
-    init_val = (nu, lambdas)
-
-    def body_fun(carry, x):
-        nu_, lambdas_ = carry
-        output_ = _bwd_step(matvec, nu_, lambdas_, inputs=x, params=params)
-        nu_, lambda_k, da_increment = output_
-        print("lambda", lambda_k)
-        lambdas_ = (lambdas_[1], lambda_k)
-        return (nu_, lambdas_), da_increment
-
-    (nu, lambdas), dAs = jax.lax.scan(
-        body_fun,
-        init=init_val,
-        xs=loop_over,
-        reverse=True,
-    )
-    # Conclude the final step:
-    # todo: also return all lambdas
-    lambda_1, dA_increment = _bwd_final(
-        matvec,
-        params=params,
-        lambdas=lambdas,
-        nu_K=nu,
-        b_K=betas[0],
-        a_K=alphas[0],
-        x_Ks=(xs[1], xs[0]),
-        dx_K=dxs[0],
-    )
-    print("lambda", lambda_1)
-    # Compute the gradients
-    dA = jnp.sum(dAs, axis=0) + dA_increment
-    dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
-    return dv, dA
-
-
-def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Ks):
-    # Read inputs
-    x_Kplus, x_K = x_Ks
-
-    # Apply formula
-    xi = dx_Kplus / b_K
-    mu_K = db_K - x_Kplus.T @ xi
-    nu_K = da_K - x_K.T @ xi
-    lambda_Kplus = xi + mu_K * x_Kplus + nu_K * x_K
-    return nu_K * b_K, lambda_Kplus
-
-
-def _bwd_step(matvec, nu_K, lambdas, /, *, inputs, params):
-    dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
-
-    lambda_Kplusplus, lambda_kplus = lambdas
-    x_Kplus, x_K, x_Kminus = x_Ks
-    b_K, b_Kminus = b_Ks
-
-    Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
-    (dA_increment,) = vjp(x_K)
-
-    # Apply formula
-    xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
-    xi /= b_Kminus
-    mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
-    nu_Kminus = da_Kminus - x_Kminus.T @ xi
-    lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
-    return nu_Kminus * b_Kminus, lambda_K, dA_increment
-
-
-def _bwd_final(matvec, *, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
-    x1, x0 = x_Ks
-    lambda_Kplus, lambda_K = lambdas
-
-    Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
-    (dA_increment,) = vjp(x0)
-
-    lambda_1 = b_K * lambda_Kplus - Av + a_K * lambda_K - nu_K * x1 - dx_K
-    return lambda_1, dA_increment
-
-
-def adjoint2(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
-    # Initialise the states
-    (xi, lambda_k), dA_increment = _bwd_init2(
+    (xi, lambda_k), dA_increment = _bwd_init(
         matvec,
         da_K=dalphas[-1],
         db_K=dbetas[-1],
@@ -332,7 +233,7 @@ def adjoint2(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs)
 
     def body_fun(carry, x):
         xi_, lambdas_ = carry
-        output_ = _bwd_step2(matvec, xi_, lambdas_, inputs=x, params=params)
+        output_ = _bwd_step(matvec, xi_, lambdas_, inputs=x, params=params)
         (xi_, lambda_k_), da_increment = output_
         print("lambda", lambda_k_)
         lambdas_ = (lambdas_[1], lambda_k_)
@@ -350,20 +251,13 @@ def adjoint2(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs)
     lambda_1 = -xi  # / betas[0]
     print("lambda", lambda_1)
     # # todo: also return all lambdas
-    # lambda_1 = _bwd_final(
-    #     lambdas=lambdas,
-    #     xi=xi,
-    #     b_K=betas[0],
-    #     a_K=alphas[0],
-    #     x_Ks=(xs[1], xs[0]),
-    #     dx_K=dxs[0],
-    # )
+
     # Compute the gradients
     dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
     return dv, dA
 
 
-def _bwd_init2(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
+def _bwd_init(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
     # Read inputs
     x_Kplus, x_K = x_Ks
     dx_Kplus, dx_K = dx_Ks
@@ -384,7 +278,7 @@ def _bwd_init2(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
     return (xi, lambda_Kplus), dA_increment
 
 
-def _bwd_step2(matvec, xi, lambdas, /, *, inputs, params):
+def _bwd_step(matvec, xi, lambdas, /, *, inputs, params):
     dx_Ks, da_Kminus, db_Kminus, x_Ks, a_Kminus, b_Ks = inputs
 
     lambda_Kplusplus, lambda_kplus = lambdas
