@@ -1,5 +1,4 @@
 """Test the tri-diagonalisation."""
-import functools
 
 import jax.flatten_util
 import jax.numpy as jnp
@@ -29,7 +28,11 @@ params = _sym(matrix)
 # Set up an initial vector
 vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
 
-matvec = lambda v, p: (p + p.T) @ v
+
+def matvec(v, p):
+    return (p + p.T) @ v
+
+
 (xs, (alphas, betas)), (x, beta) = lanczos.forward(
     matvec, 5, vector, params, reortho=True
 )

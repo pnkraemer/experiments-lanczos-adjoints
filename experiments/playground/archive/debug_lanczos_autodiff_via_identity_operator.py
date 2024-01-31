@@ -4,7 +4,7 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from matfree import lanczos, test_util
+from matfree import test_util
 
 
 def sym(x):

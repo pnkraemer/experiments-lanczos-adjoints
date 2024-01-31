@@ -2,7 +2,7 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-from matfree import lanczos, test_util
+from matfree import test_util
 
 # While debugging:
 jax.config.update("jax_disable_jit", True)
