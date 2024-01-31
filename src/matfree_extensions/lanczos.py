@@ -253,18 +253,18 @@ def _bwd_init(*, matvec, params, a, b, xs, da, db, dxs):
 
     # Apply formula
     xi = dxplus / b
-    mu_K = db - xplus.T @ xi
-    nu_K = da - x.T @ xi
-    lambda_Kplus = xi + mu_K * xplus + nu_K * x
+    mu = db - xplus.T @ xi
+    nu = da - x.T @ xi
+    lambda_ = xi + mu * xplus + nu * x
+    lambda_plus = jnp.zeros_like(lambda_)
 
-    #
-    Av, vjp = jax.vjp(lambda *p: matvec(lambda_Kplus, *p), *params)
-    (dA_increment,) = vjp(x)
+    # Value-and-grad of matrix-vector product
+    matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
+    (gradient_increment,) = vjp(x)
 
-    # Apply formula
-    lambda_Kplusplus = jnp.zeros_like(lambda_Kplus)
-    xi = dx + Av - a * lambda_Kplus - b * lambda_Kplusplus + b * nu_K * xplus
-    return (xi, lambda_Kplus), dA_increment
+    # Prepare next step
+    xi = dx + matvec_lambda - a * lambda_ - b * lambda_plus + b * nu * xplus
+    return (xi, lambda_), gradient_increment
 
 
 def _bwd_step(matvec, xi, lambda_kplus, /, *, inputs, params):
