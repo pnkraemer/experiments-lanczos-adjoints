@@ -86,7 +86,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
     def estimate_fwd(vec, *params):
         value = estimate(vec, *params)
-        return value, (value, (vec, *params))
+        return value, (value, (jnp.linalg.norm(vec), *params))
 
     # todo: for full-rank decompositions, the final b_K is almost zero
     #  which blows up the initial step of the backward pass already.
@@ -97,11 +97,12 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
 
         # Read the cache and stack related quantities
-        ((xs, (alphas, betas)), (x_last, beta_last)), (vector, *params) = cache
+        ((xs, (alphas, betas)), (x_last, beta_last)), (vector_norm, *params) = cache
         xs = jnp.concatenate((xs, x_last[None]))
         betas = jnp.concatenate((betas, beta_last[None]))
 
-        return adjoint(
+        # Compute the adjoints, discard the adjoint states, and return the gradients
+        grads, _lambdas = adjoint(
             matvec,
             alphas=alphas,
             betas=betas,
@@ -109,9 +110,10 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
             dbetas=dbetas,
             dxs=dxs,
             params=params,
-            vector=vector,
+            vector_norm=vector_norm,
             xs=xs,
         )
+        return grads
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
@@ -199,55 +201,33 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
-    # Initialise the states
-    xi = dxs[-1]
-    lambda_ = jnp.zeros_like(xi)
-    (xi, lambda_k), dA_increment = _bwd_step(
-        xi,
-        lambda_,
-        matvec=matvec,
-        params=params,
-        da=dalphas[-1],
-        db=dbetas[-1],
-        a=alphas[-1],
-        b=betas[-1],
-        dx=dxs[-2],
-        xs=(xs[-1], xs[-2]),
-    )
+def adjoint(matvec, *, params, vector_norm, alphas, betas, xs, dalphas, dbetas, dxs):
+    def adjoint_step(xi_and_lambda, inputs):
+        return _bwd_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
 
-    # Scan over the remaining inputs
+    # Scan over all input gradients and output values
     loop_over = {
-        "dx": dxs[:-2],
-        "da": dalphas[:-1],
-        "db": dbetas[:-1],
-        "xs": (xs[1:-1], xs[:-2]),
-        "a": alphas[:-1],
-        "b": betas[:-1],
+        "dx": dxs[:-1],
+        "da": dalphas,
+        "db": dbetas,
+        "xs": (xs[1:], xs[:-1]),
+        "a": alphas,
+        "b": betas,
     }
-    init_val = (xi, lambda_k)
-
-    def body_fun(carry, inputs):
-        xi_, lambda_k_ = carry
-        output_ = _bwd_step(xi_, lambda_k_, matvec=matvec, params=params, **inputs)
-        (xi_, lambda_k_), da_increment = output_
-        return (xi_, lambda_k_), da_increment
-
-    (xi, lambdas), dAs = jax.lax.scan(
-        body_fun,
+    init_val = (-dxs[-1], jnp.zeros_like(dxs[-1]))
+    (lambda_1, lambdas), grad_summands = jax.lax.scan(
+        adjoint_step,
         init=init_val,
         xs=loop_over,
         reverse=True,
     )
-    dA = jnp.sum(dAs, axis=0) + dA_increment
-
-    # Conclude the final step:
-    lambda_1 = -xi  # / betas[0]
-    # # todo: also return all lambdas
 
     # Compute the gradients
-    dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
-    return dv, dA
+    grad_matvec = jax.tree_util.tree_map(lambda s: jnp.sum(s, axis=0), grad_summands)
+    grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / vector_norm
+
+    # Return values | todo: also return all lambdas
+    return (grad_initvec, grad_matvec), (lambda_1, lambdas)
 
 
 def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
@@ -255,7 +235,7 @@ def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     (xplus, x) = xs
 
     # Apply formula
-    xi /= b
+    xi /= -b
     mu = db - lambda_plus.T @ x - xplus.T @ xi
     nu = da - x.T @ xi
     lambda_ = xi + mu * xplus + nu * x
@@ -268,4 +248,4 @@ def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     xi = dx + matvec_lambda - a * lambda_ - b * lambda_plus + b * nu * xplus
 
     # Return values
-    return (xi, lambda_), gradient_increment
+    return (-xi, lambda_), gradient_increment
