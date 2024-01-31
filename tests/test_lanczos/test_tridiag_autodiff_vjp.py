@@ -21,7 +21,7 @@ def test_vjp(n=10, krylov_order=4):
     # Flatten the inputs
     flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))
 
-    # Construct an vector-to-vector decomposition function
+    # Construct a vector-to-vector decomposition function
     def decompose(f, *, custom_vjp):
         algorithm = lanczos.tridiag(
             lambda s, p: (p + p.T) @ s, krylov_order, custom_vjp=custom_vjp
