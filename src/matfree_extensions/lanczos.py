@@ -213,25 +213,19 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     )
 
     # Scan over the remaining inputs
-    loop_over = (
-        (dxs[:-2]),
-        dalphas[:-1],
-        dbetas[:-1],
-        (xs[1:-1], xs[:-2]),
-        alphas[:-1],
-        (betas[:-1]),
-    )
+    loop_over = {
+        "dx": dxs[:-2],
+        "da": dalphas[:-1],
+        "db": dbetas[:-1],
+        "xs": (xs[1:-1], xs[:-2]),
+        "a": alphas[:-1],
+        "b": betas[:-1],
+    }
     init_val = (xi, lambda_k)
 
-    def body_fun(carry, x):
+    def body_fun(carry, inputs):
         xi_, lambda_k_ = carry
-        output_ = _bwd_step(
-            xi_,
-            lambda_k_,
-            matvec=matvec,
-            params=params,
-            inputs=x,
-        )
+        output_ = _bwd_step(xi_, lambda_k_, matvec=matvec, params=params, **inputs)
         (xi_, lambda_k_), da_increment = output_
         return (xi_, lambda_k_), da_increment
 
@@ -275,9 +269,9 @@ def _bwd_init(*, matvec, params, a, b, xs, da, db, dxs):
     return (xi, lambda_), gradient_increment
 
 
-def _bwd_step(xi, lambda_plus, /, *, matvec, inputs, params):
+def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     # Read inputs
-    dx, da, db, (xplus, x), a, b = inputs
+    (xplus, x) = xs
 
     # Apply formula
     xi /= b
