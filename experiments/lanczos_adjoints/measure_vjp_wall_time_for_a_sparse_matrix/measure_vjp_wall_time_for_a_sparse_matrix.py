@@ -10,6 +10,13 @@ import jax.numpy as jnp
 
 from matfree_extensions import exp_util, lanczos
 
+
+def _rmse_relative(x, y, /, *, nugget):
+    diff_abs = jnp.abs(x - y)
+    normalise = nugget + jnp.abs(y)
+    return jnp.linalg.norm(diff_abs / normalise) / jnp.size(diff_abs)
+
+
 # n = 10_000
 seed = 1
 
@@ -48,14 +55,16 @@ norms_of_differences = []
 
 krylov_depth = 1
 # while (krylov_depth := 2 * krylov_depth) < 64:
-for krylov_depth in jnp.arange(1, 51, step=10):
+for krylov_depth in jnp.arange(1, 100, step=10):
     krylov_depth = int(krylov_depth)
     print("Krylov-depth:", krylov_depth)
     krylov_depths.append(krylov_depth)
 
-    # Construct an vector-to-vector decomposition function
+    # Construct a vector-to-vector decomposition function
     def decompose(f, *, custom_vjp):
-        algorithm = lanczos.tridiag(matvec, krylov_depth, custom_vjp=custom_vjp)
+        algorithm = lanczos.tridiag(
+            matvec, krylov_depth, custom_vjp=custom_vjp, reortho=False
+        )
         output = algorithm(*unflatten(f))
         return jax.flatten_util.ravel_pytree(output)[0]
 
@@ -106,8 +115,8 @@ for krylov_depth in jnp.arange(1, 51, step=10):
         times_autodiff.append(time_autodiff)
         print("Time (AutoDiff):\n\t", time_autodiff)
 
-        diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
-        diff = jnp.linalg.norm(diff / jnp.abs(vjp_imp(dnu)[0])) / jnp.sqrt(diff.size)
+        # diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
+        diff = _rmse_relative(vjp_imp(dnu)[0], vjp_ref(dnu)[0], nugget=1.0)
         norms_of_differences.append(diff)
         print("Norm of VJP-difference:\n\t", diff)
         print(

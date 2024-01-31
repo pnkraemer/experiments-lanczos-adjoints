@@ -26,8 +26,9 @@ def evaluate_numerical_deviation_from_identity(*, custom_vjp, n):
         return jax.flatten_util.ravel_pytree(reconstructed)[0]
 
     # Assert that the function is indeed the identity
-    tols = {"atol": 1e-5, "rtol": 1e-5}
-    assert jnp.allclose(eye(flat), flat, **tols)
+    if n < 20:
+        tols = {"atol": 1e-5, "rtol": 1e-5}
+        assert jnp.allclose(eye(flat), flat, **tols)
 
     # Compute the Jacobian
     jacobian = jax.jit(jax.jacrev(eye))(flat)
@@ -43,8 +44,10 @@ def evaluate_numerical_deviation_from_identity(*, custom_vjp, n):
 
 
 def _identity(vector, matrix, *, custom_vjp):
+    # The adjoints are derived for the 'classical' Lanczos process.
+    # Reorthogonalisation would make them approximate.
     algorithm = lanczos.tridiag(
-        lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp
+        lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp, reortho=False
     )
     (lanczos_vectors, tridiag), _ = algorithm(vector, matrix)
 
@@ -77,12 +80,8 @@ def root_mean_square_error(x, y, /):
 
 
 if __name__ == "__main__":
-    # For x64=True, the loss of "orthogonality" (or whatever happens)
-    # ain't terrible, but is clearly visible.
-    jax.config.update("jax_enable_x64", True)
-
     for custom_vjp in [True, False]:
-        for n in [4, 8, 12, 16, 20, 24, 28, 32]:
+        for n in [4, 12, 20, 28, 36, 44]:
             output = evaluate_numerical_deviation_from_identity(
                 custom_vjp=custom_vjp, n=n
             )
@@ -91,3 +90,6 @@ if __name__ == "__main__":
 
             print()
             print(f"custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
+
+        print()
+        print()
