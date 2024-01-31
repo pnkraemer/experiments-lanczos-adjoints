@@ -235,10 +235,10 @@ def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     (xplus, x) = xs
 
     # Apply formula
-    xi /= -b
-    mu = db - lambda_plus.T @ x - xplus.T @ xi
-    nu = da - x.T @ xi
-    lambda_ = xi + mu * xplus + nu * x
+    xi /= b
+    mu = db - lambda_plus.T @ x + xplus.T @ xi
+    nu = da + x.T @ xi
+    lambda_ = -xi + mu * xplus + nu * x
 
     # Value-and-grad of matrix-vector product
     matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
