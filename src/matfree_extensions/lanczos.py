@@ -213,6 +213,7 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         b_K=betas[-1],
         x_Ks=(xs[-1], xs[-2]),
     )
+    print("lambda", lambda_k)
     zeros = jnp.zeros_like(lambda_k)
     lambdas = (zeros, lambda_k)
 
@@ -231,6 +232,7 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         nu_, lambdas_ = carry
         output_ = _bwd_step(matvec, nu_, lambdas_, inputs=x, params=params)
         nu_, lambda_k, da_increment = output_
+        print("lambda", lambda_k)
         lambdas_ = (lambdas_[1], lambda_k)
         return (nu_, lambdas_), da_increment
 
@@ -252,6 +254,7 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         x_Ks=(xs[1], xs[0]),
         dx_K=dxs[0],
     )
+    print("lambda", lambda_1)
     # Compute the gradients
     dA = jnp.sum(dAs, axis=0) + dA_increment
     dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
@@ -314,6 +317,7 @@ def adjoint2(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs)
     )
     zeros = jnp.zeros_like(lambda_k)
     lambdas = (zeros, lambda_k)
+    print("lambda", lambda_k)
 
     # Scan over the remaining inputs
     loop_over = (
@@ -329,8 +333,9 @@ def adjoint2(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs)
     def body_fun(carry, x):
         xi_, lambdas_ = carry
         output_ = _bwd_step2(matvec, xi_, lambdas_, inputs=x, params=params)
-        (xi_, lambda_k), da_increment = output_
-        lambdas_ = (lambdas_[1], lambda_k)
+        (xi_, lambda_k_), da_increment = output_
+        print("lambda", lambda_k_)
+        lambdas_ = (lambdas_[1], lambda_k_)
         return (xi_, lambdas_), da_increment
 
     (xi, lambdas), dAs = jax.lax.scan(
@@ -342,7 +347,8 @@ def adjoint2(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs)
     dA = jnp.sum(dAs, axis=0) + dA_increment
 
     # Conclude the final step:
-    lambda_1 = xi / betas[0]
+    lambda_1 = -xi  # / betas[0]
+    print("lambda", lambda_1)
     # # todo: also return all lambdas
     # lambda_1 = _bwd_final(
     #     lambdas=lambdas,
@@ -375,7 +381,6 @@ def _bwd_init2(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
     # Apply formula
     lambda_Kplusplus = jnp.zeros_like(lambda_Kplus)
     xi = dx_K + Av - a_K * lambda_Kplus - b_K * lambda_Kplusplus + b_K * nu_K * x_Kplus
-
     return (xi, lambda_Kplus), dA_increment
 
 
