@@ -19,11 +19,6 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     @jax.custom_vjp
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
-        #
-        # This function shall only be meaningful inside a VJP,
-        # thus, we raise a:
-        #
-        raise RuntimeError
 
     def quadform_fwd(v0, *parameters):
         v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
@@ -216,8 +211,6 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         x_Ks=(xs[-1], xs[-2]),
         params=params,
     )
-    zeros = jnp.zeros_like(lambda_k)
-    lambdas = (zeros, lambda_k)
 
     # Scan over the remaining inputs
     loop_over = (
@@ -228,14 +221,13 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         alphas[:-1],
         (betas[1:], betas[:-1]),
     )
-    init_val = (xi, lambdas)
+    init_val = (xi, lambda_k)
 
     def body_fun(carry, x):
-        xi_, lambdas_ = carry
-        output_ = _bwd_step(matvec, xi_, lambdas_, inputs=x, params=params)
+        xi_, lambda_k_ = carry
+        output_ = _bwd_step(matvec, xi_, lambda_k_, inputs=x, params=params)
         (xi_, lambda_k_), da_increment = output_
-        lambdas_ = (lambdas_[1], lambda_k_)
-        return (xi_, lambdas_), da_increment
+        return (xi_, lambda_k_), da_increment
 
     (xi, lambdas), dAs = jax.lax.scan(
         body_fun,
@@ -275,16 +267,12 @@ def _bwd_init(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
     return (xi, lambda_Kplus), dA_increment
 
 
-def _bwd_step(matvec, xi, lambdas, /, *, inputs, params):
+def _bwd_step(matvec, xi, lambda_kplus, /, *, inputs, params):
     dx_Ks, da_Kminus, db_Kminus, x_Ks, a_Kminus, b_Ks = inputs
 
-    lambda_Kplusplus, lambda_kplus = lambdas
     x_Kplus, x_K, x_Kminus = x_Ks
     dx_K, dx_Kminus = dx_Ks
     b_K, b_Kminus = b_Ks
-
-    # Apply formula
-    # xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
 
     # Recover this xi
     xi /= b_Kminus
