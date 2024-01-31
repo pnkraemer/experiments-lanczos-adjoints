@@ -225,7 +225,13 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
 
     def body_fun(carry, x):
         xi_, lambda_k_ = carry
-        output_ = _bwd_step(matvec, xi_, lambda_k_, inputs=x, params=params)
+        output_ = _bwd_step(
+            xi_,
+            lambda_k_,
+            matvec=matvec,
+            params=params,
+            inputs=x,
+        )
         (xi_, lambda_k_), da_increment = output_
         return (xi_, lambda_k_), da_increment
 
@@ -264,27 +270,27 @@ def _bwd_init(*, matvec, params, a, b, xs, da, db, dxs):
 
     # Prepare next step
     xi = dx + matvec_lambda - a * lambda_ - b * lambda_plus + b * nu * xplus
+
+    # Return values
     return (xi, lambda_), gradient_increment
 
 
-def _bwd_step(matvec, xi, lambda_kplus, /, *, inputs, params):
-    dx_Kminus, da_Kminus, db_Kminus, (x_K, x_Kminus), a_Kminus, b_Kminus = inputs
+def _bwd_step(xi, lambda_plus, /, *, matvec, inputs, params):
+    # Read inputs
+    dx, da, db, (xplus, x), a, b = inputs
 
     # Apply formula
-    xi /= b_Kminus
-    mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
-    nu_Kminus = da_Kminus - x_Kminus.T @ xi
-    lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
+    xi /= b
+    mu = db - lambda_plus.T @ x - xplus.T @ xi
+    nu = da - x.T @ xi
+    lambda_ = xi + mu * xplus + nu * x
+
+    # Value-and-grad of matrix-vector product
+    matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
+    (gradient_increment,) = vjp(x)
 
     # Prepare next step
-    Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
-    (dA_increment,) = vjp(x_Kminus)
-    xi = (
-        dx_Kminus
-        + Av
-        - a_Kminus * lambda_K
-        - b_Kminus * lambda_kplus
-        + b_Kminus * nu_Kminus * x_K
-    )
+    xi = dx + matvec_lambda - a * lambda_ - b * lambda_plus + b * nu * xplus
 
-    return (xi, lambda_K), dA_increment
+    # Return values
+    return (xi, lambda_), gradient_increment
