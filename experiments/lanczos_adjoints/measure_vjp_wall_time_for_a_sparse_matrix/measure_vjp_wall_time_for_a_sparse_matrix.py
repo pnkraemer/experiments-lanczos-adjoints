@@ -10,6 +10,13 @@ import jax.numpy as jnp
 
 from matfree_extensions import exp_util, lanczos
 
+
+def _rmse_relative(x, y, /, *, nugget):
+    diff_abs = jnp.abs(x - y)
+    normalise = nugget + jnp.abs(y)
+    return jnp.linalg.norm(diff_abs / normalise) / jnp.size(diff_abs)
+
+
 # n = 10_000
 seed = 1
 
@@ -108,8 +115,8 @@ for krylov_depth in jnp.arange(1, 100, step=10):
         times_autodiff.append(time_autodiff)
         print("Time (AutoDiff):\n\t", time_autodiff)
 
-        diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
-        diff = jnp.linalg.norm(diff / jnp.abs(vjp_ref(dnu)[0])) / jnp.sqrt(diff.size)
+        # diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
+        diff = _rmse_relative(vjp_imp(dnu)[0], vjp_ref(dnu)[0], nugget=1.0)
         norms_of_differences.append(diff)
         print("Norm of VJP-difference:\n\t", diff)
         print(
