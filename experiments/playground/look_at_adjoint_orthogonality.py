@@ -29,8 +29,9 @@ params = _sym(matrix)
 # Set up an initial vector
 vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
 
+matvec = lambda v, p: (p + p.T) @ v
 (xs, (alphas, betas)), (x, beta) = lanczos.forward(
-    lambda v, p: (p + p.T) @ v, 5, vector, params, reortho=True
+    matvec, 5, vector, params, reortho=True
 )
 
 print(xs.shape)
@@ -40,6 +41,24 @@ print(x.shape)
 print(beta.shape)
 
 (dxs, (dalphas, dbetas)), (dx, dbeta) = random_like((xs, (alphas, betas)), (x, beta))
+
+xs = jnp.concatenate([xs, x[None]])
+betas = jnp.concatenate([betas, beta[None]])
+dxs = jnp.concatenate([dxs, dx[None]])
+dbetas = jnp.concatenate([dbetas, dbeta[None]])
+
+
+lanczos.adjoint(
+    matvec=matvec,
+    params=(params,),
+    initvec_norm=jnp.linalg.norm(vector),
+    alphas=alphas,
+    betas=betas,
+    xs=xs,
+    dalphas=dalphas,
+    dbetas=dbetas,
+    dxs=dxs,
+)
 
 print(dxs.shape)
 print(dalphas.shape)
