@@ -19,11 +19,6 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     @jax.custom_vjp
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
-        #
-        # This function shall only be meaningful inside a VJP,
-        # thus, we raise a:
-        #
-        raise RuntimeError
 
     def quadform_fwd(v0, *parameters):
         v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
@@ -91,7 +86,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
     def estimate_fwd(vec, *params):
         value = estimate(vec, *params)
-        return value, (value, (vec, *params))
+        return value, (value, (jnp.linalg.norm(vec), *params))
 
     # todo: for full-rank decompositions, the final b_K is almost zero
     #  which blows up the initial step of the backward pass already.
@@ -102,21 +97,23 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
 
         # Read the cache and stack related quantities
-        ((xs, (alphas, betas)), (x_last, beta_last)), (vector, *params) = cache
+        ((xs, (alphas, betas)), (x_last, beta_last)), (vector_norm, *params) = cache
         xs = jnp.concatenate((xs, x_last[None]))
         betas = jnp.concatenate((betas, beta_last[None]))
 
-        return adjoint(
-            matvec,
+        # Compute the adjoints, discard the adjoint states, and return the gradients
+        grads, _lambdas = adjoint(
+            matvec=matvec,
+            params=params,
+            initvec_norm=vector_norm,
             alphas=alphas,
             betas=betas,
+            xs=xs,
             dalphas=dalphas,
             dbetas=dbetas,
             dxs=dxs,
-            params=params,
-            vector=vector,
-            xs=xs,
         )
+        return grads
 
     if custom_vjp:
         estimate = jax.custom_vjp(estimate)
@@ -204,97 +201,51 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
-    # Initialise the states
-    nu, lambda_k = _bwd_init(
-        dx_Kplus=dxs[-1],
-        da_K=dalphas[-1],
-        db_K=dbetas[-1],
-        b_K=betas[-1],
-        x_Ks=(xs[-1], xs[-2]),
-    )
-    zeros = jnp.zeros_like(lambda_k)
-    lambdas = (zeros, lambda_k)
+def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
+    def adjoint_step(xi_and_lambda, inputs):
+        return _adjoint_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
 
-    # Scan over the remaining inputs
-    loop_over = (
-        dxs[1:-1],
-        dalphas[:-1],
-        dbetas[:-1],
-        (xs[2:], xs[1:-1], xs[:-2]),
-        alphas[1:],
-        (betas[1:], betas[:-1]),
-    )
-    init_val = (nu, lambdas)
-
-    def body_fun(carry, x):
-        nu_, lambdas_ = carry
-        output_ = _bwd_step(matvec, nu_, lambdas_, inputs=x, params=params)
-        nu_, lambda_k, da_increment = output_
-        lambdas_ = (lambdas_[1], lambda_k)
-        return (nu_, lambdas_), da_increment
-
-    (nu, lambdas), dAs = jax.lax.scan(
-        body_fun,
+    # Scan over all input gradients and output values
+    loop_over = {
+        "dx": dxs[:-1],
+        "da": dalphas,
+        "db": dbetas,
+        "xs": (xs[1:], xs[:-1]),
+        "a": alphas,
+        "b": betas,
+    }
+    init_val = (-dxs[-1], jnp.zeros_like(dxs[-1]))
+    (lambda_1, lambdas), grad_summands = jax.lax.scan(
+        adjoint_step,
         init=init_val,
         xs=loop_over,
         reverse=True,
     )
-    # Conclude the final step:
-    # todo: also return all lambdas
-    lambda_1, dA_increment = _bwd_final(
-        matvec,
-        params=params,
-        lambdas=lambdas,
-        nu_K=nu,
-        b_K=betas[0],
-        a_K=alphas[0],
-        x_Ks=(xs[1], xs[0]),
-        dx_K=dxs[0],
-    )
+
     # Compute the gradients
-    dA = jnp.sum(dAs, axis=0) + dA_increment
-    dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
-    return dv, dA
+    grad_matvec = jax.tree_util.tree_map(lambda s: jnp.sum(s, axis=0), grad_summands)
+    grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / initvec_norm
+
+    # Return values
+    return (grad_initvec, grad_matvec), (lambda_1, lambdas)
 
 
-def _bwd_init(*, dx_Kplus, da_K, db_K, b_K, x_Ks):
+def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     # Read inputs
-    x_Kplus, x_K = x_Ks
+    (xplus, x) = xs
 
     # Apply formula
-    xi = dx_Kplus / b_K
-    mu_K = db_K - x_Kplus.T @ xi
-    nu_K = da_K - x_K.T @ xi
-    lambda_Kplus = xi + mu_K * x_Kplus + nu_K * x_K
-    return nu_K * b_K, lambda_Kplus
+    xi /= b
+    mu = db - lambda_plus.T @ x + xplus.T @ xi
+    nu = da + x.T @ xi
+    lambda_ = -xi + mu * xplus + nu * x
 
+    # Value-and-grad of matrix-vector product
+    matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
+    (gradient_increment,) = vjp(x)
 
-def _bwd_step(matvec, nu_K, lambdas, /, *, inputs, params):
-    dx_K, da_Kminus, db_Kminus, x_Ks, a_K, b_Ks = inputs
+    # Prepare next step
+    xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
-    lambda_Kplusplus, lambda_kplus = lambdas
-    x_Kplus, x_K, x_Kminus = x_Ks
-    b_K, b_Kminus = b_Ks
-
-    Av, vjp = jax.vjp(lambda *p: matvec(lambda_kplus, *p), *params)
-    (dA_increment,) = vjp(x_K)
-
-    # Apply formula
-    xi = dx_K + Av - a_K * lambda_kplus - b_K * lambda_Kplusplus + nu_K * x_Kplus
-    xi /= b_Kminus
-    mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
-    nu_Kminus = da_Kminus - x_Kminus.T @ xi
-    lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
-    return nu_Kminus * b_Kminus, lambda_K, dA_increment
-
-
-def _bwd_final(matvec, *, params, lambdas, x_Ks, nu_K, b_K, a_K, dx_K):
-    x1, x0 = x_Ks
-    lambda_Kplus, lambda_K = lambdas
-
-    Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
-    (dA_increment,) = vjp(x0)
-
-    lambda_1 = b_K * lambda_Kplus - Av + a_K * lambda_K - nu_K * x1 - dx_K
-    return lambda_1, dA_increment
+    # Return values
+    return (xi, lambda_), gradient_increment
