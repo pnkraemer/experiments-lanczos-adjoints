@@ -201,14 +201,18 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
 
 def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     # Initialise the states
+    xi = dxs[-1]
+    lambda_ = jnp.zeros_like(xi)
     (xi, lambda_k), dA_increment = _bwd_init(
+        xi,
+        lambda_,
         matvec=matvec,
         params=params,
         da=dalphas[-1],
         db=dbetas[-1],
         a=alphas[-1],
         b=betas[-1],
-        dxs=(dxs[-1], dxs[-2]),
+        dx=dxs[-2],
         xs=(xs[-1], xs[-2]),
     )
 
@@ -246,13 +250,12 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     return dv, dA
 
 
-def _bwd_init(*, matvec, params, a, b, xs, da, db, dxs):
+def _bwd_init(xi, _zeros, *, matvec, params, a, b, xs, da, db, dx):
     # Read inputs
     xplus, x = xs
-    dxplus, dx = dxs
 
     # Apply formula
-    xi = dxplus / b
+    xi /= b
     mu = db - xplus.T @ xi
     nu = da - x.T @ xi
     lambda_ = xi + mu * xplus + nu * x
