@@ -37,11 +37,6 @@ def matvec(v, p):
     matvec, 5, vector, params, reortho=True
 )
 
-print(xs.shape)
-print(alphas.shape)
-print(betas.shape)
-print(x.shape)
-print(beta.shape)
 
 (dxs, (dalphas, dbetas)), (dx, dbeta) = random_like((xs, (alphas, betas)), (x, beta))
 
@@ -51,7 +46,7 @@ dxs = jnp.concatenate([dxs, dx[None]])
 dbetas = jnp.concatenate([dbetas, dbeta[None]])
 
 
-lanczos.adjoint(
+gradients, (lambda_0, lambda_1N) = lanczos.adjoint(
     matvec=matvec,
     params=(params,),
     initvec_norm=jnp.linalg.norm(vector),
@@ -62,9 +57,5 @@ lanczos.adjoint(
     dbetas=dbetas,
     dxs=dxs,
 )
-
-print(dxs.shape)
-print(dalphas.shape)
-print(dbetas.shape)
-print(dx.shape)
-print(dbeta.shape)
+lambdas = jnp.concatenate([lambda_0[None], lambda_1N])
+print(lambdas.shape)
