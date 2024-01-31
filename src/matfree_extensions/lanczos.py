@@ -218,7 +218,6 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     )
     zeros = jnp.zeros_like(lambda_k)
     lambdas = (zeros, lambda_k)
-    print("lambda", lambda_k)
 
     # Scan over the remaining inputs
     loop_over = (
@@ -235,7 +234,6 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
         xi_, lambdas_ = carry
         output_ = _bwd_step(matvec, xi_, lambdas_, inputs=x, params=params)
         (xi_, lambda_k_), da_increment = output_
-        print("lambda", lambda_k_)
         lambdas_ = (lambdas_[1], lambda_k_)
         return (xi_, lambdas_), da_increment
 
@@ -249,7 +247,6 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
 
     # Conclude the final step:
     lambda_1 = -xi  # / betas[0]
-    print("lambda", lambda_1)
     # # todo: also return all lambdas
 
     # Compute the gradients
