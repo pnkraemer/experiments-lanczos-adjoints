@@ -103,15 +103,15 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
 
         # Compute the adjoints, discard the adjoint states, and return the gradients
         grads, _lambdas = adjoint(
-            matvec,
+            matvec=matvec,
+            params=params,
+            initvec_norm=vector_norm,
             alphas=alphas,
             betas=betas,
+            xs=xs,
             dalphas=dalphas,
             dbetas=dbetas,
             dxs=dxs,
-            params=params,
-            vector_norm=vector_norm,
-            xs=xs,
         )
         return grads
 
@@ -201,7 +201,7 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(matvec, *, params, vector_norm, alphas, betas, xs, dalphas, dbetas, dxs):
+def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
     def adjoint_step(xi_and_lambda, inputs):
         return _bwd_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
 
@@ -224,7 +224,7 @@ def adjoint(matvec, *, params, vector_norm, alphas, betas, xs, dalphas, dbetas, 
 
     # Compute the gradients
     grad_matvec = jax.tree_util.tree_map(lambda s: jnp.sum(s, axis=0), grad_summands)
-    grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / vector_norm
+    grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / initvec_norm
 
     # Return values
     return (grad_initvec, grad_matvec), (lambda_1, lambdas)
