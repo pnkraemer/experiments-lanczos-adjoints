@@ -214,12 +214,12 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
 
     # Scan over the remaining inputs
     loop_over = (
-        (dxs[1:-1], dxs[:-2]),
+        (dxs[:-2]),
         dalphas[:-1],
         dbetas[:-1],
-        (xs[2:], xs[1:-1], xs[:-2]),
+        (xs[1:-1], xs[:-2]),
         alphas[:-1],
-        (betas[1:], betas[:-1]),
+        (betas[:-1]),
     )
     init_val = (xi, lambda_k)
 
@@ -268,19 +268,15 @@ def _bwd_init(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
 
 
 def _bwd_step(matvec, xi, lambda_kplus, /, *, inputs, params):
-    dx_Ks, da_Kminus, db_Kminus, x_Ks, a_Kminus, b_Ks = inputs
+    dx_Kminus, da_Kminus, db_Kminus, (x_K, x_Kminus), a_Kminus, b_Kminus = inputs
 
-    x_Kplus, x_K, x_Kminus = x_Ks
-    dx_K, dx_Kminus = dx_Ks
-    b_K, b_Kminus = b_Ks
-
-    # Recover this xi
+    # Apply formula
     xi /= b_Kminus
     mu_Kminus = db_Kminus - lambda_kplus.T @ x_Kminus - x_K.T @ xi
     nu_Kminus = da_Kminus - x_Kminus.T @ xi
     lambda_K = xi + mu_Kminus * x_K + nu_Kminus * x_Kminus
 
-    #
+    # Prepare next step
     Av, vjp = jax.vjp(lambda *p: matvec(lambda_K, *p), *params)
     (dA_increment,) = vjp(x_Kminus)
     xi = (
