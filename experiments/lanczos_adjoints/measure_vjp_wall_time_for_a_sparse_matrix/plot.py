@@ -28,12 +28,17 @@ fig, axes = plt.subplot_mosaic([["spy", "linear", "log"]], dpi=200)
 label_fwd = "Forward"
 label_adjoint = "Adjoint"
 label_autodiff = "Backprop"
+label_diff = "Difference"
+
 
 # Plot the sparsity pattern of the test-matrix
 axes["spy"].set_title(f"SuiteSparse Matrix ({matrix_which})")
-exp_util.plt_spy_coo(axes["spy"], M, cmap="viridis")
-axes["spy"].set_xticks(())
-axes["spy"].set_yticks(())
+exp_util.plt_spy_coo(axes["spy"], M, cmap="viridis", invert_axes=False)
+axes["spy"].set_xlabel("Rows")
+axes["spy"].set_ylabel("Columns")
+
+# axes["spy"].set_xticks(())
+# axes["spy"].set_yticks(())
 
 # Plot the linear scale
 axes["linear"].set_title("Linear scale")
@@ -46,6 +51,7 @@ axes["linear"].plot(
 )
 axes["linear"].plot(krylov_depths, times_custom, label=label_adjoint)
 axes["linear"].plot(krylov_depths, times_autodiff, label=label_autodiff)
+# axes["linear"].plot(krylov_depths, norms_of_differences, label=label_diff)
 
 # Plot the log-scale
 axes["log"].set_title("Logarithmic scale")
@@ -58,6 +64,7 @@ axes["log"].semilogy(
 )
 axes["log"].semilogy(krylov_depths, times_custom, label=label_adjoint)
 axes["log"].semilogy(krylov_depths, times_autodiff, label=label_autodiff)
+# axes["log"].semilogy(krylov_depths, norms_of_differences, label=label_diff)
 
 # Label the benchmark plots
 for name in ["log", "linear"]:

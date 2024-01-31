@@ -39,7 +39,7 @@ def suite_sparse_load(which, /, path="./data/matrices/"):
     return jax.experimental.sparse.BCOO([data, indices], shape=matrix.shape)
 
 
-def plt_spy_coo(ax, A, /, markersize=3, cmap="jet"):
+def plt_spy_coo(ax, A, /, markersize=3, cmap="jet", invert_axes=True):
     """Plot the sparsity pattern of a BCOO matrix.
 
     Credit:
@@ -58,8 +58,10 @@ def plt_spy_coo(ax, A, /, markersize=3, cmap="jet"):
     nrows, ncols = A.shape
     ax.set_xlim((0, nrows))
     ax.set_ylim((0, ncols))
-    ax.invert_yaxis()
-    ax.xaxis.tick_top()
+
+    if invert_axes:
+        ax.invert_yaxis()
+        ax.xaxis.tick_top()
 
 
 def matching_directory(file, where, /, replace="experiments/"):
