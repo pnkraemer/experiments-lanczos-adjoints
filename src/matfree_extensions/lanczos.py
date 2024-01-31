@@ -202,14 +202,14 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
 def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     # Initialise the states
     (xi, lambda_k), dA_increment = _bwd_init(
-        matvec,
-        da_K=dalphas[-1],
-        db_K=dbetas[-1],
-        a_K=alphas[-1],
-        b_K=betas[-1],
-        dx_Ks=(dxs[-1], dxs[-2]),
-        x_Ks=(xs[-1], xs[-2]),
+        matvec=matvec,
         params=params,
+        da=dalphas[-1],
+        db=dbetas[-1],
+        a=alphas[-1],
+        b=betas[-1],
+        dxs=(dxs[-1], dxs[-2]),
+        xs=(xs[-1], xs[-2]),
     )
 
     # Scan over the remaining inputs
@@ -246,24 +246,24 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     return dv, dA
 
 
-def _bwd_init(matvec, *, params, a_K, b_K, x_Ks, da_K, db_K, dx_Ks):
+def _bwd_init(*, matvec, params, a, b, xs, da, db, dxs):
     # Read inputs
-    x_Kplus, x_K = x_Ks
-    dx_Kplus, dx_K = dx_Ks
+    xplus, x = xs
+    dxplus, dx = dxs
 
     # Apply formula
-    xi = dx_Kplus / b_K
-    mu_K = db_K - x_Kplus.T @ xi
-    nu_K = da_K - x_K.T @ xi
-    lambda_Kplus = xi + mu_K * x_Kplus + nu_K * x_K
+    xi = dxplus / b
+    mu_K = db - xplus.T @ xi
+    nu_K = da - x.T @ xi
+    lambda_Kplus = xi + mu_K * xplus + nu_K * x
 
     #
     Av, vjp = jax.vjp(lambda *p: matvec(lambda_Kplus, *p), *params)
-    (dA_increment,) = vjp(x_K)
+    (dA_increment,) = vjp(x)
 
     # Apply formula
     lambda_Kplusplus = jnp.zeros_like(lambda_Kplus)
-    xi = dx_K + Av - a_K * lambda_Kplus - b_K * lambda_Kplusplus + b_K * nu_K * x_Kplus
+    xi = dx + Av - a * lambda_Kplus - b * lambda_Kplusplus + b * nu_K * xplus
     return (xi, lambda_Kplus), dA_increment
 
 
