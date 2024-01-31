@@ -6,12 +6,12 @@ from matfree import test_util
 
 from matfree_extensions import lanczos
 
+jnp.set_printoptions(2)
+
 
 def random_like(*tree):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)
-    flat_like = jax.random.normal(
-        jax.random.PRNGKey(14214213), shape=flat.shape, dtype=flat.dtype
-    )
+    flat_like = jnp.arange(1.0, 1.0 + len(flat))
     return unflatten(flat_like)
 
 
@@ -21,12 +21,12 @@ def _sym(m):
 
 # Set up a test-matrix
 n = 10
-eigvals = jax.random.uniform(jax.random.PRNGKey(2), shape=(n,)) + 1.0
+eigvals = jnp.arange(2.0, 2.0 + n)
 matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 params = _sym(matrix)
 
 # Set up an initial vector
-vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
+vector = jnp.arange(4.0, 4.0 + n)
 
 
 def matvec(v, p):
@@ -58,4 +58,5 @@ gradients, (lambda_0, lambda_1N) = lanczos.adjoint(
     dxs=dxs,
 )
 lambdas = jnp.concatenate([lambda_0[None], lambda_1N])
-print(lambdas.shape)
+
+print(lambdas @ lambdas.T)
