@@ -80,6 +80,48 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
     return quadform
 
 
+def tridiag_no_reortho(matvec, krylov_depth, /, *, custom_vjp):
+    def estimate(vec, *params):
+        return forward_no_reortho(matvec, krylov_depth, vec, *params)
+
+    def estimate_fwd(vec, *params):
+        value = estimate(vec, *params)
+        return value, (value, (jnp.linalg.norm(vec), *params))
+
+    # todo: for full-rank decompositions, the final b_K is almost zero
+    #  which blows up the initial step of the backward pass already.
+    def estimate_bwd(cache, vjp_incoming):
+        # Read incoming gradients and stack related quantities
+        (dxs, (dalphas, dbetas)), (dx_last, dbeta_last) = vjp_incoming
+        dxs = jnp.concatenate((dxs, dx_last[None]))
+        dbetas = jnp.concatenate((dbetas, dbeta_last[None]))
+
+        # Read the cache and stack related quantities
+        ((xs, (alphas, betas)), (x_last, beta_last)), (vector_norm, *params) = cache
+        xs = jnp.concatenate((xs, x_last[None]))
+        betas = jnp.concatenate((betas, beta_last[None]))
+
+        # Compute the adjoints, discard the adjoint states, and return the gradients
+        grads, _lambdas = adjoint(
+            matvec=matvec,
+            params=params,
+            initvec_norm=vector_norm,
+            alphas=alphas,
+            betas=betas,
+            xs=xs,
+            dalphas=dalphas,
+            dbetas=dbetas,
+            dxs=dxs,
+        )
+        return grads
+
+    if custom_vjp:
+        estimate = jax.custom_vjp(estimate)
+        estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
+
+    return estimate
+
+
 def tridiag(matvec, krylov_depth, /, *, custom_vjp):
     def estimate(vec, *params):
         return forward(matvec, krylov_depth, vec, *params)
@@ -156,6 +198,40 @@ def forward(matvec, krylov_depth, vec, *params):
     return decomposition, remainder
 
 
+def forward_no_reortho(matvec, krylov_depth, vec, *params):
+    # Pre-allocate
+    vectors = jnp.zeros((krylov_depth + 1, len(vec)))
+    offdiags = jnp.zeros((krylov_depth,))
+    diags = jnp.zeros((krylov_depth,))
+
+    # Normalize (not all Lanczos implementations do that)
+    v0 = vec / jnp.linalg.norm(vec)
+    vectors = vectors.at[0].set(v0)
+
+    # Lanczos initialisation
+    ((v1, offdiag), diag) = _fwd_init(matvec, v0, *params)
+
+    # Store results
+    k = 0
+    vectors = vectors.at[k + 1].set(v1)
+    offdiags = offdiags.at[k].set(offdiag)
+    diags = diags.at[k].set(diag)
+
+    # Run Lanczos-loop
+    init = (v1, offdiag, v0), (vectors, diags, offdiags)
+    _, (vectors, diags, offdiags) = jax.lax.fori_loop(
+        lower=1,
+        upper=krylov_depth,
+        body_fun=functools.partial(_fwd_step_no_reortho, matvec, params),
+        init_val=init,
+    )
+
+    # Reorganise the outputs
+    decomposition = vectors[:-1], (diags, offdiags[:-1])
+    remainder = vectors[-1], offdiags[-1]
+    return decomposition, remainder
+
+
 def _fwd_init(matvec, vec, *params):
     """Initialize Lanczos' algorithm.
 
@@ -177,6 +253,18 @@ def _fwd_step(matvec, params, i, val):
     # Reorthogonalisation
     v1 = v1 - vectors.T @ (vectors @ v1)
     v1 /= jnp.linalg.norm(v1)
+
+    # Store results
+    vectors = vectors.at[i + 1].set(v1)
+    offdiags = offdiags.at[i].set(offdiag)
+    diags = diags.at[i].set(diag)
+
+    return (v1, offdiag, v0), (vectors, diags, offdiags)
+
+
+def _fwd_step_no_reortho(matvec, params, i, val):
+    (v1, offdiag, v0), (vectors, diags, offdiags) = val
+    ((v1, offdiag), diag), v0 = _fwd_step_apply(matvec, v1, offdiag, v0, *params), v1
 
     # Store results
     vectors = vectors.at[i + 1].set(v1)
