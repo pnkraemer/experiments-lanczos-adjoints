@@ -2,13 +2,16 @@ import os
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from tueplots import axes, bundles
+from tueplots import axes, figsizes, fontsizes
 
 from matfree_extensions import exp_util
 
 # Plotting-configuration
-plt.rcParams.update(bundles.neurips2023(nrows=1, ncols=2, family="sans-serif"))
+plt.rcParams.update(figsizes.neurips2023(nrows=1, ncols=2))
+plt.rcParams.update(fontsizes.neurips2023(default_smaller=2))
 plt.rcParams.update(axes.lines())
+plt.rcParams.update(axes.legend())
+plt.rcParams.update(axes.grid())
 
 
 # Load the results
@@ -32,13 +35,11 @@ label_diff = "Difference"
 
 
 # Plot the sparsity pattern of the test-matrix
-axes["spy"].set_title(f"SuiteSparse Matrix ({matrix_which})")
+axes["spy"].set_title(f"SuiteSparse: {matrix_which}")
 exp_util.plt_spy_coo(axes["spy"], M, cmap="viridis", invert_axes=False)
 axes["spy"].set_xlabel("Rows")
 axes["spy"].set_ylabel("Columns")
 
-# axes["spy"].set_xticks(())
-# axes["spy"].set_yticks(())
 
 # Plot the linear scale
 axes["linear"].set_title("Linear scale")
@@ -51,7 +52,7 @@ axes["linear"].plot(
 )
 axes["linear"].plot(krylov_depths, times_custom, label=label_adjoint)
 axes["linear"].plot(krylov_depths, times_autodiff, label=label_autodiff)
-# axes["linear"].plot(krylov_depths, norms_of_differences, label=label_diff)
+
 
 # Plot the log-scale
 axes["log"].set_title("Logarithmic scale")
@@ -64,7 +65,7 @@ axes["log"].semilogy(
 )
 axes["log"].semilogy(krylov_depths, times_custom, label=label_adjoint)
 axes["log"].semilogy(krylov_depths, times_autodiff, label=label_autodiff)
-# axes["log"].semilogy(krylov_depths, norms_of_differences, label=label_diff)
+
 
 # Label the benchmark plots
 for name in ["log", "linear"]:
@@ -73,6 +74,7 @@ for name in ["log", "linear"]:
     axes[name].legend()
     axes[name].set_ylabel("Wall time (sec)")
     axes[name].set_xlabel("Krylov-space depth")
+    axes[name].grid(visible=True, which="both", axis="both")
 
 # Save the figure
 directory = exp_util.matching_directory(__file__, "figures/")
