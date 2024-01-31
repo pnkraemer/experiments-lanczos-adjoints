@@ -226,7 +226,7 @@ def adjoint(matvec, *, params, vector_norm, alphas, betas, xs, dalphas, dbetas, 
     grad_matvec = jax.tree_util.tree_map(lambda s: jnp.sum(s, axis=0), grad_summands)
     grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / vector_norm
 
-    # Return values | todo: also return all lambdas
+    # Return values
     return (grad_initvec, grad_matvec), (lambda_1, lambdas)
 
 
