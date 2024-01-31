@@ -203,7 +203,7 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     # Initialise the states
     xi = dxs[-1]
     lambda_ = jnp.zeros_like(xi)
-    (xi, lambda_k), dA_increment = _bwd_init(
+    (xi, lambda_k), dA_increment = _bwd_step(
         xi,
         lambda_,
         matvec=matvec,
@@ -248,28 +248,6 @@ def adjoint(matvec, *, params, vector, alphas, betas, xs, dalphas, dbetas, dxs):
     # Compute the gradients
     dv = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / jnp.linalg.norm(vector)
     return dv, dA
-
-
-def _bwd_init(xi, _zeros, *, matvec, params, a, b, xs, da, db, dx):
-    # Read inputs
-    xplus, x = xs
-
-    # Apply formula
-    xi /= b
-    mu = db - xplus.T @ xi
-    nu = da - x.T @ xi
-    lambda_ = xi + mu * xplus + nu * x
-    lambda_plus = jnp.zeros_like(lambda_)
-
-    # Value-and-grad of matrix-vector product
-    matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
-    (gradient_increment,) = vjp(x)
-
-    # Prepare next step
-    xi = dx + matvec_lambda - a * lambda_ - b * lambda_plus + b * nu * xplus
-
-    # Return values
-    return (xi, lambda_), gradient_increment
 
 
 def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
