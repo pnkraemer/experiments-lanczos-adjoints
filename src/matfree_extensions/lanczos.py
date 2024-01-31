@@ -245,7 +245,7 @@ def _bwd_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     (gradient_increment,) = vjp(x)
 
     # Prepare next step
-    xi = dx + matvec_lambda - a * lambda_ - b * lambda_plus + b * nu * xplus
+    xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
     # Return values
-    return (-xi, lambda_), gradient_increment
+    return (xi, lambda_), gradient_increment
