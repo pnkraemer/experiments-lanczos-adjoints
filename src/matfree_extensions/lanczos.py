@@ -89,7 +89,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
         return value, (value, (jnp.linalg.norm(vec), *params))
 
     # todo: for full-rank decompositions, the final b_K is almost zero
-    #  which blows up the initial step of the backward pass already.
+    #  which blows up the initial step of the backward pass already. Solve this!
     def estimate_bwd(cache, vjp_incoming):
         # Read incoming gradients and stack related quantities
         (dxs, (dalphas, dbetas)), (dx_last, dbeta_last) = vjp_incoming
@@ -217,7 +217,7 @@ def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas,
         "b": betas,
     }
     init_val = (-dxs[-1], jnp.zeros_like(dxs[-1]))
-    (lambda_1, lambdas), grad_summands = jax.lax.scan(
+    (lambda_1, _lambda_2), (grad_summands, lambdas) = jax.lax.scan(
         adjoint_step,
         init=init_val,
         xs=loop_over,
@@ -250,4 +250,4 @@ def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
     # Return values
-    return (xi, lambda_), gradient_increment
+    return (xi, lambda_), (gradient_increment, lambda_)

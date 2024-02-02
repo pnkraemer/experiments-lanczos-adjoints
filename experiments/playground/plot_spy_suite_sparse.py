@@ -1,6 +1,5 @@
 """Suite-sparse playground."""
 
-import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from matfree_extensions import exp_util
