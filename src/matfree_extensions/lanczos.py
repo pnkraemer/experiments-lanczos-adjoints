@@ -102,7 +102,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
         betas = jnp.concatenate((betas, beta_last[None]))
 
         # Compute the adjoints, discard the adjoint states, and return the gradients
-        grads, _lambdas = adjoint(
+        grads, _lambdas_and_mus_and_nus = adjoint(
             matvec=matvec,
             params=params,
             initvec_norm=vector_norm,
@@ -217,7 +217,7 @@ def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas,
         "b": betas,
     }
     init_val = (-dxs[-1], jnp.zeros_like(dxs[-1]))
-    (lambda_1, _lambda_2), (grad_summands, lambdas, _mus, _nus) = jax.lax.scan(
+    (lambda_1, _lambda_2), (grad_summands, lambdas, mus, nus) = jax.lax.scan(
         adjoint_step,
         init=init_val,
         xs=loop_over,
@@ -229,7 +229,7 @@ def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas,
     grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / initvec_norm
 
     # Return values
-    return (grad_initvec, grad_matvec), (lambda_1, lambdas)
+    return (grad_initvec, grad_matvec), (lambda_1, lambdas, mus, nus)
 
 
 def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
