@@ -113,7 +113,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dbetas=dbetas,
             dxs=dxs,
             # Always set to false until we figure this out properly.
-            reortho=False,
+            reortho=reortho,
         )
         return grads
 
@@ -217,7 +217,7 @@ def adjoint(
     indices = jnp.arange(0, len(xs), step=1)
     xs0 = xs
     xs0 = xs0.at[-1, :].set(jnp.zeros_like(xs[-1, :]))
-    print(xs0.shape)
+    # print(xs0.shape)
 
     loop_over = {
         "dx": dxs[:-1],
