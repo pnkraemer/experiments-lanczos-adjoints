@@ -112,6 +112,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dalphas=dalphas,
             dbetas=dbetas,
             dxs=dxs,
+            reortho=reortho,
         )
         return grads
 
@@ -203,21 +204,27 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
+def adjoint(
+    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs, reortho
+):
     def adjoint_step(xi_and_lambda, inputs):
-        return _adjoint_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
+        return _adjoint_step(
+            *xi_and_lambda, matvec=matvec, params=params, **inputs, reortho=reortho
+        )
 
     # Scan over all input gradients and output values
+    indices = jnp.arange(0, len(xs), step=1)
     loop_over = {
         "dx": dxs[:-1],
         "da": dalphas,
         "db": dbetas,
+        "idcs": (indices[1:], indices[:-1]),
         "xs": (xs[1:], xs[:-1]),
         "a": alphas,
         "b": betas,
     }
-    init_val = (-dxs[-1], jnp.zeros_like(dxs[-1]))
-    (lambda_1, _lambda_2), (grad_summands, lambdas, mus, nus) = jax.lax.scan(
+    init_val = (xs, -dxs[-1], jnp.zeros_like(dxs[-1]))
+    (_, lambda_1, _lambda_2), (grad_summands, lambdas, mus, nus) = jax.lax.scan(
         adjoint_step,
         init=init_val,
         xs=loop_over,
@@ -232,15 +239,38 @@ def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas,
     return (grad_initvec, grad_matvec), (lambda_1, lambdas, mus, nus)
 
 
-def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
+def _adjoint_step(
+    xs_all,
+    xi,
+    lambda_plus,
+    /,
+    *,
+    matvec,
+    params,
+    idcs,
+    dx,
+    da,
+    db,
+    xs,
+    a,
+    b,
+    reortho: bool,
+):
     # Read inputs
     (xplus, x) = xs
+    idx_plus, idx = idcs
 
     # Apply formula
     xi /= b
     mu = db - lambda_plus.T @ x + xplus.T @ xi
     nu = da + x.T @ xi
     lambda_ = -xi + mu * xplus + nu * x
+
+    if reortho:
+        zeros = jnp.zeros_like(lambda_)
+        xs_all = xs_all.at[idx_plus, :].set(zeros)
+        xs_all = xs_all.at[idx, :].set(zeros)
+        lambda_ = lambda_ - xs_all.T @ (xs_all @ lambda_)
 
     # Value-and-grad of matrix-vector product
     matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
@@ -250,4 +280,4 @@ def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
     # Return values
-    return (xi, lambda_), (gradient_increment, lambda_, b * mu, b * nu)
+    return (xs_all, xi, lambda_), (gradient_increment, lambda_, b * mu, b * nu)
