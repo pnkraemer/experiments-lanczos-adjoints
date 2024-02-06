@@ -217,7 +217,7 @@ def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas,
         "b": betas,
     }
     init_val = (-dxs[-1], jnp.zeros_like(dxs[-1]))
-    (lambda_1, _lambda_2), (grad_summands, lambdas) = jax.lax.scan(
+    (lambda_1, _lambda_2), (grad_summands, lambdas, _mus, _nus) = jax.lax.scan(
         adjoint_step,
         init=init_val,
         xs=loop_over,
@@ -250,4 +250,4 @@ def _adjoint_step(xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
     # Return values
-    return (xi, lambda_), (gradient_increment, lambda_)
+    return (xi, lambda_), (gradient_increment, lambda_, b * mu, b * nu)
