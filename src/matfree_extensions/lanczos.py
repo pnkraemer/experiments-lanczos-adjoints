@@ -214,16 +214,20 @@ def adjoint(
 
     # Scan over all input gradients and output values
     indices = jnp.arange(0, len(xs), step=1)
+    xs0 = xs
+    xs0 = xs0.at[-1, :].set(jnp.zeros_like(xs[-1, :]))
+    print(xs0.shape)
+
     loop_over = {
         "dx": dxs[:-1],
         "da": dalphas,
         "db": dbetas,
-        "idcs": (indices[1:], indices[:-1]),
+        "idx": indices[:-1],
         "xs": (xs[1:], xs[:-1]),
         "a": alphas,
         "b": betas,
     }
-    init_val = (xs, -dxs[-1], jnp.zeros_like(dxs[-1]))
+    init_val = (xs0, -dxs[-1], jnp.zeros_like(dxs[-1]))
     (_, lambda_1, _lambda_2), (grad_summands, lambdas, mus, nus) = jax.lax.scan(
         adjoint_step,
         init=init_val,
@@ -247,7 +251,7 @@ def _adjoint_step(
     *,
     matvec,
     params,
-    idcs,
+    idx,
     dx,
     da,
     db,
@@ -258,7 +262,6 @@ def _adjoint_step(
 ):
     # Read inputs
     (xplus, x) = xs
-    idx_plus, idx = idcs
 
     # Apply formula
     xi /= b
@@ -268,7 +271,6 @@ def _adjoint_step(
 
     if reortho:
         zeros = jnp.zeros_like(lambda_)
-        xs_all = xs_all.at[idx_plus, :].set(zeros)
         xs_all = xs_all.at[idx, :].set(zeros)
         lambda_ = lambda_ - xs_all.T @ (xs_all @ lambda_)
 
