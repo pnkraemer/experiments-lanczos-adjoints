@@ -112,7 +112,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dalphas=dalphas,
             dbetas=dbetas,
             dxs=dxs,
-            reortho=reortho,
+            # Always set to false until we figure this out properly.
+            reortho=False,
         )
         return grads
 
