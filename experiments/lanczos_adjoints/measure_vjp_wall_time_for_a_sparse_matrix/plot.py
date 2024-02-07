@@ -39,7 +39,7 @@ axes["spy"].set_title(f"SuiteSparse: {matrix_which}")
 exp_util.plt_spy_coo(axes["spy"], M, cmap="viridis", invert_axes=False)
 axes["spy"].set_xlabel("Rows")
 axes["spy"].set_ylabel("Columns")
-
+axes["spy"].invert_yaxis()
 
 # Plot the linear scale
 axes["linear"].set_title("Linear scale")
