@@ -82,9 +82,10 @@ def root_mean_square_error(x, y, /):
 
 
 if __name__ == "__main__":
+    jnp.set_printoptions(2)
     for reortho in [True, False]:
         for custom_vjp in [True, False]:
-            for n in [4, 12, 20, 28, 36, 44]:
+            for n in [4, 12, 20, 28, 36]:
                 output = evaluate_numerical_deviation_from_identity(
                     custom_vjp=custom_vjp, n=n, reortho=reortho
                 )

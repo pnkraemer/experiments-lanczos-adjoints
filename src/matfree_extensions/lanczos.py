@@ -113,7 +113,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dbetas=dbetas,
             dxs=dxs,
             # Always set to 'False' until we figure this out properly.
-            reortho=False,
+            reortho=reortho,
         )
         return grads
 
@@ -205,6 +205,57 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
 def adjoint(
     *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs, reortho
 ):
+    if not reortho:
+        return _adjoint_pass(
+            matvec=matvec,
+            params=params,
+            initvec_norm=initvec_norm,
+            alphas=alphas,
+            betas=betas,
+            xs=xs,
+            dalphas=dalphas,
+            dbetas=dbetas,
+            dxs=dxs,
+            reortho=reortho,
+        )
+
+    dalphas1 = dalphas
+    dbetas1 = dbetas
+    dxs1 = jnp.zeros_like(dxs)
+    output1 = _adjoint_pass(
+        matvec=matvec,
+        params=params,
+        initvec_norm=initvec_norm,
+        alphas=alphas,
+        betas=betas,
+        xs=xs,
+        dalphas=dalphas1,
+        dbetas=dbetas1,
+        dxs=dxs1,
+        reortho=True,
+    )
+
+    dalphas2 = jnp.zeros_like(dalphas1)
+    dbetas2 = jnp.zeros_like(dbetas1)
+    dxs2 = dxs
+    output2 = _adjoint_pass(
+        matvec=matvec,
+        params=params,
+        initvec_norm=initvec_norm,
+        alphas=alphas,
+        betas=betas,
+        xs=xs,
+        dalphas=dalphas2,
+        dbetas=dbetas2,
+        dxs=dxs2,
+        reortho=False,
+    )
+    return jax.tree_util.tree_map(lambda a, b: a + b, output1, output2)
+
+
+def _adjoint_pass(
+    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs, reortho
+):
     def adjoint_step(xi_and_lambda, inputs):
         return _adjoint_step(
             *xi_and_lambda, matvec=matvec, params=params, **inputs, reortho=reortho
@@ -276,4 +327,4 @@ def _adjoint_step(
     xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
     # Return values
-    return (xs_all, xi, lambda_), (gradient_increment, lambda_, b * mu, b * nu, xi)
+    return (xs_all, xi, lambda_), (gradient_increment, lambda_, mu, nu, xi)

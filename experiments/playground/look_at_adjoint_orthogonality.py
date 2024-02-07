@@ -16,7 +16,8 @@ jnp.set_printoptions(2)
 
 def random_like(*tree):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)
-    flat_like = jnp.arange(1.0, 1.0 + len(flat))
+    # flat_like = jnp.arange(1.0, 1.0 + len(flat))
+    flat_like = 0.1 + 0.9 * jax.random.uniform(jax.random.PRNGKey(1), shape=flat.shape)
     unflat = unflatten(flat_like)
     return jax.tree_util.tree_map(lambda s: s / jnp.mean(s), unflat)
 
@@ -26,7 +27,7 @@ def _sym(m):
 
 
 # Set up a test-matrix
-n = 4
+n = 10
 eigvals = jnp.arange(2.0, 2.0 + n)
 matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 params = _sym(matrix)
@@ -39,10 +40,8 @@ def matvec(v, p):
     return (p + p.T) @ v
 
 
-# krylov_depth = 3 * n // 4
-krylov_depth = n - 1
-
-# fig, axes = plt.subplots(nrows=1, ncols=2, sharex=True, sharey=True, dpi=200)
+krylov_depth = 3 * n // 4
+# krylov_depth = n - 1
 
 # for reortho, axis in zip([False, False], axes):
 for reortho in [False]:
@@ -59,14 +58,19 @@ for reortho in [False]:
     dxs = jnp.concatenate([dxs, dx[None]])
     dbetas = jnp.concatenate([dbetas, dbeta[None]])
 
-    # Important: reorthogonalisation only works for dxs=0 for now...
-    i = -1
-    v1 = dxs[i, :]
-    dxs = jnp.zeros_like(dxs)
-    dxs = dxs.at[i, :].set(v1)
+    # Important: reorthogonalisation only works if
+    # dxs is orthogonal to xs (including if it is zero)
+    # dxs1 = dxs - dxs @ xs.T @ xs
+    # dxs2 = dxs @ xs.T @ xs
+    # # dxs = dxs / jnp.trace(dxs)  # scale to unit(ish) values
+    # print(dxs)
+
+    # dxs2 = jnp.zeros_like(dxs)
+
+    dxs = dxs @ (xs.T @ xs)
     dalphas = jnp.zeros_like(dalphas)
     dbetas = jnp.zeros_like(dbetas)
-    gradients, (lambda_0, lambda_1N, mus, nus, xis) = lanczos.adjoint(
+    _, (lambda_0, lambda_1N, *_, xis) = lanczos.adjoint(
         matvec=matvec,
         params=(params,),
         initvec_norm=jnp.linalg.norm(vector),
@@ -79,36 +83,3 @@ for reortho in [False]:
         reortho=reortho,
     )
     lambdas = jnp.concatenate([lambda_0[None], lambda_1N])
-    orthogonality = lambdas @ xs.T - dxs @ xs.T
-
-    print("dxs\n", dxs)
-    print()
-    print("lambda @ xs\n", lambdas @ xs.T)
-    print()
-    print("dxs @ xs\n", dxs @ xs.T)
-    print()
-    print("xis @ xs\n", xis @ xs.T)
-    print()
-    print("lambda @ lambda\n", lambdas @ lambdas.T)
-    print("lambda @ lambda\n", lambdas.T @ lambdas)
-    print()
-    print()
-
-    # A true zero would break this plotting code
-    # (-inf is sometimes plotted as zero),
-    # so we clip with the machine epsilon
-    # eps = jnp.finfo(jnp.dtype(lambdas)).eps
-    # plot_vals = jnp.log10(eps + jnp.abs(orthogonality))
-
-    # color_values = axis.imshow(plot_vals, vmin=-7, vmax=1, interpolation="none")
-#
-#     axis.set_title(f"Reortho: {str(reortho)}")
-#     axis.set_xlabel(r"State index $x_k$")
-#
-# axes[0].set_ylabel(r"Adjoint index $\lambda_k$")
-#
-# label = r"$\log_{10}|\langle \lambda,  x\rangle|$"
-# fig.colorbar(
-#     color_values, ax=axes, orientation="vertical", pad=0.1, label=label, shrink=0.6
-# )
-# plt.show()
