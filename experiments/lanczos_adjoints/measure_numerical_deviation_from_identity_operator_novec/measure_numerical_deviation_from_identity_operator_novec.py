@@ -30,6 +30,7 @@ def evaluate_numerical_deviation_from_identity(
     flat, unflatten = jax.flatten_util.ravel_pytree(tridiag)
 
     def eye(t_like):
+        """Put a matrix back together and decompose it again."""
         dense_matrix = _dense_tridiag(*unflatten(t_like))
         matrix_reconstructed = _sym(lanczos_vectors.T @ dense_matrix @ lanczos_vectors)
         (_vec, tridiag_), _ = algorithm(vector, matrix_reconstructed)
@@ -42,23 +43,6 @@ def evaluate_numerical_deviation_from_identity(
     # Compute the expected Jacobian (the identity matrix)
     expected = jnp.eye(len(jacobian_reduced))
     return jacobian_reduced, expected
-
-
-def _identity(vector, matrix, *, custom_vjp, reortho: bool):
-    algorithm = lanczos.tridiag(
-        lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp, reortho=reortho
-    )
-    (lanczos_vectors, tridiag), _ = algorithm(vector, matrix)
-
-    # Reconstruct the original matrix from the full-order approximation
-    dense_matrix = _dense_tridiag(*tridiag)
-    matrix_reconstructed = lanczos_vectors.T @ dense_matrix @ lanczos_vectors
-
-    # Reconstruct the original matrix
-    vector_reconstructed = lanczos_vectors[0, :]
-
-    # Return the reconstruction
-    return vector_reconstructed, _sym(matrix_reconstructed)
 
 
 def _sym(m):

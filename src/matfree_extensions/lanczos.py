@@ -112,8 +112,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dalphas=dalphas,
             dbetas=dbetas,
             dxs=dxs,
-            # Always set to false until we figure this out properly.
-            reortho=reortho,
+            # Always set to 'False' until we figure this out properly.
+            reortho=False,
         )
         return grads
 
@@ -217,7 +217,6 @@ def adjoint(
     indices = jnp.arange(0, len(xs), step=1)
     xs0 = xs
     xs0 = xs0.at[-1, :].set(jnp.zeros_like(xs[-1, :]))
-    # print(xs0.shape)
 
     loop_over = {
         "dx": dxs[:-1],
@@ -229,7 +228,7 @@ def adjoint(
         "b": betas,
     }
     init_val = (xs0, -dxs[-1], jnp.zeros_like(dxs[-1]))
-    (_, lambda_1, _lambda_2), (grad_summands, lambdas, mus, nus) = jax.lax.scan(
+    (_, lambda_1, _lambda_2), (grad_summands, *other) = jax.lax.scan(
         adjoint_step,
         init=init_val,
         xs=loop_over,
@@ -241,7 +240,7 @@ def adjoint(
     grad_initvec = ((lambda_1.T @ xs[0]) * xs[0] - lambda_1) / initvec_norm
 
     # Return values
-    return (grad_initvec, grad_matvec), (lambda_1, lambdas, mus, nus)
+    return (grad_initvec, grad_matvec), (lambda_1, *other)
 
 
 def _adjoint_step(
@@ -283,4 +282,4 @@ def _adjoint_step(
     xi = -dx - matvec_lambda + a * lambda_ + b * lambda_plus - b * nu * xplus
 
     # Return values
-    return (xs_all, xi, lambda_), (gradient_increment, lambda_, b * mu, b * nu)
+    return (xs_all, xi, lambda_), (gradient_increment, lambda_, b * mu, b * nu, xi)

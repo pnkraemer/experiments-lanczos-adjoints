@@ -46,6 +46,7 @@ def evaluate_numerical_deviation_from_identity(
 
 
 def _identity(vector, matrix, *, custom_vjp, reortho: bool):
+    """Decompose a matrix and put it back together."""
     algorithm = lanczos.tridiag(
         lambda s, p: (p + p.T) @ s, len(vector), custom_vjp=custom_vjp, reortho=reortho
     )
@@ -82,25 +83,17 @@ def root_mean_square_error(x, y, /):
 
 
 if __name__ == "__main__":
-    # The adjoints are derived for the 'classical' Lanczos process.
-    # Reorthogonalisation would make them approximate.
-    #
-    # That means that the values printed below are almost identical
-    # as long as we do not reorthogonalise during the forward pass.
-    # If we do, the accuracy custom-adjoint deteriorates while the
-    # accuracy of the  no-custom-adjoint improves.
-    reortho = False
+    for reortho in [True, False]:
+        for custom_vjp in [True, False]:
+            for n in [4, 12, 20, 28, 36, 44]:
+                output = evaluate_numerical_deviation_from_identity(
+                    custom_vjp=custom_vjp, n=n, reortho=reortho
+                )
+                received, expected = output
+                rmse = root_mean_square_error(received, expected)
 
-    for custom_vjp in [True, False]:
-        for n in [4, 12, 20, 28, 36, 44]:
-            output = evaluate_numerical_deviation_from_identity(
-                custom_vjp=custom_vjp, n=n, reortho=reortho
-            )
-            received, expected = output
-            rmse = root_mean_square_error(received, expected)
-
+                print()
+                print(f"reortho={reortho}, custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
+                assert False
             print()
-            print(f"reortho={reortho}, custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
-
-        print()
         print()
