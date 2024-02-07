@@ -14,7 +14,9 @@ def evaluate_numerical_deviation_from_identity(
     eigvals = jnp.arange(1.0, 2.0, step=1 / (n + 1))
     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
     params = _sym(matrix)
-    matvec = lambda s, p: (p + p.T) @ s
+
+    def matvec(s, p):
+        return (p + p.T) @ s
 
     # Set up an initial vector
     vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
@@ -68,6 +70,7 @@ if __name__ == "__main__":
     for use_reortho in [True, False]:
         for use_custom_vjp in [True, False]:
             for nrows in [4, 12, 20, 28, 36, 44, 52]:
+                # Ensure that reortho=True actually reaches the Lanczos-adjoint
                 output = evaluate_numerical_deviation_from_identity(
                     custom_vjp=use_custom_vjp, n=nrows, reortho=use_reortho
                 )
