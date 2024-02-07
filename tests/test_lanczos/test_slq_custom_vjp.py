@@ -3,7 +3,6 @@
 import jax
 import jax.numpy as jnp
 from matfree import hutchinson, lanczos, test_util
-
 from matfree_extensions import lanczos as lanczos_extensions
 
 

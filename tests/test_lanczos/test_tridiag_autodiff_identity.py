@@ -3,13 +3,12 @@ import jax.flatten_util
 import jax.numpy as jnp
 import pytest_cases
 from matfree import test_util
-
 from matfree_extensions import lanczos
 
 
 @pytest_cases.parametrize("custom_vjp", [True, False])
 def test_identity_operator(custom_vjp, n=5):
-    """Test that the reverse-mode Jacobian of an identity-like operation is the identity.
+    """Test that the reverse-mode Jacobian of an identity operation is the identity.
 
     "Identity operation": full-rank Lanczos decomposition and full reconstruction.
     """

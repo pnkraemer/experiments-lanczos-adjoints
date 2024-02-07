@@ -3,7 +3,6 @@
 import jax.flatten_util
 import jax.numpy as jnp
 from matfree import test_util
-
 from matfree_extensions import lanczos
 
 
@@ -94,6 +93,5 @@ if __name__ == "__main__":
 
                 print()
                 print(f"reortho={reortho}, custom_vjp={custom_vjp}, n={n}, rmse={rmse}")
-                assert False
             print()
         print()

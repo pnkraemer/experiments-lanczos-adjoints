@@ -2,7 +2,6 @@
 import jax
 from matfree import hutchinson, lanczos, test_util
 from matfree.backend import np, prng
-
 from matfree_extensions import deprecated
 from matfree_extensions import lanczos as lanczos_extensions
 

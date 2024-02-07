@@ -4,7 +4,6 @@ import jax
 import jax.experimental.sparse
 import jax.numpy as jnp
 from matfree import hutchinson, slq
-
 from matfree_extensions import integrand_slq_spd_custom_vjp
 
 n = 100  # nrows/ncols

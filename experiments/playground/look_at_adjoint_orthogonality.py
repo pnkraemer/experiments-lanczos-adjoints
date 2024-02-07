@@ -1,14 +1,12 @@
 """Investigate whether there is any orthogonality left if dx!=0."""
 
-import os
 
 import jax.flatten_util
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matfree import test_util
+from matfree_extensions import lanczos
 from tueplots import figsizes, fontsizes
-
-from matfree_extensions import exp_util, lanczos
 
 plt.rcParams.update(figsizes.neurips2023(nrows=2, ncols=2, rel_width=1.0))
 plt.rcParams.update(fontsizes.neurips2023(default_smaller=2))

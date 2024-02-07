@@ -3,7 +3,6 @@
 import jax.numpy as jnp
 import pytest_cases
 from matfree import test_util
-
 from matfree_extensions import lanczos
 
 
@@ -33,7 +32,8 @@ def test_full_rank_reconstruction_is_exact():
     assert jnp.allclose(lanczos_vectors.T @ lanczos_vectors, eye, **tols)
 
 
-# anything 0 <= k < n works; k=n is full reconstruction and the (q, b) values become meaningless
+# anything 0 <= k < n works; k=n is full reconstruction
+# and the (q, b) values become meaningless
 @pytest_cases.parametrize("krylov_depth", [0, 5, 11])
 @pytest_cases.parametrize("n", [12])
 @pytest_cases.parametrize("reortho", [True, False])

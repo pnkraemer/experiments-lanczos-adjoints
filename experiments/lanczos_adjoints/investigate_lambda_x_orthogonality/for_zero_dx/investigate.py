@@ -5,9 +5,8 @@ import jax.flatten_util
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matfree import test_util
-from tueplots import figsizes, fontsizes
-
 from matfree_extensions import exp_util, lanczos
+from tueplots import figsizes, fontsizes
 
 plt.rcParams.update(figsizes.neurips2023(nrows=2, ncols=2, rel_width=1.0))
 plt.rcParams.update(fontsizes.neurips2023(default_smaller=2))
@@ -84,7 +83,7 @@ for reortho, axis in zip([True, False], axes):
 
     color_values = axis.imshow(plot_vals, vmin=-7, vmax=1, interpolation="none")
 
-    axis.set_title(f"Reortho: {str(reortho)}")
+    axis.set_title(f"Reortho: {reortho!s}")
     axis.set_xlabel(r"State index $x_k$")
 
 axes[0].set_ylabel(r"Adjoint index $\lambda_k$")

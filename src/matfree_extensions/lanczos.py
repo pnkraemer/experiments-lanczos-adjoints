@@ -147,10 +147,7 @@ def forward(matvec, krylov_depth, vec, *params, reortho):
     init = (v1, offdiag, v0), (vectors, diags, offdiags)
     step_fun = functools.partial(_fwd_step, matvec, params, reortho=reortho)
     _, (vectors, diags, offdiags) = jax.lax.fori_loop(
-        lower=1,
-        upper=krylov_depth,
-        body_fun=step_fun,
-        init_val=init,
+        lower=1, upper=krylov_depth, body_fun=step_fun, init_val=init
     )
 
     # Reorganise the outputs
@@ -229,10 +226,7 @@ def adjoint(
     }
     init_val = (xs0, -dxs[-1], jnp.zeros_like(dxs[-1]))
     (_, lambda_1, _lambda_2), (grad_summands, *other) = jax.lax.scan(
-        adjoint_step,
-        init=init_val,
-        xs=loop_over,
-        reverse=True,
+        adjoint_step, init=init_val, xs=loop_over, reverse=True
     )
 
     # Compute the gradients

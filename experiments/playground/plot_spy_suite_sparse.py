@@ -1,7 +1,6 @@
 """Suite-sparse playground."""
 
 import matplotlib.pyplot as plt
-
 from matfree_extensions import exp_util
 
 PATH = "./data/matrices/"

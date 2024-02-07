@@ -7,7 +7,6 @@ import time
 import jax.experimental.sparse
 import jax.flatten_util
 import jax.numpy as jnp
-
 from matfree_extensions import exp_util, lanczos
 
 
@@ -61,9 +60,12 @@ for krylov_depth in jnp.arange(1, 100, step=10):
     krylov_depths.append(krylov_depth)
 
     # Construct a vector-to-vector decomposition function
-    def decompose(f, *, custom_vjp):
+    def decompose(f, *, custom_vjp):  # todo: resolve noqa
         algorithm = lanczos.tridiag(
-            matvec, krylov_depth, custom_vjp=custom_vjp, reortho=False
+            matvec,
+            krylov_depth,  # noqa: B023
+            custom_vjp=custom_vjp,
+            reortho=False,
         )
         output = algorithm(*unflatten(f))
         return jax.flatten_util.ravel_pytree(output)[0]

@@ -18,7 +18,7 @@ def hutchinson_nograd(integrand_fun, /, sample_fun):
 
 
 def hutchinson_custom_vjp(integrand_fun, /, sample_fun):
-    """Implement Hutchinson's estimator but use a different key during the backward pass."""
+    """Implement Hutchinson's estimator with a different key for the backward pass."""
 
     @jax.custom_vjp
     def sample(_key, *_parameters):
@@ -26,7 +26,8 @@ def hutchinson_custom_vjp(integrand_fun, /, sample_fun):
         # This function shall only be meaningful inside a VJP,
         # thus, we raise a:
         #
-        raise RuntimeError("oops")
+        msg = "oops"
+        raise RuntimeError(msg)
 
     def sample_fwd(key, *parameters):
         _key_fwd, key_bwd = jax.random.split(key, num=2)

@@ -1,9 +1,4 @@
-format:
-	isort .  --quiet
-	black .  --quiet
-	blackdoc *.md  --line-length 82
-
-lint:
+format-and-lint:
 	pre-commit run --all-files
 
 test:

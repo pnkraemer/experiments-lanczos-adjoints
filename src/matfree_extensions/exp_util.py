@@ -16,7 +16,7 @@ def suite_sparse_download(
     nzbounds=None,
     rowbounds=(None, None),
     colbounds=(None, None),
-    format="MM",
+    matrixformat="MM",
 ):
     """Download from https://sparse.tamu.edu/."""
     searched = ssgetpy.search(
@@ -26,7 +26,7 @@ def suite_sparse_download(
         rowbounds=rowbounds,
         colbounds=colbounds,
     )
-    searched.download(destpath=path, format=format, extract=True)
+    searched.download(destpath=path, format=matrixformat, extract=True)
 
 
 def suite_sparse_load(which, /, path="./data/matrices/"):

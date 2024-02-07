@@ -6,7 +6,6 @@ import jax.experimental.sparse
 import jax.numpy as jnp
 import tqdm
 from matfree import hutchinson
-
 from matfree_extensions import exp_util
 from matfree_extensions import slq as slq_extensions
 
@@ -109,8 +108,7 @@ def estimator(integrand_func, *, nrows, nsamples, nbatches):
         estimate_approximate, num=nbatches
     )
     estimate_approximate = jax.value_and_grad(estimate_approximate, argnums=1)
-    estimate_approximate = jax.jit(estimate_approximate)
-    return estimate_approximate
+    return jax.jit(estimate_approximate)
 
 
 if __name__ == "__main__":
@@ -126,7 +124,8 @@ if __name__ == "__main__":
 
     # Construct a problem
     # bcsstm08:
-    # 7 eigvals > 1000, a lot at 1000, another 4 in the low hundreds, another 4 in the tens,
+    # 7 eigvals > 1000, a lot at 1000, another 4 in the low hundreds,
+    # another 4 in the tens,
     # and a lot of small ones.
     (matvec, parameters), error_func, num_rows, eigvals = problem_setup("bcsstm08")
 

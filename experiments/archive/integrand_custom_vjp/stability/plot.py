@@ -1,8 +1,7 @@
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from tueplots import axes, bundles, markers
-
 from matfree_extensions import exp_util
+from tueplots import axes, bundles, markers
 
 plt.rcParams.update(
     bundles.icml2022(column="full", family="sans-serif", nrows=1, ncols=2)

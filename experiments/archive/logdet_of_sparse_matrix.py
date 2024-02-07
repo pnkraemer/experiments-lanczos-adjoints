@@ -5,7 +5,6 @@ import jax
 import jax.experimental.sparse
 import jax.numpy as jnp
 from matfree import hutchinson, slq
-
 from matfree_extensions import bcoo_random_spd, integrand_slq_spd_value_and_grad
 
 n = 1_000  # nrows/ncols

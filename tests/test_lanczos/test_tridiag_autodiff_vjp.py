@@ -4,7 +4,6 @@ import functools
 import jax.flatten_util
 import jax.numpy as jnp
 from matfree import test_util
-
 from matfree_extensions import lanczos
 
 

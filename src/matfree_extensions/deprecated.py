@@ -9,12 +9,13 @@ from matfree import lanczos
 
 
 def integrand_spd_value_and_grad(matfun, order, matvec, /):
-    """Construct an integrand that computes the value and gradient of SLQ for SPD matrices.
+    """Construct an integrand that computes the value and gradient for SPD matrices.
 
     This yields E[value_and_grad()], and is therefore neither forward- nor
     reverse-mode. It is rather a "clever implementation" of what is common
     in the GP community (clever because it requires a single backward-pass
-    over a parameter-to-scalar function instead of propagating kernel parameters forward).
+    over a parameter-to-scalar function instead of propagating
+    kernel parameters forward).
 
     Use this function if SLQ is the entire computational chain, i.e.,
     if neither forward- nor reverse-mode are strictly required.
@@ -73,7 +74,8 @@ def integrand_spd_value_and_grad(matfun, order, matvec, /):
 def integrand_spd_custom_vjp_recursive(matfun, order, matvec, /):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
-    The custom VJP recursively calls into quadform(), and as such, allows higher derivatives.
+    The custom VJP recursively calls into quadform(),
+    and as such, allows higher derivatives.
     But this comes at the price of calling Lanczos twice more in the backward pass,
     which makes it more costly for computing gradients.
     """

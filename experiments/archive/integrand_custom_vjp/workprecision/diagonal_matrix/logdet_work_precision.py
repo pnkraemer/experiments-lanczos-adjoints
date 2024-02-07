@@ -5,7 +5,6 @@ import jax.experimental.sparse
 import jax.numpy as jnp
 import tqdm
 from matfree import hutchinson, slq
-
 from matfree_extensions import integrand_slq_spd_custom_vjp
 
 
@@ -76,8 +75,7 @@ def estimator(integrand_func, *, nrows, nsamples):
     x_like = jnp.ones((nrows,))
     sampler = hutchinson.sampler_rademacher(x_like, num=nsamples)
     estimate_approximate = hutchinson.hutchinson(integrand_func, sampler)
-    estimate_approximate = jax.jit(estimate_approximate)
-    return estimate_approximate
+    return jax.jit(estimate_approximate)
 
 
 if __name__ == "__main__":

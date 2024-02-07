@@ -2,9 +2,8 @@ import os
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from tueplots import axes, figsizes, fontsizes
-
 from matfree_extensions import exp_util
+from tueplots import axes, figsizes, fontsizes
 
 # Plotting-configuration
 plt.rcParams.update(figsizes.neurips2023(nrows=1, ncols=2))
@@ -44,11 +43,7 @@ axes["spy"].invert_yaxis()
 # Plot the linear scale
 axes["linear"].set_title("Linear scale")
 axes["linear"].plot(
-    krylov_depths,
-    times_fwdpass,
-    linestyle="dashed",
-    color="black",
-    label=label_fwd,
+    krylov_depths, times_fwdpass, linestyle="dashed", color="black", label=label_fwd
 )
 axes["linear"].plot(krylov_depths, times_custom, label=label_adjoint)
 axes["linear"].plot(krylov_depths, times_autodiff, label=label_autodiff)
@@ -57,11 +52,7 @@ axes["linear"].plot(krylov_depths, times_autodiff, label=label_autodiff)
 # Plot the log-scale
 axes["log"].set_title("Logarithmic scale")
 axes["log"].semilogy(
-    krylov_depths,
-    times_fwdpass,
-    linestyle="dashed",
-    color="black",
-    label=label_fwd,
+    krylov_depths, times_fwdpass, linestyle="dashed", color="black", label=label_fwd
 )
 axes["log"].semilogy(krylov_depths, times_custom, label=label_adjoint)
 axes["log"].semilogy(krylov_depths, times_autodiff, label=label_autodiff)
