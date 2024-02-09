@@ -64,10 +64,6 @@ for reortho in [True]:
     # print(betas)
     # print(beta)
 
-    # todo: figure out whether max-order Krylov spaces imply
-    #  that A @ x_K projected onto the Lanczos vectors is invariant
-    #  and if so, whether the Krylov-projection is
-    #  an invariance for the Lanczos vectors.
     (dxs, (dalphas, dbetas)), (dx, dbeta) = random_like(
         (xs, (alphas, betas)), (x, beta)
     )
@@ -77,24 +73,20 @@ for reortho in [True]:
     dxs = jnp.concatenate([dxs, dx[None]])
     dbetas = jnp.concatenate([dbetas, dbeta[None]])
 
-    # Important: reorthogonalisation only works if
-    # dxs is orthogonal to xs (including if it is zero)
-    # dxs1 = dxs - dxs @ xs.T @ xs
-    # dxs2 = dxs @ xs.T @ xs
-    # # dxs = dxs / jnp.trace(dxs)  # scale to unit(ish) values
-    # print(dxs)
-
-    # dxs2 = jnp.zeros_like(dxs)
-
-    # print(dxs)
-    # dxs =  dxs @ (xs.T @ xs)
-    # dxs = xs @ sym(xs.T @ dxs)
-    # dxs = xs @ skew(xs.T @ dxs) + dxs - xs @ xs.T @ dxs
-    # print(dxs)
-
-    dalphas = jnp.zeros_like(dalphas)
-    dbetas = jnp.zeros_like(dbetas)
-    _, (lambda_0, lambda_1N, mus, nus, xis) = lanczos._adjoint_pass(
+    (dv_ref, dp_ref), _ = lanczos._adjoint_pass(
+        matvec=matvec,
+        params=(params,),
+        initvec_norm=jnp.linalg.norm(vector),
+        alphas=alphas,
+        betas=betas,
+        xs=xs,
+        dalphas=dalphas,
+        dbetas=dbetas,
+        dxs=dxs,
+        reortho=False,
+    )
+    print(dv_ref, dp_ref)
+    (dv, dp), _ = lanczos.matrix_adjoint(
         matvec=matvec,
         params=(params,),
         initvec_norm=jnp.linalg.norm(vector),
@@ -107,20 +99,4 @@ for reortho in [True]:
         reortho=False,
     )
 
-    lambdas = jnp.concatenate([lambda_0[None], lambda_1N])
-
-    print(lambdas)
-    print()
-    print(xs)
-    print()
-    print(betas)
-    print(betas**2)
-    print()
-
-    print(alphas)
-
-    # # xs = jnp.concatenate([xs, (matrix @ (xs[-1]))[None]])
-    # print(xs.T @ xs)
-    # print(xs @ xs.T)
-    # print()
-    # print(lambdas - lambdas @ xs.T @ xs)
+    print(dv, dp)

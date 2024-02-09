@@ -219,46 +219,69 @@ def adjoint(
             reortho=reortho,
         )
 
-    dalphas1 = dalphas
-    dbetas1 = dbetas
-    dxs1 = jnp.zeros_like(dxs)
-    output1 = _adjoint_pass(
+    dxs_in = dxs @ (xs.T @ xs)
+    dxs_out = dxs - dxs_in
+
+    dalphas_out = dalphas
+    dbetas_out = dbetas
+    output_out = _adjoint_pass(
         matvec=matvec,
         params=params,
         initvec_norm=initvec_norm,
         alphas=alphas,
         betas=betas,
         xs=xs,
-        dalphas=dalphas1,
-        dbetas=dbetas1,
-        dxs=dxs1,
+        dalphas=dalphas_out,
+        dbetas=dbetas_out,
+        dxs=dxs_out,
         reortho=True,
+        reortho_mode="out",
     )
 
-    dalphas2 = jnp.zeros_like(dalphas1)
-    dbetas2 = jnp.zeros_like(dbetas1)
-    dxs2 = dxs
-    output2 = _adjoint_pass(
+    dalphas_in = jnp.zeros_like(dalphas)
+    dbetas_in = jnp.zeros_like(dbetas)
+    output_in = _adjoint_pass(
         matvec=matvec,
         params=params,
         initvec_norm=initvec_norm,
         alphas=alphas,
         betas=betas,
         xs=xs,
-        dalphas=dalphas2,
-        dbetas=dbetas2,
-        dxs=dxs2,
-        reortho=False,
+        dalphas=dalphas_in,
+        dbetas=dbetas_in,
+        dxs=dxs_in,
+        reortho=True,
+        reortho_mode="in",
     )
-    return jax.tree_util.tree_map(lambda a, b: a + b, output1, output2)
+    return jax.tree_util.tree_map(lambda a, b: a + b, output_out, output_in)
 
 
 def _adjoint_pass(
-    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs, reortho
+    *,
+    matvec,
+    params,
+    initvec_norm,
+    alphas,
+    betas,
+    xs,
+    dalphas,
+    dbetas,
+    dxs,
+    reortho,
+    reortho_mode=None,
 ):
+    # If reortho_mode is selected, reortho must be true
+    if reortho_mode is not None and not reortho:
+        raise ValueError
+
     def adjoint_step(xi_and_lambda, inputs):
         return _adjoint_step(
-            *xi_and_lambda, matvec=matvec, params=params, **inputs, reortho=reortho
+            *xi_and_lambda,
+            matvec=matvec,
+            params=params,
+            **inputs,
+            reortho=reortho,
+            reortho_mode=reortho_mode,
         )
 
     # Scan over all input gradients and output values
@@ -304,6 +327,7 @@ def _adjoint_step(
     a,
     b,
     reortho: bool,
+    reortho_mode: str,
 ):
     # Read inputs
     (xplus, x) = xs
@@ -314,10 +338,20 @@ def _adjoint_step(
     nu = da + x.T @ xi
     lambda_ = -xi + mu * xplus + nu * x
 
+    # lambda_ = xs_all.T @ xs_all @ lambda_
     if reortho:
-        zeros = jnp.zeros_like(lambda_)
-        xs_all = xs_all.at[idx, :].set(zeros)
-        lambda_ = lambda_ - xs_all.T @ (xs_all @ lambda_)
+        if reortho_mode == "out":
+            zeros = jnp.zeros_like(lambda_)
+            xs_all = xs_all.at[idx, :].set(zeros)
+            lambda_ = lambda_ - xs_all.T @ (xs_all @ lambda_)
+        elif reortho_mode == "in":
+            lambda_ = xs_all.T @ xs_all @ lambda_
+            # print(lambda_)
+            # print(lambda_new)
+            # print()
+        else:
+            msg = "reortho_mode not provided"
+            raise ValueError(msg)
 
     # Value-and-grad of matrix-vector product
     matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
