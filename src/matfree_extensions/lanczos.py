@@ -113,7 +113,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dbetas=dbetas,
             dxs=dxs,
             # Always set to 'False' until we figure this out properly.
-            reortho=reortho,
+            reortho=False,
         )
         return grads
 
@@ -377,6 +377,7 @@ def matrix_adjoint(
     E_K = jnp.eye(len(alphas) + 1)[:, : len(alphas)]
 
     # Compute M
+    # todo: this one still feels wrong...
     XX = dxs.T @ xs + E_K @ (dT.T @ T) @ E_K.T - T @ dT.T  # missing c and dc
     M = -jnp.tril(XX)
     MM = M + M.T - jnp.diag(jnp.diag(M))
