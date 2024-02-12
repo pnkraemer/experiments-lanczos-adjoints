@@ -376,11 +376,13 @@ def matrix_adjoint(
 
     # P, = params
     # A = P + P.T
+    (A,) = params
 
     XX = dxs.T @ xs + E_K @ (dT.T @ T) @ E_K.T - T @ dT.T  # missing c and dc
     M = -jnp.tril(XX)
     MM = M + M.T - jnp.diag(jnp.diag(M))
-    Xi = (dxs + xs @ MM).T
+
+    Xi = -(dxs + xs @ MM).T
 
     lambda_kplus = Xi[-1] / betas[-1]
     lambda_k = (
@@ -388,18 +390,21 @@ def matrix_adjoint(
     ) / betas[-2]
 
     lambdas = [lambda_kplus, lambda_k]
-    betas_ = jnp.concatenate([jnp.ones((1,)), betas[:-1]])
+
+    betas_ = jnp.concatenate([-jnp.ones((1,)), betas[:-1]])
     for bminus, a, bplus, xi in zip(
         reversed(betas_[:-1]),
         reversed(alphas[:-1]),
         reversed(betas_[1:]),
-        reversed(Xi[:-1]),
+        reversed(Xi[:-2]),
     ):
         lambda_kminus = (
             xi - bplus * lambda_kplus - a * lambda_k + matvec(lambda_k, *params)
         ) / bminus
+
+        lambdas.append(lambda_kminus)
         lambda_k, lambda_kplus = lambda_kminus, lambda_k
-        lambdas.append(lambda_k)
+
     dv = lambda_k / initvec_norm
 
     # dv = ((lambda_k.T @ xs[:, 0]) * xs[:, 0] - lambda_k) / initvec_norm
@@ -412,12 +417,46 @@ def matrix_adjoint(
     # print(T @ dT.T)
     # assert False
     #
+
+    rho, *lambdas_ = lambdas
+    lambdas_ = jnp.asarray(lambdas_)
+    e1, e_K = jnp.eye(len(alphas) + 1)[[0, -1], :]
+
+    # Verify the original system
+    print("Residual of original system:", A @ xs @ E_K - xs @ T)
+
+    # Verify the solved system
+    # print(T)
+    L = lambdas_
+    print(
+        "Residual of new system:",
+        A.T @ L.T @ E_K.T - L.T @ T.T + jnp.outer(rho, e1) + Xi.T,
+    )
+
+    #
+    # expected = (
+    #     dxs.T @ xs
+    #     + E_K @ dT.T @ T @ E_K.T
+    #     + E_K @ lambdas_ @ A @ xs @ e_K @ e_K.T
+    #     - T @ dT.T
+    #     + jnp.outer(e1, (rho.T @ xs))
+    # )
+    #
+
     return (dv, 0.0), lambdas
 
 
 def _dense_matrix(diag, off_diag):
     k = len(diag)
+
+    # Zero matrix
     T = jnp.zeros((k + 1, k))
+
+    # Diagonal
     T = T.at[:k, :k].set(T[:k, :k] + jnp.diag(diag))
+
+    # Upper diagonal
     T = T.at[:k, :k].set(T[:k, :k] + jnp.diag(off_diag[:-1], 1))
+
+    # Lower diagonal
     return T.at[1:, :k].set(T[1:, :k] + jnp.diag(off_diag))

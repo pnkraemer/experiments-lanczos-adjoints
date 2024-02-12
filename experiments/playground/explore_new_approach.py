@@ -11,21 +11,21 @@ def random_like(*tree):
     # flat_like = jnp.arange(1.0, 1.0 + len(flat))
     flat_like = 0.1 + 0.9 * jax.random.uniform(jax.random.PRNGKey(1), shape=flat.shape)
     unflat = unflatten(flat_like)
-    return jax.tree_util.tree_map(lambda s: s / jnp.mean(s), unflat)
+    return jax.tree_util.tree_map(lambda s: s, unflat)
 
 
-def _sym(m):
-    return jnp.triu(m) - jnp.diag(0.5 * jnp.diag(m))
+# def _sym(m):
+#     return jnp.triu(m) - jnp.diag(0.5 * jnp.diag(m))
 
 
-jnp.set_printoptions(2)
+jnp.set_printoptions(3)
 
 # Set up a test-matrix
-n = 15
+n = 60
 eigvals = jnp.arange(2.0, 2.0 + n)
 # eigvals = eigvals.at[n//2:].set(0.00001)
 matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
-params = _sym(matrix)
+params = matrix
 
 
 # Set up an initial vector
@@ -34,7 +34,7 @@ vector /= jnp.linalg.norm(vector)
 
 
 def matvec(v, p):
-    return (p + p.T) @ v
+    return p @ v
 
 
 # krylov_depth = 3 * n // 4
@@ -69,10 +69,11 @@ for reortho in [True]:
         dxs=dxs,
         reortho=False,
     )
-    print(lambdas.shape)
+    # print(lambdas.shape)
     print("Reference:", dv_ref)
 
-    print()
+    # print(dp_ref)
+    # print()
 
     # print()
 
@@ -87,16 +88,25 @@ for reortho in [True]:
         dbetas=dbetas,
         dxs=dxs,
     )
+    print(dv @ vector)
+
+    # print(dv)
 
     print()
-    print(lambdas)
+
     print()
-    print(lambdas @ xs.T)
-    print()
+    # print(xs.T @ lambdas)
+
+    # print(lambdas @ xs.T)
 
     import matplotlib.pyplot as plt
 
-    plt.imshow(lambdas @ xs.T)
+    ortho = lambdas @ xs.T
+    # ortho = xs.T @ lambdas
+    ortho = jnp.log10(jnp.abs(ortho) + jnp.finfo(jnp.dtype(ortho)).eps)
+
+    plt.imshow(ortho)
+    plt.colorbar()
     plt.show()
     # print(lambdas[0] - vector * (vector.T @ lambdas[0]))
     # print(lambdas[0] @ vector)
