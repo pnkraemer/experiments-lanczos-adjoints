@@ -379,27 +379,28 @@ def matrix_adjoint(
 
     XX = dxs.T @ xs + E_K @ (dT.T @ T) @ E_K.T - T @ dT.T  # missing c and dc
     M = -jnp.tril(XX)
-    Xi = (dxs + xs @ (M + M.T)).T
-    Xi_ = jnp.concatenate([jnp.zeros_like(Xi[[0], :]), Xi])
+    MM = M + M.T - jnp.diag(jnp.diag(M))
+    Xi = (dxs + xs @ MM).T
 
     lambda_kplus = Xi[-1] / betas[-1]
     lambda_k = (
         Xi[-2] - alphas[-1] * lambda_kplus + matvec(lambda_kplus, *params)
     ) / betas[-2]
+
     lambdas = [lambda_kplus, lambda_k]
-    betas_ = jnp.concatenate([-jnp.ones((1,)), betas[:-1]])
+    betas_ = jnp.concatenate([jnp.ones((1,)), betas[:-1]])
     for bminus, a, bplus, xi in zip(
         reversed(betas_[:-1]),
         reversed(alphas[:-1]),
         reversed(betas_[1:]),
-        reversed(Xi_[:-1]),
+        reversed(Xi[:-1]),
     ):
         lambda_kminus = (
             xi - bplus * lambda_kplus - a * lambda_k + matvec(lambda_k, *params)
         ) / bminus
         lambda_k, lambda_kplus = lambda_kminus, lambda_k
         lambdas.append(lambda_k)
-    dv = lambda_k * initvec_norm
+    dv = lambda_k / initvec_norm
 
     # dv = ((lambda_k.T @ xs[:, 0]) * xs[:, 0] - lambda_k) / initvec_norm
 
@@ -411,7 +412,6 @@ def matrix_adjoint(
     # print(T @ dT.T)
     # assert False
     #
-
     return (dv, 0.0), lambdas
 
 

@@ -57,7 +57,7 @@ for reortho in [True]:
     dxs = jnp.concatenate([dxs, dx[None]])
     dbetas = jnp.concatenate([dbetas, dbeta[None]])
 
-    (dv_ref, dp_ref), (lambda0, *_) = lanczos._adjoint_pass(
+    (dv_ref, dp_ref), (lambda0, lambdas, *_) = lanczos._adjoint_pass(
         matvec=matvec,
         params=(params,),
         initvec_norm=jnp.linalg.norm(vector),
@@ -69,8 +69,11 @@ for reortho in [True]:
         dxs=dxs,
         reortho=False,
     )
-    # print("Reference:", lambda0)
-    # print()
+    print(lambdas.shape)
+    print("Reference:", dv_ref)
+
+    print()
+
     # print()
 
     (dv, dp), lambdas = lanczos.matrix_adjoint(
@@ -85,7 +88,17 @@ for reortho in [True]:
         dxs=dxs,
     )
 
+    print()
+    print(lambdas)
+    print()
+    print(lambdas @ xs.T)
+    print()
+
+    import matplotlib.pyplot as plt
+
+    plt.imshow(lambdas @ xs.T)
+    plt.show()
     # print(lambdas[0] - vector * (vector.T @ lambdas[0]))
     # print(lambdas[0] @ vector)
-    print("product", lambdas @ xs.T)
-    print("product", lambdas.T @ xs)
+    # print("product", lambdas @ xs.T)
+    # print("product", lambdas.T @ xs)
