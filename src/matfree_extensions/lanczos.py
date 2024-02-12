@@ -367,31 +367,32 @@ def _adjoint_step(
 def matrix_adjoint(
     *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs
 ):
+    # Transpose the inputs (so code matches maths)
     xs = xs.T
     dxs = dxs.T
 
+    # Assemble the dense matrices
     T = _dense_matrix(alphas, betas)
     dT = _dense_matrix(dalphas, dbetas)
     E_K = jnp.eye(len(alphas) + 1)[:, : len(alphas)]
 
-    # P, = params
-    # A = P + P.T
-    (A,) = params
-
+    # Compute M
     XX = dxs.T @ xs + E_K @ (dT.T @ T) @ E_K.T - T @ dT.T  # missing c and dc
     M = -jnp.tril(XX)
     MM = M + M.T - jnp.diag(jnp.diag(M))
 
-    Xi = -(dxs + xs @ MM).T
+    # Set up the linear system
+    Xi = (dxs + xs @ MM).T
 
+    # Initialise the linear-system solve
     lambda_kplus = Xi[-1] / betas[-1]
     lambda_k = (
         Xi[-2] - alphas[-1] * lambda_kplus + matvec(lambda_kplus, *params)
     ) / betas[-2]
-
     lambdas = [lambda_kplus, lambda_k]
 
-    betas_ = jnp.concatenate([-jnp.ones((1,)), betas[:-1]])
+    # Solve the linear system
+    betas_ = jnp.concatenate([jnp.ones((1,)), betas[:-1]])
     for bminus, a, bplus, xi in zip(
         reversed(betas_[:-1]),
         reversed(alphas[:-1]),
@@ -405,44 +406,49 @@ def matrix_adjoint(
         lambdas.append(lambda_kminus)
         lambda_k, lambda_kplus = lambda_kminus, lambda_k
 
+    lambdas = jnp.stack(list(reversed(lambdas)))
+
+    # Verify the original system
+    (A,) = params
+    machine_epsilon = jnp.sqrt(jnp.finfo(jnp.dtype(A)).eps)
+    residual_original = A @ xs @ E_K - xs @ T
+    assert jnp.linalg.norm(residual_original) / jnp.sqrt(xs.size) < (machine_epsilon)
+
+    # Verify the solved system
+    rho, *L = lambdas
+    L = jnp.asarray(L)
+    e1, e_K = jnp.eye(len(alphas) + 1)[[0, -1], :]
+    residual_new = A.T @ L.T @ E_K.T - L.T @ T.T - jnp.outer(rho, e1) + Xi.T
+    assert jnp.linalg.norm(residual_new) / jnp.sqrt(xs.size) < (machine_epsilon)
+
+    # Verify z_c = 0
+    assert jnp.abs(rho.T @ xs[:, 0]) < (machine_epsilon)
+
+    # Verify z_Q = 0
+    residual_Z = dxs.T + E_K @ L @ A - T @ L + MM @ xs.T - jnp.outer(e1, rho)
+    assert jnp.linalg.norm(residual_Z) / jnp.sqrt(residual_Z.size) < machine_epsilon
+
+    # Verify (Z_Q).T @ Q = 0
+    res1 = dxs.T @ xs + E_K @ dT.T @ T @ E_K.T
+    res2 = E_K @ L @ A @ xs @ e_K @ e_K.T
+    res3 = -T @ dT.T + MM + jnp.outer(e1, rho) @ xs
+    residual_Q = res1 + res2 + res3
+    # todo: this residual is only zero on the lower-triangular component.
+    #  the upper triangular is wrong. This is probably because we
+    #  should not be allowed to compute M by only computing the lower triangular....
+    assert jnp.linalg.norm(residual_Q) / jnp.sqrt(residual_Q.size) < machine_epsilon
+
+    # Verify Z_T = 0
+    residual_T = L @ xs - dT.T
+    # todo: the lower-triangular and the tri-diagonal parts are correct.
+    #  the remaining part of the upper is off. Is this beacuse the residual
+    #  above is only correct for the lower-triangular part?
+    assert jnp.linalg.norm(residual_T) / jnp.sqrt(residual_T.size) < machine_epsilon
+
+    # Compute the gradients
     dv = lambda_k / initvec_norm
 
     # dv = ((lambda_k.T @ xs[:, 0]) * xs[:, 0] - lambda_k) / initvec_norm
-
-    lambdas = jnp.stack(list(reversed(lambdas)))
-    # e1 = E_K[:, 0]
-
-    # print(M)
-    # print(dxs.T @ xs)
-    # print(T @ dT.T)
-    # assert False
-    #
-
-    rho, *lambdas_ = lambdas
-    lambdas_ = jnp.asarray(lambdas_)
-    e1, e_K = jnp.eye(len(alphas) + 1)[[0, -1], :]
-
-    # Verify the original system
-    print("Residual of original system:", A @ xs @ E_K - xs @ T)
-
-    # Verify the solved system
-    # print(T)
-    L = lambdas_
-    print(
-        "Residual of new system:",
-        A.T @ L.T @ E_K.T - L.T @ T.T + jnp.outer(rho, e1) + Xi.T,
-    )
-
-    #
-    # expected = (
-    #     dxs.T @ xs
-    #     + E_K @ dT.T @ T @ E_K.T
-    #     + E_K @ lambdas_ @ A @ xs @ e_K @ e_K.T
-    #     - T @ dT.T
-    #     + jnp.outer(e1, (rho.T @ xs))
-    # )
-    #
-
     return (dv, 0.0), lambdas
 
 
