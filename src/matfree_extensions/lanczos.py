@@ -362,3 +362,62 @@ def _adjoint_step(
 
     # Return values
     return (xs_all, xi, lambda_), (gradient_increment, lambda_, mu, nu, xi)
+
+
+def matrix_adjoint(
+    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs
+):
+    xs = xs.T
+    dxs = dxs.T
+
+    T = _dense_matrix(alphas, betas)
+    dT = _dense_matrix(dalphas, dbetas)
+    E_K = jnp.eye(len(alphas) + 1)[:, : len(alphas)]
+
+    # P, = params
+    # A = P + P.T
+
+    XX = dxs.T @ xs + E_K @ (dT.T @ T) @ E_K.T - T @ dT.T  # missing c and dc
+    M = -jnp.tril(XX)
+    Xi = (dxs + xs @ (M + M.T)).T
+    Xi_ = jnp.concatenate([jnp.zeros_like(Xi[[0], :]), Xi])
+
+    lambda_kplus = Xi[-1] / betas[-1]
+    lambda_k = (
+        Xi[-2] - alphas[-1] * lambda_kplus + matvec(lambda_kplus, *params)
+    ) / betas[-2]
+    lambdas = [lambda_kplus, lambda_k]
+    betas_ = jnp.concatenate([-jnp.ones((1,)), betas[:-1]])
+    for bminus, a, bplus, xi in zip(
+        reversed(betas_[:-1]),
+        reversed(alphas[:-1]),
+        reversed(betas_[1:]),
+        reversed(Xi_[:-1]),
+    ):
+        lambda_kminus = (
+            xi - bplus * lambda_kplus - a * lambda_k + matvec(lambda_k, *params)
+        ) / bminus
+        lambda_k, lambda_kplus = lambda_kminus, lambda_k
+        lambdas.append(lambda_k)
+    dv = lambda_k * initvec_norm
+
+    # dv = ((lambda_k.T @ xs[:, 0]) * xs[:, 0] - lambda_k) / initvec_norm
+
+    lambdas = jnp.stack(list(reversed(lambdas)))
+    # e1 = E_K[:, 0]
+
+    # print(M)
+    # print(dxs.T @ xs)
+    # print(T @ dT.T)
+    # assert False
+    #
+
+    return (dv, 0.0), lambdas
+
+
+def _dense_matrix(diag, off_diag):
+    k = len(diag)
+    T = jnp.zeros((k + 1, k))
+    T = T.at[:k, :k].set(T[:k, :k] + jnp.diag(diag))
+    T = T.at[:k, :k].set(T[:k, :k] + jnp.diag(off_diag[:-1], 1))
+    return T.at[1:, :k].set(T[1:, :k] + jnp.diag(off_diag))
