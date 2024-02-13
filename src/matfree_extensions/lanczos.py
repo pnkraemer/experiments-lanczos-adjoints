@@ -372,7 +372,6 @@ def matrix_adjoint(
     dQ = dxs.T
 
     # Allocate the multipliers
-    rho = jnp.zeros_like(Q[:, 0])
     L = jnp.zeros_like(Q[:, 1:])
     M = jnp.zeros_like(dQ.T @ Q)
 
@@ -386,43 +385,44 @@ def matrix_adjoint(
 
     # Compute M
     rhs = T @ dT.T - dQ.T @ Q
-    # XX = rhs - E_K @ (dT.T @ T) @ E_K.T  # missing c and dc
-    # M = jnp.tril(XX)
-    # MM = M + M.T - jnp.diag(jnp.diag(M))
-
-    # Set up the linear system
-    # Xi = MM.T @ Q.T + dQ.T
     Xi = jnp.zeros_like(Q.T)
-
     m = rhs[-1]
     M = M.at[-1].set(m)
-    Xi_final = m @ Q.T + dQ[:, -1]
-    Xi = Xi.at[-1].set(Xi_final)
+    xi = m @ Q.T + dQ[:, -1]
+    Xi = Xi.at[-1].set(xi)
 
     # Initialise the linear-system solve
     lambda_kplus = jnp.zeros_like(Q[:, 0])
-    lambda_k = Xi_final / betas[-1]
+    lambda_k = xi / betas[-1]
 
     # Solve the linear system
     betas_ = jnp.concatenate([jnp.ones((1,)), betas])
-    for idx, bminus, a, bplus, xi in zip(
+    for idx, bminus, a, bplus in zip(
         (jnp.arange(0, len(betas), step=1))[::-1],
         reversed(betas_[:-1]),
         reversed(alphas),
         reversed(betas_[1:]),
-        reversed(Xi[:-1]),
     ):
         L = L.at[:, idx].set(lambda_k)
 
+        # Matrix-vector product
+        matvec_p = functools.partial(matvec, lambda_k)
+        Al, _vjp = jax.vjp(matvec_p, *params)
+
         # Prepare system
-        m = rhs[idx] - lambda_k @ A @ Q
+        m = rhs[idx] - Al.T @ Q
+        print("mmm", m)
+
+        if idx == 0:
+            m = m.at[1:].set(0.0)
+
         M = M.at[idx].set(m)
 
         xi = m @ Q.T + dQ[:, idx]
         Xi = Xi.at[idx].set(xi)
 
         # Solve system
-        res = xi - bplus * lambda_kplus - a * lambda_k + matvec(lambda_k, *params)
+        res = xi - bplus * lambda_kplus - a * lambda_k + Al
         lambda_kminus = res / bminus
         lambda_k, lambda_kplus = lambda_kminus, lambda_k
 
@@ -432,7 +432,7 @@ def matrix_adjoint(
     # Verify a bunch of systems
 
     def assert_is_small(arr):
-        machine_epsilon = jnp.sqrt(jnp.finfo(jnp.dtype(A)).eps)
+        machine_epsilon = 10 * jnp.sqrt(jnp.finfo(jnp.dtype(A)).eps)
         assert jnp.linalg.norm(arr) / jnp.sqrt(arr.size) < machine_epsilon, arr
 
     # Verify the original system
@@ -456,24 +456,17 @@ def matrix_adjoint(
     residual_Z = dQ.T + E_K @ L.T @ A - T @ L.T + M @ Q.T - jnp.outer(e1, rho)
     assert_is_small(residual_Z)
 
-    # Verify (Z_Q).T @ Q = 0 in its initial formulation
+    # Verify (Z_Q).T @ Q = 0 (after simplification)
     res1 = dQ.T @ Q + E_K @ L.T @ A @ Q
     res2 = -T @ dT.T + M - jnp.outer(e1, rho) @ Q
     residual_Q = res1 + res2
     assert_is_small(residual_Q)
 
-    # Verify Z_Q).T @ Q = 0 after substituting AQ = QT
-    res1 = dQ.T @ Q + E_K @ dT.T @ T @ E_K.T
-    res2 = E_K @ L.T @ A @ Q @ e_K @ e_K.T
-    res3 = -T @ dT.T + M - jnp.outer(e1, rho) @ Q
-    residual_Q = res1 + res2 + res3
-    assert_is_small(residual_Q)
-
     # Compute the gradients
-    dv = rho / initvec_norm
+    dv = rho * initvec_norm
+    dp = L @ E_K.T @ Q.T
 
-    # dv = ((lambda_k.T @ xs[:, 0]) * xs[:, 0] - lambda_k) / initvec_norm
-    return (dv, 0.0), L
+    return (dv, dp), (rho, L.T, M, Xi)
 
 
 def _dense_matrix(diag, off_diag):

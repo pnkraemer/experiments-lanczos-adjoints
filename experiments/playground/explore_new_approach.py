@@ -9,19 +9,19 @@ from matfree_extensions import lanczos
 
 def random_like(*tree):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)
-    flat_like = 0.1 + 0.9 * jax.random.uniform(jax.random.PRNGKey(1), shape=flat.shape)
+    flat_like = jnp.arange(1.0, 1.0 + len(flat), step=1.0)
     unflat = unflatten(flat_like)
-    return jax.tree_util.tree_map(lambda s: s, unflat)
+    return jax.tree_util.tree_map(lambda s: s / jnp.mean(s), unflat)
 
 
 # def _sym(m):
 #     return jnp.triu(m) - jnp.diag(0.5 * jnp.diag(m))
 
 
-jnp.set_printoptions(3, suppress=True)
+jnp.set_printoptions(5, suppress=True)
 
 # Set up a test-matrix
-n = 18
+n = 15
 eigvals = jnp.arange(2.0, 2.0 + n)
 matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 params = matrix
@@ -38,55 +38,79 @@ vector /= jnp.linalg.norm(vector)
 
 # krylov_depth = 3 * n // 4
 # krylov_depth = n // 2 + 1
+# krylov_depth = n // 2
 krylov_depth = n // 2
-# krylov_depth = n - 1
+# krylov_depth=1
 
-# for reortho, axis in zip([False, False], axes):
-for reortho in [True]:
-    # Forward pass
-    (xs, (alphas, betas)), (x, beta) = lanczos.forward(
-        matvec, krylov_depth, vector, params, reortho=reortho
-    )
 
-    # Random gradient values to backward-pass
-    (dxs, (dalphas, dbetas)), (dx, dbeta) = random_like(
-        (xs, (alphas, betas)), (x, beta)
-    )
-    xs = jnp.concatenate([xs, x[None]])
-    betas = jnp.concatenate([betas, beta[None]])
-    dxs = jnp.concatenate([dxs, dx[None]])
-    dbetas = jnp.concatenate([dbetas, dbeta[None]])
+# Forward pass
+def fwd(v0, p):
+    (Q, (A, B)), (q_, b_) = lanczos.forward(matvec, krylov_depth, v0, p, reortho=True)
+    Q = jnp.concatenate([Q, q_[None]])
+    B = jnp.concatenate([B, b_[None]])
+    return Q, A, B
 
-    # Adjoint pass (reference)
-    (dv_ref, dp_ref), (lambda0, lambda1N, *_) = lanczos._adjoint_pass(
-        matvec=matvec,
-        params=(params,),
-        initvec_norm=jnp.linalg.norm(vector),
-        alphas=alphas,
-        betas=betas,
-        xs=xs,
-        dalphas=dalphas,
-        dbetas=dbetas,
-        dxs=dxs,
-        reortho=False,
-    )
 
-    # Adjoint pass (to be computed)
-    (dv, dp), lambdas = lanczos.matrix_adjoint(
-        matvec=matvec,
-        params=(params,),
-        initvec_norm=jnp.linalg.norm(vector),
-        alphas=alphas,
-        betas=betas,
-        xs=xs,
-        dalphas=dalphas,
-        dbetas=dbetas,
-        dxs=dxs,
-    )
+(xs, alphas, betas), VJP = jax.vjp(fwd, vector, params)
 
-    # Plot the bi-orthogonality of lambda and X
-    ortho = lambdas @ xs.T
-    ortho = jnp.log10(jnp.abs(ortho) + jnp.finfo(jnp.dtype(ortho)).eps)
-    plt.imshow(ortho)
-    plt.colorbar()
-    plt.show()
+# Random gradient values to backward-pass
+(dxs, dalphas, dbetas) = random_like(xs, alphas, betas)
+dv_ref, dp_ref = VJP((dxs, dalphas, dbetas))
+
+
+# Adjoint pass (reference)
+(dv1, dp1), _ = lanczos._adjoint_pass(
+    matvec=matvec,
+    params=(params,),
+    initvec_norm=jnp.linalg.norm(vector),
+    alphas=alphas,
+    betas=betas,
+    xs=xs,
+    dalphas=dalphas,
+    dbetas=dbetas,
+    dxs=dxs,
+    reortho=False,
+)
+
+
+# Adjoint pass (to be computed)
+(dv2, dp2), (_rho, L, M, Xi) = lanczos.matrix_adjoint(
+    matvec=matvec,
+    params=(params,),
+    initvec_norm=jnp.linalg.norm(vector),
+    alphas=alphas,
+    betas=betas,
+    xs=xs,
+    dalphas=dalphas,
+    dbetas=dbetas,
+    dxs=dxs,
+)
+
+
+# Print gradients wrt v0.
+#
+# todo: for full-rank Lanczos approximations,
+#  the matrix-adjoint yields a zero gradient wrt v
+#  which feels like the correct answer!
+#  Autodiff does not yield this zero-gradient. Why?
+#  does the matrix adjoint compute the adjoint of a different decomposition?
+#  Also, dv2 is orthogonal to _all_ Xs, not just the first one.
+#  what does that mean?
+#
+
+print(dv_ref @ xs.T)
+print()
+print(dv1 @ xs.T)
+print()
+print()
+print(dv2 @ xs.T)
+print()
+
+
+# Plot the bi-orthogonality of lambda and X
+ortho = L @ xs.T
+ortho = jnp.log10(jnp.abs(ortho) + jnp.finfo(jnp.dtype(ortho)).eps)
+plt.title("Log(L.T @ X)")
+plt.imshow(ortho)
+plt.colorbar()
+plt.show()
