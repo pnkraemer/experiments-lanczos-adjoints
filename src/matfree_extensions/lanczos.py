@@ -385,23 +385,23 @@ def matrix_adjoint(
     E_K = jnp.eye(len(alphas) + 1)[:, : len(alphas)]
 
     # Compute M
-    # todo: this one still feels wrong...
     rhs = T @ dT.T - dQ.T @ Q
-    XX = rhs - E_K @ (dT.T @ T) @ E_K.T  # missing c and dc
-    M = jnp.tril(XX)
-    MM = M + M.T - jnp.diag(jnp.diag(M))
+    # XX = rhs - E_K @ (dT.T @ T) @ E_K.T  # missing c and dc
+    # M = jnp.tril(XX)
+    # MM = M + M.T - jnp.diag(jnp.diag(M))
 
     # Set up the linear system
-    Xi = MM.T @ Q.T + dQ.T
+    # Xi = MM.T @ Q.T + dQ.T
+    Xi = jnp.zeros_like(Q.T)
 
     m = rhs[-1]
+    M = M.at[-1].set(m)
     Xi_final = m @ Q.T + dQ[:, -1]
+    Xi = Xi.at[-1].set(Xi_final)
 
     # Initialise the linear-system solve
     lambda_kplus = jnp.zeros_like(Q[:, 0])
     lambda_k = Xi_final / betas[-1]
-
-    print("A bunch of zeros?", lambda_k @ Q)
 
     # Solve the linear system
     betas_ = jnp.concatenate([jnp.ones((1,)), betas])
@@ -414,57 +414,60 @@ def matrix_adjoint(
     ):
         L = L.at[:, idx].set(lambda_k)
 
+        # Prepare system
         m = rhs[idx] - lambda_k @ A @ Q
+        M = M.at[idx].set(m)
+
         xi = m @ Q.T + dQ[:, idx]
-        # print()
-        # print("xi", xi)
-        # print()
+        Xi = Xi.at[idx].set(xi)
+
+        # Solve system
         res = xi - bplus * lambda_kplus - a * lambda_k + matvec(lambda_k, *params)
         lambda_kminus = res / bminus
         lambda_k, lambda_kplus = lambda_kminus, lambda_k
 
-        print("A bunch of zeros?", lambda_k @ Q)
-        # assert False
-
+    # Assign the final adjoint variable
     rho = lambda_k
 
+    # Verify a bunch of systems
+
+    def assert_is_small(arr):
+        machine_epsilon = jnp.sqrt(jnp.finfo(jnp.dtype(A)).eps)
+        assert jnp.linalg.norm(arr) / jnp.sqrt(arr.size) < machine_epsilon, arr
+
     # Verify the original system
-    machine_epsilon = jnp.sqrt(jnp.finfo(jnp.dtype(A)).eps)
     residual_original = A @ Q @ E_K - Q @ T
-    assert jnp.linalg.norm(residual_original) / jnp.sqrt(xs.size) < (machine_epsilon)
+    assert_is_small(residual_original)
 
     # Verify z_c = 0
     v = Q[:, 0] * initvec_norm
-    assert jnp.abs(rho.T @ v) < (machine_epsilon)
+    residual_c = rho.T @ v
+    assert_is_small(residual_c)
 
     # Verify Z_T = 0
     residual_T = L.T @ Q - dT.T
-    assert jnp.linalg.norm(residual_T) / jnp.sqrt(residual_T.size) < machine_epsilon
+    assert_is_small(residual_T)
 
     # Verify the solved system
     residual_new = A.T @ L @ E_K.T - L @ T.T - jnp.outer(rho, e1) + Xi.T
-    assert jnp.linalg.norm(residual_new) / jnp.sqrt(xs.size) < (machine_epsilon)
+    assert_is_small(residual_new)
 
     # Verify z_Q = 0
-    residual_Z = dQ.T + E_K @ L.T @ A - T @ L.T + MM @ Q.T - jnp.outer(e1, rho)
-    assert jnp.linalg.norm(residual_Z) / jnp.sqrt(residual_Z.size) < machine_epsilon
+    residual_Z = dQ.T + E_K @ L.T @ A - T @ L.T + M @ Q.T - jnp.outer(e1, rho)
+    assert_is_small(residual_Z)
 
     # Verify (Z_Q).T @ Q = 0 in its initial formulation
     res1 = dQ.T @ Q + E_K @ L.T @ A @ Q
-    res2 = -T @ dT.T + MM - jnp.outer(e1, rho) @ Q
-    print(res1 + res2)
-    print()
+    res2 = -T @ dT.T + M - jnp.outer(e1, rho) @ Q
+    residual_Q = res1 + res2
+    assert_is_small(residual_Q)
 
     # Verify Z_Q).T @ Q = 0 after substituting AQ = QT
     res1 = dQ.T @ Q + E_K @ dT.T @ T @ E_K.T
     res2 = E_K @ L.T @ A @ Q @ e_K @ e_K.T
-    res3 = -T @ dT.T + MM - jnp.outer(e1, rho) @ Q
+    res3 = -T @ dT.T + M - jnp.outer(e1, rho) @ Q
     residual_Q = res1 + res2 + res3
-    print(residual_Q)
-    # todo: this residual is only zero on the lower-triangular component.
-    #  the upper triangular is wrong. This is probably because we
-    #  should not be allowed to compute M by only computing the lower triangular....
-    assert jnp.linalg.norm(residual_Q) / jnp.sqrt(residual_Q.size) < machine_epsilon
+    assert_is_small(residual_Q)
 
     # Compute the gradients
     dv = rho / initvec_norm
