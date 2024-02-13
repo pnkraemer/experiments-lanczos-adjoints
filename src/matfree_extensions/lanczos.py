@@ -392,23 +392,19 @@ def matrix_adjoint(
     Xi = (dQ + Q @ MM).T
 
     # Initialise the linear-system solve
-    lambda_kplus = Xi[-1] / betas[-1]
-    lambda_k = (
-        Xi[-2] - alphas[-1] * lambda_kplus + matvec(lambda_kplus, *params)
-    ) / betas[-2]
-    L = L.at[:, -1].set(lambda_kplus)
+    lambda_kplus = jnp.zeros_like(Q[:, 0])
+    lambda_k = Xi[-1] / betas[-1]
 
     # Solve the linear system
-    betas_ = jnp.concatenate([jnp.ones((1,)), betas[:-1]])
+    betas_ = jnp.concatenate([jnp.ones((1,)), betas])
     for idx, bminus, a, bplus, xi in zip(
-        (jnp.arange(0, len(betas) - 1, step=1))[::-1],
+        (jnp.arange(0, len(betas), step=1))[::-1],
         reversed(betas_[:-1]),
-        reversed(alphas[:-1]),
+        reversed(alphas),
         reversed(betas_[1:]),
-        reversed(Xi[:-2]),
+        reversed(Xi[:-1]),
     ):
         L = L.at[:, idx].set(lambda_k)
-
         lambda_kminus = (
             xi - bplus * lambda_kplus - a * lambda_k + matvec(lambda_k, *params)
         ) / bminus
