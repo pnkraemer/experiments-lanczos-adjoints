@@ -389,6 +389,9 @@ def matrix_adjoint(
     T = _dense_matrix(alphas, betas)
     dT = _dense_matrix(dalphas, dbetas)
 
+    raise ValueError(
+        "continue here by creating a meaningful test, and slowly fixing it."
+    )
     assert False
     # Compute M
     rhs = T @ dT.T - dQ.T @ Q
