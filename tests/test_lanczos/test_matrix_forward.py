@@ -58,9 +58,16 @@ def test_mid_rank_reconstruction_satisfies_decomposition(n, krylov_depth):
     e_K = jnp.eye(krylov_depth)[-1]
     assert jnp.allclose(matrix @ Qt.T, Qt.T @ T + jnp.outer(residual, e_K), **tols)
 
+    # Verify the orthogonality
     eye = jnp.eye(krylov_depth)
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(T)).eps)
     assert jnp.allclose(Qt @ Qt.T, eye, atol=small_value)
+
+    # Verify the initial vector
+    assert jnp.allclose(Qt[0], vector * length, atol=small_value)
+
+    # Verify the residual's orthogonality
+    assert jnp.allclose(jnp.dot(residual, Qt[-1]), 0.0, atol=small_value)
 
 
 def _dense_tridiag(diagonal, off_diagonal):

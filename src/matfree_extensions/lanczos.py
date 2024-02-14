@@ -82,7 +82,8 @@ def integrand_spd_custom_vjp(matfun, order, matvec, /):
 
 def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
     def estimate(vec, *params):
-        return forward(matvec, krylov_depth, vec, *params, reortho=reortho)
+        *values, _ = forward(matvec, krylov_depth, vec, *params, reortho=reortho)
+        return values
 
     def estimate_fwd(vec, *params):
         value = estimate(vec, *params)
@@ -159,7 +160,7 @@ def forward(matvec, krylov_depth, vec, *params, reortho):
     # Reorganise the outputs
     decomposition = vectors[:-1], (diags, offdiags[:-1])
     remainder = vectors[-1], offdiags[-1]
-    return decomposition, remainder, jnp.linalg.norm(vec)
+    return decomposition, remainder, 1 / jnp.linalg.norm(vec)
 
 
 def _fwd_init(matvec, vec, *params):
