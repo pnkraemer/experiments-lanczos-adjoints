@@ -59,6 +59,14 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     z_c = dlength.T + rho.T @ vector
     z_T = dT.T - Lt @ Qt.T
     z_r = dresidual.T - e_K.T @ (Lt - gamma * Qt)
+    z_QtQ = (
+        dQt @ Qt.T
+        + dT.T @ T
+        - T @ dT.T
+        - e_1 @ (rho.T @ Qt.T)
+        + M
+        + gamma * e_K @ (residual @ Qt.T)
+    )
     z_Q = (
         dQt
         + Lt @ matrix
@@ -67,7 +75,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
         + M @ Qt
         + gamma * jnp.outer(e_K, residual)
     )
-    return z_Q, z_r, z_T, z_c
+    return z_Q, z_r, z_T, z_c, z_QtQ
 
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
@@ -94,7 +102,7 @@ def test_z_r(constraints):
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
 def test_z_T(constraints):
-    _, _, z_T, _ = constraints
+    _, _, z_T, *_ = constraints
 
     # Tie the tolerance to the floating-point accuracy
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_T)).eps)
@@ -105,13 +113,24 @@ def test_z_T(constraints):
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
 def test_z_c(constraints):
-    *_, z_c = constraints
+    *_, z_c, _ = constraints
 
     # Tie the tolerance to the floating-point accuracy
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_c)).eps)
     tols = {"atol": small_value, "rtol": small_value}
 
     assert jnp.allclose(z_c, 0.0, **tols), z_c
+
+
+@pytest_cases.parametrize_with_cases("constraints", ".")
+def test_z_QtQ(constraints):
+    *_, z_QtQ = constraints
+
+    # Tie the tolerance to the floating-point accuracy
+    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_QtQ)).eps)
+    tols = {"atol": small_value, "rtol": small_value}
+
+    assert jnp.allclose(z_QtQ, 0.0, **tols), z_QtQ
 
 
 def _dense_tridiag(diagonal, off_diagonal):
