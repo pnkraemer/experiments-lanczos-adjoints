@@ -372,7 +372,21 @@ def _adjoint_step(
 
 
 def matrix_adjoint(
-    *, matvec, params, alphas, betas, xs, res, norm, dalphas, dbetas, dxs, dres, dnorm
+    *,
+    matvec,
+    params,
+    alphas,
+    betas,
+    xs,
+    residual,
+    initlength,
+    dalphas,
+    dbetas,
+    dxs,
+    dresidual,
+    dinitlength,
+    w,
+    dw,
 ):
     # Transpose the inputs (so code matches maths)
     Q = xs.T
@@ -390,11 +404,16 @@ def matrix_adjoint(
     dT = _dense_matrix(dalphas, dbetas)
 
     # Initialize
-    gamma = e_K.T @ dT.T @ e_K - dres.T @ Q @ e_K
-    eta = dres.T + gamma * e_K.T @ Q.T
-
+    gamma = e_K.T @ dT.T @ e_K - dresidual.T @ Q @ e_K
+    eta = dresidual.T + gamma * e_K.T @ Q.T
     L = L.at[:, -1].set(eta)
-    return None, (L.T, jnp.zeros_like(res), M, gamma)
+
+    # Compute M
+    M = T @ dT.T - dT.T @ T - dQ.T @ Q - gamma * e_K @ (residual @ Q)
+
+    # Prepare the linear system
+
+    return None, (L.T, jnp.zeros_like(residual), M, gamma, 0.0)
 
     return None
     assert False

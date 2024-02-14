@@ -28,23 +28,28 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     Qt, (alphas, betas), residual, length = lanczos.matrix_forward(
         lambda s, p: p @ s, krylov_depth, vector, matrix
     )
+    w = jnp.eye(len(alphas))[-1]
+    dw = jnp.zeros_like(alphas)
+
     dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
         Qt, (alphas, betas), residual, length
     )
 
-    _grads, (Lt, rho, M, gamma) = lanczos.matrix_adjoint(
+    _grads, (Lt, rho, M, gamma, zeta) = lanczos.matrix_adjoint(
         matvec=lambda s, p: p @ s,
         params=(matrix,),
         alphas=alphas,
         betas=betas,
         xs=Qt,
-        res=residual,
-        norm=length,
+        residual=residual,
+        initlength=length,
         dalphas=dalphas,
         dbetas=dbetas,
         dxs=dQt,
-        dres=dresidual,
-        dnorm=dlength,
+        dresidual=dresidual,
+        dinitlength=dlength,
+        w=w,
+        dw=dw,
     )
 
     # Materialise the tridiagonal matrices
@@ -56,81 +61,38 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     e_K = jnp.eye(len(alphas))[-1]
 
     # Evaluate the constraints
-    z_c = dlength.T + rho.T @ vector
-    z_T = dT.T - Lt @ Qt.T
-    z_r = dresidual.T - e_K.T @ (Lt - gamma * Qt)
-    z_QtQ = (
-        dQt @ Qt.T
-        + dT.T @ T
-        - T @ dT.T
-        - e_1 @ (rho.T @ Qt.T)
-        + M
-        + gamma * e_K @ (residual @ Qt.T)
-    )
-    z_Q = (
-        dQt
-        + Lt @ matrix
-        - T @ Lt
-        - jnp.outer(e_1, rho)
-        + M @ Qt
-        + gamma * jnp.outer(e_K, residual)
-    )
-    return z_Q, z_r, z_T, z_c, z_QtQ
+    constraints = {
+        "c": dlength.T + rho.T @ vector,
+        "T": dT.T - Lt @ Qt.T,
+        "w": dw.T - residual.T @ Lt.T + 2 * zeta * w.T,
+        "r": dresidual.T - e_K.T @ (Lt - gamma * Qt),
+        "QtQ": (
+            dQt @ Qt.T
+            + dT.T @ T
+            - T @ dT.T
+            - e_1 @ (rho.T @ Qt.T)
+            + M
+            + gamma * e_K @ (residual @ Qt.T)
+        ),
+        "Q": (
+            dQt
+            + Lt @ matrix
+            - T @ Lt
+            - jnp.outer(e_1, rho)
+            + M @ Qt
+            + gamma * jnp.outer(e_K, residual)
+        ),
+    }
+    return constraints
 
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
-def test_z_Q(constraints):
-    z_Q, *_ = constraints
-
+@pytest_cases.parametrize("key", ["c", "T", "w", "r", "QtQ", "Q"])
+def test_constraint_is_zero(constraints, key):
     # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_Q)).eps)
+    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(constraints[key])).eps)
     tols = {"atol": small_value, "rtol": small_value}
-
-    assert jnp.allclose(z_Q, 0.0, **tols), z_Q
-
-
-@pytest_cases.parametrize_with_cases("constraints", ".")
-def test_z_r(constraints):
-    _, z_r, *_ = constraints
-
-    # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_r)).eps)
-    tols = {"atol": small_value, "rtol": small_value}
-
-    assert jnp.allclose(z_r, 0.0, **tols), z_r
-
-
-@pytest_cases.parametrize_with_cases("constraints", ".")
-def test_z_T(constraints):
-    _, _, z_T, *_ = constraints
-
-    # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_T)).eps)
-    tols = {"atol": small_value, "rtol": small_value}
-
-    assert jnp.allclose(z_T, 0.0, **tols), z_T
-
-
-@pytest_cases.parametrize_with_cases("constraints", ".")
-def test_z_c(constraints):
-    *_, z_c, _ = constraints
-
-    # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_c)).eps)
-    tols = {"atol": small_value, "rtol": small_value}
-
-    assert jnp.allclose(z_c, 0.0, **tols), z_c
-
-
-@pytest_cases.parametrize_with_cases("constraints", ".")
-def test_z_QtQ(constraints):
-    *_, z_QtQ = constraints
-
-    # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(z_QtQ)).eps)
-    tols = {"atol": small_value, "rtol": small_value}
-
-    assert jnp.allclose(z_QtQ, 0.0, **tols), z_QtQ
+    assert jnp.allclose(constraints[key], 0.0, **tols), constraints[key]
 
 
 def _dense_tridiag(diagonal, off_diagonal):
