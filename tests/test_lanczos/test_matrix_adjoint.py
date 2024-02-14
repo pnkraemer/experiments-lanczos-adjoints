@@ -61,7 +61,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     e_K = jnp.eye(len(alphas))[-1]
 
     # Evaluate the constraints
-    constraints = {
+    return {
         "c": dlength.T + rho.T @ vector,
         "T": dT.T - Lt @ Qt.T,
         "w": dw.T - residual.T @ Lt.T + 2 * zeta * w.T,
@@ -83,16 +83,18 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
             + gamma * jnp.outer(e_K, residual)
         ),
     }
-    return constraints
 
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
 @pytest_cases.parametrize("key", ["c", "T", "w", "r", "QtQ", "Q"])
 def test_constraint_is_zero(constraints, key):
+    constraint = constraints[key]
+
     # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(constraints[key])).eps)
-    tols = {"atol": small_value, "rtol": small_value}
-    assert jnp.allclose(constraints[key], 0.0, **tols), constraints[key]
+    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(constraint)).eps)
+
+    # Assert the constraints are essentially zero
+    assert jnp.allclose(constraint, 0.0, atol=small_value, rtol=small_value), constraint
 
 
 def _dense_tridiag(diagonal, off_diagonal):
