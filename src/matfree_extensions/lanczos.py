@@ -124,6 +124,12 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
     return estimate
 
 
+def matrix_forward(matvec, krylov_depth, vec, *params):
+    output = forward(matvec, krylov_depth, vec, *params, reortho=True)
+    (Q, (alphas, betas)), (q, beta), norm = output
+    return Q, (alphas, betas), q * beta, norm
+
+
 def forward(matvec, krylov_depth, vec, *params, reortho):
     # Pre-allocate
     vectors = jnp.zeros((krylov_depth + 1, len(vec)))
@@ -153,7 +159,7 @@ def forward(matvec, krylov_depth, vec, *params, reortho):
     # Reorganise the outputs
     decomposition = vectors[:-1], (diags, offdiags[:-1])
     remainder = vectors[-1], offdiags[-1]
-    return decomposition, remainder
+    return decomposition, remainder, jnp.linalg.norm(vec)
 
 
 def _fwd_init(matvec, vec, *params):
@@ -365,14 +371,14 @@ def _adjoint_step(
 
 
 def matrix_adjoint(
-    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs
+    *, matvec, params, alphas, betas, xs, res, norm, dalphas, dbetas, dxs, dres, dnorm
 ):
     # Transpose the inputs (so code matches maths)
     Q = xs.T
     dQ = dxs.T
 
     # Allocate the multipliers
-    L = jnp.zeros_like(Q[:, 1:])
+    L = jnp.zeros_like(Q)
     M = jnp.zeros_like(dQ.T @ Q)
 
     (A,) = params
@@ -381,8 +387,8 @@ def matrix_adjoint(
     # Assemble the dense matrices
     T = _dense_matrix(alphas, betas)
     dT = _dense_matrix(dalphas, dbetas)
-    E_K = jnp.eye(len(alphas) + 1)[:, : len(alphas)]
 
+    assert False
     # Compute M
     rhs = T @ dT.T - dQ.T @ Q
     Xi = jnp.zeros_like(Q.T)
@@ -411,7 +417,6 @@ def matrix_adjoint(
 
         # Prepare system
         m = rhs[idx] - Al.T @ Q
-        print("mmm", m)
 
         if idx == 0:
             m = m.at[1:].set(0.0)
@@ -470,6 +475,114 @@ def matrix_adjoint(
 
 
 def _dense_matrix(diag, off_diag):
+    return jnp.diag(diag) + jnp.diag(off_diag, 1) + jnp.diag(off_diag, -1)
+
+
+def matrix_adjoint_old(
+    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs
+):
+    # Transpose the inputs (so code matches maths)
+    Q = xs.T
+    dQ = dxs.T
+
+    # Allocate the multipliers
+    L = jnp.zeros_like(Q[:, 1:])
+    M = jnp.zeros_like(dQ.T @ Q)
+
+    (A,) = params
+    e1, e_K = jnp.eye(len(alphas) + 1)[[0, -1], :]
+
+    # Assemble the dense matrices
+    T = _dense_matrix_old(alphas, betas)
+    dT = _dense_matrix_old(dalphas, dbetas)
+    E_K = jnp.eye(len(alphas) + 1)[:, : len(alphas)]
+
+    # Compute M
+    rhs = T @ dT.T - dQ.T @ Q
+    Xi = jnp.zeros_like(Q.T)
+    m = rhs[-1]
+    M = M.at[-1].set(m)
+    xi = m @ Q.T + dQ[:, -1]
+    Xi = Xi.at[-1].set(xi)
+
+    # Initialise the linear-system solve
+    lambda_kplus = jnp.zeros_like(Q[:, 0])
+    lambda_k = xi / betas[-1]
+
+    # Solve the linear system
+    betas_ = jnp.concatenate([jnp.ones((1,)), betas])
+    for idx, bminus, a, bplus in zip(
+        (jnp.arange(0, len(betas), step=1))[::-1],
+        reversed(betas_[:-1]),
+        reversed(alphas),
+        reversed(betas_[1:]),
+    ):
+        L = L.at[:, idx].set(lambda_k)
+
+        # Matrix-vector product
+        matvec_p = functools.partial(matvec, lambda_k)
+        Al, _vjp = jax.vjp(matvec_p, *params)
+
+        # Prepare system
+        m = rhs[idx] - Al.T @ Q
+
+        if idx == 0:
+            m = m.at[1:].set(0.0)
+
+        M = M.at[idx].set(m)
+
+        xi = m @ Q.T + dQ[:, idx]
+        Xi = Xi.at[idx].set(xi)
+
+        # Solve system
+        res = xi - bplus * lambda_kplus - a * lambda_k + Al
+        lambda_kminus = res / bminus
+        lambda_k, lambda_kplus = lambda_kminus, lambda_k
+
+    # Assign the final adjoint variable
+    rho = lambda_k
+
+    # Verify a bunch of systems
+
+    def assert_is_small(arr):
+        machine_epsilon = 10 * jnp.sqrt(jnp.finfo(jnp.dtype(A)).eps)
+        assert jnp.linalg.norm(arr) / jnp.sqrt(arr.size) < machine_epsilon, arr
+
+    # Verify the original system
+    residual_original = A @ Q @ E_K - Q @ T
+    assert_is_small(residual_original)
+
+    # Verify z_c = 0
+    v = Q[:, 0] * initvec_norm
+    residual_c = rho.T @ v
+    assert_is_small(residual_c)
+
+    # Verify Z_T = 0
+    residual_T = L.T @ Q - dT.T
+    assert_is_small(residual_T)
+
+    # Verify the solved system
+    residual_new = A.T @ L @ E_K.T - L @ T.T - jnp.outer(rho, e1) + Xi.T
+    assert_is_small(residual_new)
+
+    # Verify z_Q = 0
+    residual_Z = dQ.T + E_K @ L.T @ A - T @ L.T + M @ Q.T - jnp.outer(e1, rho)
+    assert_is_small(residual_Z)
+
+    # Verify (Z_Q).T @ Q = 0 (after simplification)
+    res1 = dQ.T @ Q + E_K @ L.T @ A @ Q
+    res2 = -T @ dT.T + M - jnp.outer(e1, rho) @ Q
+    residual_Q = res1 + res2
+    assert_is_small(residual_Q)
+
+    # Compute the gradients
+    dv = rho * initvec_norm
+    dp = L @ E_K.T @ Q.T
+
+    return (dv, dp), (rho, L.T, M, Xi)
+
+
+def _dense_matrix_old(diag, off_diag):
     k = len(diag)
 
     # Zero matrix
