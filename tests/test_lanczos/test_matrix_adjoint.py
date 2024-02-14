@@ -65,22 +65,22 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
         "c": dlength.T + rho.T @ vector,
         "T": dT.T - Lt @ Qt.T,
         "w": dw.T - residual.T @ Lt.T + 2 * zeta * w.T,
-        "r": dresidual.T - e_K.T @ (Lt - gamma * Qt),
-        "QtQ": (
-            dQt @ Qt.T
-            + dT.T @ T
-            - T @ dT.T
-            - e_1 @ (rho.T @ Qt.T)
-            + M
-            + gamma * e_K @ (residual @ Qt.T)
-        ),
+        "r": dresidual.T - w.T @ Lt + gamma @ Qt,
         "Q": (
             dQt
             + Lt @ matrix
             - T @ Lt
             - jnp.outer(e_1, rho)
             + M @ Qt
-            + gamma * jnp.outer(e_K, residual)
+            + jnp.outer(gamma, residual)
+        ),
+        "QtQ": (
+            dQt @ Qt.T
+            + dT.T @ T
+            - T @ dT.T
+            - e_1 @ (rho.T @ Qt.T)
+            + M
+            + gamma @ (residual @ Qt.T)
         ),
     }
 

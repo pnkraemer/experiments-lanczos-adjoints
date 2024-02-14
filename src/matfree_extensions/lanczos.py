@@ -412,7 +412,7 @@ def matrix_adjoint(
     M = T @ dT.T - dT.T @ T - dQ.T @ Q - gamma * e_K @ (residual @ Q)
 
     # Prepare the linear system
-
+    gamma *= e_K
     return None, (L.T, jnp.zeros_like(residual), M, gamma, 0.0)
 
     return None
