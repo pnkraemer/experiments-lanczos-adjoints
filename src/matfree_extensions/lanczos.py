@@ -383,13 +383,18 @@ def matrix_adjoint(
     M = jnp.zeros_like(dQ.T @ Q)
 
     (A,) = params
-    e1, e_K = jnp.eye(len(alphas) + 1)[[0, -1], :]
+    e_1, e_K = jnp.eye(len(alphas))[[0, -1], :]
 
     # Assemble the dense matrices
     T = _dense_matrix(alphas, betas)
     dT = _dense_matrix(dalphas, dbetas)
 
-    return None, (L.T, jnp.zeros_like(res), M, 0.0)
+    # Initialize
+    gamma = e_K.T @ dT.T @ e_K - dres.T @ Q @ e_K
+    eta = dres.T + gamma * e_K.T @ Q.T
+
+    L = L.at[:, -1].set(eta)
+    return None, (L.T, jnp.zeros_like(res), M, gamma)
 
     return None
     assert False

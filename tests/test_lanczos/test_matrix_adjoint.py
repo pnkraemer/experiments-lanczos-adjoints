@@ -7,6 +7,8 @@ import pytest_cases
 from matfree import test_util
 from matfree_extensions import lanczos
 
+jnp.set_printoptions(2, suppress=True)
+
 
 # anything 0 <= k < n works; k=n is full reconstruction
 # and the (q, b) values become meaningless
@@ -56,7 +58,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     # Evaluate the constraints
     z_c = dlength.T + rho.T @ vector
     z_T = dT.T - Lt @ Qt.T
-    z_r = dresidual.T - e_K.T @ (Lt + gamma * Qt)
+    z_r = dresidual.T - e_K.T @ (Lt - gamma * Qt)
     z_Q = (
         dQt
         + Lt @ matrix
