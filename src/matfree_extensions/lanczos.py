@@ -403,17 +403,28 @@ def matrix_adjoint(
     T = _dense_matrix(alphas, betas)
     dT = _dense_matrix(dalphas, dbetas)
 
-    # Initialize
-    gamma = e_K.T @ dT.T @ e_K - dresidual.T @ Q @ e_K
-    eta = dresidual.T + gamma * e_K.T @ Q.T
+    # Solve for gamma
+    gamma = dT @ w - Q.T @ dresidual
+
+    # Solve for Lw (=:eta)
+    eta = dresidual + Q @ gamma
+
+    # Solve for zeta
+    zeta = 0.5 * (residual.T @ eta - dw.T @ w)
+
+    # Solve for r^T L
+    rL = dw.T + 2 * zeta * w.T
+    Lrw = jnp.outer(rL, w)
+
+    # Solve for M
+    Pi = T @ dT.T - dT.T @ T - dQ.T @ Q
+    M = Pi - Lrw
+
+    # Initial value
     L = L.at[:, -1].set(eta)
 
-    # Compute M
-    M = T @ dT.T - dT.T @ T - dQ.T @ Q - gamma * e_K @ (residual @ Q)
-
     # Prepare the linear system
-    gamma *= e_K
-    return None, (L.T, jnp.zeros_like(residual), M, gamma, 0.0)
+    return None, (L, jnp.zeros_like(residual), M, M, jnp.zeros_like(gamma))
 
     return None
     assert False
