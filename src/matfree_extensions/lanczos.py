@@ -426,9 +426,10 @@ def matrix_adjoint(
     lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
     betas = jnp.concatenate([jnp.ones((1,)), betas])
-    for _ in range(len(alphas)):
+    for _ in range(len(alphas) - 1):
         idx += 1
         # Save result
+        print(Lambda @ Q.T)
         Lambda = Lambda.at[:, -idx].set(lambda_k)
 
         # Solve or (Gamma + Gamma.T) e_K
@@ -449,7 +450,7 @@ def matrix_adjoint(
     Sigma = (Lambda.T @ Q - dT.T).T
 
     # Return the solution
-    dv = lambda_kplus * initlength
+    dv = lambda_k * initlength
     dA = Lambda @ Q.T
     return (dv, dA), (Lambda, lambda_k, Gamma, Sigma, eta)
 
