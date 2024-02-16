@@ -429,7 +429,6 @@ def matrix_adjoint(
     for _ in range(len(alphas) - 1):
         idx += 1
         # Save result
-        print(Lambda @ Q.T)
         Lambda = Lambda.at[:, -idx].set(lambda_k)
 
         # Solve or (Gamma + Gamma.T) e_K
