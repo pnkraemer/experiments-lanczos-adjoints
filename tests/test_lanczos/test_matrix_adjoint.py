@@ -61,7 +61,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     e_K = jnp.eye(len(alphas))[-1]
 
     # Evaluate the constraints
-    constraints = {
+    return {
         "Sigma_sp": Sigma - jnp.tril(Sigma, -2),
         "Gamma_sp": Gamma - jnp.tril(Sigma),
         "c": dlength.T + rho.T @ vector,
@@ -98,7 +98,6 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
             + Gamma.T
         ),
     }
-    return constraints
 
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
