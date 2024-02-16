@@ -28,8 +28,6 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     Qt, (alphas, betas), residual, length = lanczos.matrix_forward(
         lambda s, p: p @ s, krylov_depth, vector, matrix
     )
-    w = jnp.eye(len(alphas))[-1]
-    dw = jnp.zeros_like(alphas)
 
     dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
         Qt, (alphas, betas), residual, length
@@ -48,8 +46,6 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
         dxs=dQt,
         dresidual=dresidual,
         dinitlength=dlength,
-        w=w,
-        dw=dw,
     )
 
     # Materialise the tridiagonal matrices

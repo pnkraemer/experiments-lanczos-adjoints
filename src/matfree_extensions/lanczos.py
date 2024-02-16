@@ -385,8 +385,6 @@ def matrix_adjoint(
     dxs,
     dresidual,
     dinitlength,
-    w,
-    dw,
 ):
     # Transpose the inputs (so code matches maths)
     Q = xs.T
@@ -404,27 +402,13 @@ def matrix_adjoint(
     dT = _dense_matrix(dalphas, dbetas)
 
     # Solve for gamma
-    gamma = dT @ w - Q.T @ dresidual
+    eta = dT @ e_K - Q.T @ dresidual
 
-    # Solve for Lw (=:eta)
-    eta = dresidual + Q @ gamma
+    # Solve for L e_K
+    L = L.at[:, -1].set(dresidual + Q @ eta)
 
-    # Solve for zeta
-    zeta = 0.5 * (residual.T @ eta - dw.T @ w)
-
-    # Solve for r^T L
-    rL = dw.T + 2 * zeta * w.T
-    Lrw = jnp.outer(rL, w)
-
-    # Solve for M
-    Pi = T @ dT.T - dT.T @ T - dQ.T @ Q
-    M = Pi - Lrw
-
-    # Initial value
-    L = L.at[:, -1].set(eta)
-
-    # Prepare the linear system
-    return None, (L, jnp.zeros_like(residual), M, M, jnp.zeros_like(gamma))
+    # Return the solution
+    return None, (L, jnp.zeros_like(residual), M, M, eta)
 
 
 def _dense_matrix(diag, off_diag):
