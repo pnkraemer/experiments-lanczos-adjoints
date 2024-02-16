@@ -413,14 +413,25 @@ def matrix_adjoint(
     tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
     Gamma = Gamma.at[-1, :].set(tmp[-1, :])
 
-    # Set up the system
+    # Solve for the next lambda
     Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
-
-    # Solve
     xi = Xi[-1]
-    lambda_k = Lambda[:, -1]
-    tmp = (xi - (alphas[-1] * lambda_k - A.T @ lambda_k)) / betas[-1]
-    Lambda = Lambda.at[:, -2].set(tmp)
+    lambda_kplus = Lambda[:, -1]
+    lambda_k = (xi - (alphas[-1] * lambda_kplus - A.T @ lambda_kplus)) / betas[-1]
+    Lambda = Lambda.at[:, -2].set(lambda_k)
+
+    # Solve for the next Gamma
+    tmp = jnp.tril(T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
+    tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
+    Gamma = Gamma.at[-2, :].set(tmp[-2, :])
+
+    # Solve for the next lambda
+    Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
+    xi = Xi[-2]
+    lambda_kminus = (
+        xi - (alphas[-2] * lambda_k - A.T @ lambda_k) - betas[-1] * lambda_kplus
+    ) / betas[-2]
+    Lambda = Lambda.at[:, -3].set(lambda_kminus)
 
     # Return the solution
     return None, (Lambda, jnp.zeros_like(residual), Gamma, Sigma, eta)

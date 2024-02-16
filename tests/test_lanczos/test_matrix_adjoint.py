@@ -72,7 +72,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
             + jnp.outer(eta, residual)
         ),
         # # Projection through Q (without simplification)
-        "QtQ1": (
+        "QtQ": jnp.tril(
             dQt @ Qt.T
             + Lambda.T @ matrix @ Qt.T
             - T @ dT.T
@@ -81,29 +81,13 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
             + Gamma
             + Gamma.T
         ),
-        # Projection through Q (using AQ = QT + re.T)
-        "QtQ2": (
-            dQt @ Qt.T
-            + dT.T @ T
-            - T @ dT.T
-            + Sigma.T @ T
-            - T @ Sigma.T
-            + jnp.outer(Lambda.T @ residual, e_K.T)
-            - jnp.outer(e_1, (rho.T @ Qt.T))
-            + Gamma
-            + Gamma.T
-        ),
     }
-    print(constraints["Q"][-1, :])
-    print(constraints["QtQ1"][-1, :])
-    print(constraints["QtQ2"][-1, :])
+    print(constraints)
     return constraints
 
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
-@pytest_cases.parametrize(
-    "key", ["Sigma_sp", "Gamma_sp", "c", "T", "r", "Q", "QtQ1", "QtQ2"]
-)
+@pytest_cases.parametrize("key", ["Sigma_sp", "Gamma_sp", "c", "T", "r", "Q", "QtQ"])
 def test_constraint_is_zero(constraints, key):
     constraint = constraints[key]
 
