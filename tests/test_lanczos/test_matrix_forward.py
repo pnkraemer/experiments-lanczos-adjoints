@@ -67,7 +67,7 @@ def test_mid_rank_reconstruction_satisfies_decomposition(n, krylov_depth):
     assert jnp.allclose(Qt[0], vector * length, atol=small_value)
 
     # Verify the residual's orthogonality
-    assert jnp.allclose(jnp.dot(residual, Qt[-1]), 0.0, atol=small_value)
+    assert jnp.allclose(jnp.dot(residual, Qt.T), 0.0, atol=small_value)
 
 
 def _dense_tridiag(diagonal, off_diagonal):

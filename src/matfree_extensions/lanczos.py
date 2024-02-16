@@ -392,7 +392,6 @@ def matrix_adjoint(
 
     # Allocate the multipliers
     Lambda = jnp.zeros_like(Q)
-    Sigma = jnp.zeros_like(dQ.T @ Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
 
     (A,) = params
@@ -402,22 +401,21 @@ def matrix_adjoint(
     T = _dense_matrix(alphas, betas)
     dT = _dense_matrix(dalphas, dbetas)
 
-    # Solve for gamma
+    # Solve for eta
     eta = dT @ e_K - Q.T @ dresidual
 
     # Solve for L e_K
     lambda_k = dresidual + Q @ eta
-    lambda_kplus = jnp.zeros_like(lambda_k)
 
-    # betas = jnp.concatenate([betas, jnp.zeros((1,))])
-
+    # INitialise
     idx = 1
+
     # Save result
     Lambda = Lambda.at[:, -idx].set(lambda_k)
 
     # Solve or (Gamma + Gamma.T) e_K
-    e1p = -initlength * dinitlength * jnp.outer(e_1, e_1)
-    tmp = jnp.tril(e1p + T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
+    e1p = -dinitlength * initlength * jnp.outer(e_1, e_1)
+    tmp = jnp.tril(e1p + T @ dT.T - Lambda.T @ A @ Q - (dQ.T @ Q))
     tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
     Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
 
@@ -428,21 +426,19 @@ def matrix_adjoint(
     lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
     betas = jnp.concatenate([jnp.ones((1,)), betas])
-    for _ in range(5):
+    for _ in range(len(alphas)):
         idx += 1
         # Save result
         Lambda = Lambda.at[:, -idx].set(lambda_k)
 
         # Solve or (Gamma + Gamma.T) e_K
-        e1p = -initlength * dinitlength * jnp.outer(e_1, e_1)
-        tmp = jnp.tril(e1p + T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
+        tmp = jnp.tril(e1p + T @ dT.T - Lambda.T @ A @ Q - (dQ.T @ Q))
         tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
         Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
 
         # Solve for the next lambda
         Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
         xi = Xi[-idx]
-        print(alphas[-idx])
         lambda_kminus = (
             xi
             - (alphas[-idx] * lambda_k - A.T @ lambda_k)
@@ -450,8 +446,12 @@ def matrix_adjoint(
         ) / betas[-idx]
         lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
+    Sigma = (Lambda.T @ Q - dT.T).T
+
     # Return the solution
-    return None, (Lambda, lambda_k, Gamma, Sigma, eta)
+    dv = lambda_kplus * initlength
+    dA = Lambda @ Q.T
+    return (dv, dA), (Lambda, lambda_k, Gamma, Sigma, eta)
 
 
 def _dense_matrix(diag, off_diag):
