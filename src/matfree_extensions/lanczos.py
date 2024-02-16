@@ -406,35 +406,52 @@ def matrix_adjoint(
     eta = dT @ e_K - Q.T @ dresidual
 
     # Solve for L e_K
-    Lambda = Lambda.at[:, -1].set(dresidual + Q @ eta)
+    lambda_k = dresidual + Q @ eta
+    lambda_kplus = jnp.zeros_like(lambda_k)
+
+    # betas = jnp.concatenate([betas, jnp.zeros((1,))])
+
+    idx = 1
+    # Save result
+    Lambda = Lambda.at[:, -idx].set(lambda_k)
 
     # Solve or (Gamma + Gamma.T) e_K
-    tmp = jnp.tril(T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
+    e1p = -initlength * dinitlength * jnp.outer(e_1, e_1)
+    tmp = jnp.tril(e1p + T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
     tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
-    Gamma = Gamma.at[-1, :].set(tmp[-1, :])
+    Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
 
     # Solve for the next lambda
     Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
-    xi = Xi[-1]
-    lambda_kplus = Lambda[:, -1]
-    lambda_k = (xi - (alphas[-1] * lambda_kplus - A.T @ lambda_kplus)) / betas[-1]
-    Lambda = Lambda.at[:, -2].set(lambda_k)
+    xi = Xi[-idx]
+    lambda_kminus = (xi - (alphas[-idx] * lambda_k - A.T @ lambda_k)) / betas[-idx]
+    lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
-    # Solve for the next Gamma
-    tmp = jnp.tril(T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
-    tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
-    Gamma = Gamma.at[-2, :].set(tmp[-2, :])
+    betas = jnp.concatenate([jnp.ones((1,)), betas])
+    for _ in range(5):
+        idx += 1
+        # Save result
+        Lambda = Lambda.at[:, -idx].set(lambda_k)
 
-    # Solve for the next lambda
-    Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
-    xi = Xi[-2]
-    lambda_kminus = (
-        xi - (alphas[-2] * lambda_k - A.T @ lambda_k) - betas[-1] * lambda_kplus
-    ) / betas[-2]
-    Lambda = Lambda.at[:, -3].set(lambda_kminus)
+        # Solve or (Gamma + Gamma.T) e_K
+        e1p = -initlength * dinitlength * jnp.outer(e_1, e_1)
+        tmp = jnp.tril(e1p + T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
+        tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
+        Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
+
+        # Solve for the next lambda
+        Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
+        xi = Xi[-idx]
+        print(alphas[-idx])
+        lambda_kminus = (
+            xi
+            - (alphas[-idx] * lambda_k - A.T @ lambda_k)
+            - betas[-(idx - 1)] * lambda_kplus
+        ) / betas[-idx]
+        lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
     # Return the solution
-    return None, (Lambda, jnp.zeros_like(residual), Gamma, Sigma, eta)
+    return None, (Lambda, lambda_k, Gamma, Sigma, eta)
 
 
 def _dense_matrix(diag, off_diag):
