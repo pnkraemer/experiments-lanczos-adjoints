@@ -409,8 +409,18 @@ def matrix_adjoint(
     Lambda = Lambda.at[:, -1].set(dresidual + Q @ eta)
 
     # Solve or (Gamma + Gamma.T) e_K
-    tmp = (dQ.T @ Q) + Lambda.T @ A @ Q - T @ dT.T
+    tmp = jnp.tril(T @ dT.T - (dQ.T @ Q) - Lambda.T @ A @ Q)
+    tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
     Gamma = Gamma.at[-1, :].set(tmp[-1, :])
+
+    # Set up the system
+    Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, residual)
+
+    # Solve
+    xi = Xi[-1]
+    lambda_k = Lambda[:, -1]
+    tmp = (xi - (alphas[-1] * lambda_k - A.T @ lambda_k)) / betas[-1]
+    Lambda = Lambda.at[:, -2].set(tmp)
 
     # Return the solution
     return None, (Lambda, jnp.zeros_like(residual), Gamma, Sigma, eta)

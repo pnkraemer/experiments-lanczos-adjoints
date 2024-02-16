@@ -7,7 +7,7 @@ import pytest_cases
 from matfree import test_util
 from matfree_extensions import lanczos
 
-jnp.set_printoptions(3, suppress=False)
+jnp.set_printoptions(3, suppress=True)
 
 
 # anything 0 <= k < n works; k=n is full reconstruction
@@ -56,13 +56,12 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     e_1 = jnp.eye(len(alphas))[0]
     e_K = jnp.eye(len(alphas))[-1]
 
-    print(Gamma)
     # Evaluate the constraints
-    return {
+    constraints = {
         "Sigma_sp": Sigma - jnp.tril(Sigma, -2),
         "Gamma_sp": Gamma - jnp.tril(Gamma),
         "c": dlength.T + rho.T @ vector,
-        "T": dT.T - Lambda.T @ Qt.T + Sigma.T,
+        "T": jnp.tril(dT.T - Lambda.T @ Qt.T + Sigma.T),
         "r": dresidual.T - e_K.T @ Lambda.T + eta.T @ Qt,
         "Q": (
             dQt
@@ -72,7 +71,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
             + (Gamma + Gamma.T) @ Qt
             + jnp.outer(eta, residual)
         ),
-        # Projection through Q (without simplification)
+        # # Projection through Q (without simplification)
         "QtQ1": (
             dQt @ Qt.T
             + Lambda.T @ matrix @ Qt.T
@@ -95,11 +94,15 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
             + Gamma.T
         ),
     }
+    print(constraints["Q"][-1, :])
+    print(constraints["QtQ1"][-1, :])
+    print(constraints["QtQ2"][-1, :])
+    return constraints
 
 
 @pytest_cases.parametrize_with_cases("constraints", ".")
 @pytest_cases.parametrize(
-    "key", ["Sigma_sp", "Gamma_sp", "c", "T", "r", "QtQ1", "QtQ2", "Q"]
+    "key", ["Sigma_sp", "Gamma_sp", "c", "T", "r", "Q", "QtQ1", "QtQ2"]
 )
 def test_constraint_is_zero(constraints, key):
     constraint = constraints[key]
