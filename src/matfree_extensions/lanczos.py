@@ -391,8 +391,9 @@ def matrix_adjoint(
     dQ = dxs.T
 
     # Allocate the multipliers
-    L = jnp.zeros_like(Q)
-    M = jnp.zeros_like(dQ.T @ Q)
+    Lambda = jnp.zeros_like(Q)
+    Sigma = jnp.zeros_like(dQ.T @ Q)
+    Gamma = jnp.zeros_like(dQ.T @ Q)
 
     (A,) = params
     e_1, e_K = jnp.eye(len(alphas))[[0, -1], :]
@@ -405,10 +406,14 @@ def matrix_adjoint(
     eta = dT @ e_K - Q.T @ dresidual
 
     # Solve for L e_K
-    L = L.at[:, -1].set(dresidual + Q @ eta)
+    Lambda = Lambda.at[:, -1].set(dresidual + Q @ eta)
+
+    # Solve or (Gamma + Gamma.T) e_K
+    tmp = (dQ.T @ Q) + Lambda.T @ A @ Q - T @ dT.T
+    Gamma = Gamma.at[-1, :].set(tmp[-1, :])
 
     # Return the solution
-    return None, (L, jnp.zeros_like(residual), M, M, eta)
+    return None, (Lambda, jnp.zeros_like(residual), Gamma, Sigma, eta)
 
 
 def _dense_matrix(diag, off_diag):

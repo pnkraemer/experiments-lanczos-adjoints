@@ -56,10 +56,11 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     e_1 = jnp.eye(len(alphas))[0]
     e_K = jnp.eye(len(alphas))[-1]
 
+    print(Gamma)
     # Evaluate the constraints
     return {
         "Sigma_sp": Sigma - jnp.tril(Sigma, -2),
-        "Gamma_sp": Gamma - jnp.tril(Sigma),
+        "Gamma_sp": Gamma - jnp.tril(Gamma),
         "c": dlength.T + rho.T @ vector,
         "T": dT.T - Lambda.T @ Qt.T + Sigma.T,
         "r": dresidual.T - e_K.T @ Lambda.T + eta.T @ Qt,
