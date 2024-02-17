@@ -128,7 +128,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
 def matrix_forward(matvec, krylov_depth, vec, *params):
     output = forward(matvec, krylov_depth, vec, *params, reortho=True)
     (Q, (alphas, betas)), (q, beta), norm = output
-    return Q, (alphas, betas), q * beta, norm
+    return Q, (alphas, betas, betas), q * beta, norm
 
 
 def forward(matvec, krylov_depth, vec, *params, reortho):
@@ -373,7 +373,7 @@ def _adjoint_step(
 
 def matrix_adjoint(
     *,
-    matvec,
+    matvec,  # noqa: ARG001
     params,
     alphas,
     betas,
@@ -386,6 +386,29 @@ def matrix_adjoint(
     dresidual,
     dinitlength,
 ):
+    # todo: weird things happen:
+    #  if I treat T as a generic tridiagonal matrix,
+    #  and explicitly do not exploit symmetry,
+    #  (which makes dT asymmetric),
+    #  then the VJPs match autodiff. However,
+    #  the Z_T constraint does not hold anymore.
+    #  why is that? Have I accidentally implemented Arnoldi adjoints?
+    #  Which constraints do I have, and why does it still work?
+    #  Which constraints can I expect to satisfy??
+    #  WHY DOES IT WORK?????
+    #  Mathematically, this feels related to the symmetry of A
+    #  (and the symmetry of T).
+    #  so if we practice with a symmetry( and orthogonality)-constrained
+    #  differentiation problem, maybe we learn something.
+
+    # todo: another question:
+    #  Can I have any expectation whatsoever that dT has zeros?
+
+    # todo (on monday): implement Arnoldi and check whether
+    #  the gradients are valid Arnoldi gradients.
+    #  then, think about how we can/should simplify for
+    #  symmetric problems (after practicing a bit).
+
     # Transpose the inputs (so code matches maths)
     Q = xs.T
     dQ = dxs.T
@@ -398,8 +421,11 @@ def matrix_adjoint(
     e_1, e_K = jnp.eye(len(alphas))[[0, -1], :]
 
     # Assemble the dense matrices
-    T = _dense_matrix(alphas, betas)
-    dT = _dense_matrix(dalphas, dbetas)
+    T = _dense_matrix(alphas, *betas)
+    dT = _dense_matrix(dalphas, *dbetas)
+    # dT = 0.5*(dT + dT.T)
+    print(dT)
+    print(T)
 
     # Solve for eta
     eta = dT @ e_K - Q.T @ dresidual
@@ -407,7 +433,10 @@ def matrix_adjoint(
     # Solve for L e_K
     lambda_k = dresidual + Q @ eta
 
-    # INitialise
+    # Both betas are identical...
+    betas = betas[0]
+
+    # Initialise
     idx = 1
 
     # Save result
@@ -454,8 +483,8 @@ def matrix_adjoint(
     return (dv, dA), (Lambda, lambda_k, Gamma, Sigma, eta)
 
 
-def _dense_matrix(diag, off_diag):
-    return jnp.diag(diag) + jnp.diag(off_diag, 1) + jnp.diag(off_diag, -1)
+def _dense_matrix(diag, off_diag1, off_diag2):
+    return jnp.diag(diag) + jnp.diag(off_diag2, 1) + jnp.diag(off_diag1, -1)
 
 
 def matrix_adjoint_old(

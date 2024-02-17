@@ -7,7 +7,7 @@ import pytest_cases
 from matfree import test_util
 from matfree_extensions import lanczos
 
-jnp.set_printoptions(3, suppress=False)
+jnp.set_printoptions(3, suppress=True)
 
 
 @pytest_cases.parametrize("krylov_depth", [3])
@@ -24,134 +24,13 @@ def test_vjp(n, krylov_depth):
         # Run Lanczos approximation
         return lanczos.matrix_forward(lambda s, p: p @ s, krylov_depth, v, mat)
 
-    (Qt, (alphas, betas), residual, length), vjp = jax.vjp(fwd, vector, matrix)
+    (Qt, (alphas, *betas), residual, length), vjp = jax.vjp(fwd, vector, matrix)
 
-    dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
-        Qt, (alphas, betas), residual, length
+    dQt, (dalphas, *dbetas), dresidual, dlength = _random_like(
+        Qt, (alphas, *betas), residual, length
     )
 
-    # dalphas = jnp.zeros_like(dalphas)
-    # # dbetas = dbetas.at[:].set(0.)
-    # dQt = jnp.zeros_like(dQt)
-    # dresidual = jnp.zeros_like(dresidual)
-    # dlength = jnp.zeros_like(dlength)
-
-    dv_ref, dA_ref = vjp((dQt, (dalphas, dbetas), dresidual, dlength))
-
-    (dv, dA), (Lambda, lambda_, Gamma, Sigma, eta) = lanczos.matrix_adjoint(
-        matvec=lambda s, p: p @ s,
-        params=(matrix,),
-        alphas=alphas,
-        betas=betas,
-        xs=Qt,
-        residual=residual,
-        initlength=length,
-        dalphas=dalphas,
-        dbetas=dbetas,
-        dxs=dQt,
-        dresidual=dresidual,
-        dinitlength=dlength,
-    )
-    # print(Lambda)
-    # print(lambda_)
-    # print(Gamma)
-    # print(Sigma)
-    # print(eta)
-
-    print()
-    print("----------------------------------------")
-    print("----------------------------------------")
-
-    print((dA + dA.T) / 2)
-    print(dA_ref + dA_ref.T)
-
-    print()
-    print()
-    print()
-    print()
-    print("diff", dv_ref - dv / 2)
-    print()
-    print(dv)
-    print()
-    print()
-
-    assert False
-
-
-@pytest_cases.parametrize("krylov_depth", [3])
-@pytest_cases.parametrize("n", [7])
-@pytest_cases.case()
-def test_vjp_all_but_dbeta_good(n, krylov_depth):
-    eigvals = jnp.arange(1.0, 1.0 + n, step=1.0)
-    matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
-
-    # Set up an initial vector
-    vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
-
-    def fwd(v, mat):
-        # Run Lanczos approximation
-        return lanczos.matrix_forward(lambda s, p: p @ s, krylov_depth, v, mat)
-
-    (Qt, (alphas, betas), residual, length), vjp = jax.vjp(fwd, vector, matrix)
-
-    dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
-        Qt, (alphas, betas), residual, length
-    )
-
-    # If we set dbeta to 0, all gradients are exact.
-    dbetas = dbetas.at[:].set(0.0)
-
-    dv_ref, dA_ref = vjp((dQt, (dalphas, dbetas), dresidual, dlength))
-
-    (dv, dA), (Lambda, lambda_, Gamma, Sigma, eta) = lanczos.matrix_adjoint(
-        matvec=lambda s, p: p @ s,
-        params=(matrix,),
-        alphas=alphas,
-        betas=betas,
-        xs=Qt,
-        residual=residual,
-        initlength=length,
-        dalphas=dalphas,
-        dbetas=dbetas,
-        dxs=dQt,
-        dresidual=dresidual,
-        dinitlength=dlength,
-    )
-
-    # Tie the tolerance to the floating-point accuracy
-    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(dv)).eps)
-
-    assert jnp.allclose(dv, dv_ref, rtol=small_value, atol=small_value)
-    assert jnp.allclose(dA, dA_ref, rtol=small_value, atol=small_value)
-
-
-@pytest_cases.parametrize("krylov_depth", [3])
-@pytest_cases.parametrize("n", [7])
-@pytest_cases.case()
-def test_vjp_only_dbeta_good(n, krylov_depth):
-    eigvals = jnp.arange(1.0, 1.0 + n, step=1.0)
-    matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
-
-    # Set up an initial vector
-    vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
-
-    def fwd(v, mat):
-        # Run Lanczos approximation
-        return lanczos.matrix_forward(lambda s, p: p @ s, krylov_depth, v, mat)
-
-    (Qt, (alphas, betas), residual, length), vjp = jax.vjp(fwd, vector, matrix)
-
-    dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
-        Qt, (alphas, betas), residual, length
-    )
-
-    # If we set all but dbeta to zero, we somehow get exact gradients.
-    dalphas = jnp.zeros_like(dalphas)
-    dQt = jnp.zeros_like(dQt)
-    dresidual = jnp.zeros_like(dresidual)
-    dlength = jnp.zeros_like(dlength)
-
-    dv_ref, dA_ref = vjp((dQt, (dalphas, dbetas), dresidual, dlength))
+    dv_ref, dA_ref = vjp((dQt, (dalphas, *dbetas), dresidual, dlength))
 
     (dv, dA), (Lambda, lambda_, Gamma, Sigma, eta) = lanczos.matrix_adjoint(
         matvec=lambda s, p: p @ s,
@@ -173,8 +52,110 @@ def test_vjp_only_dbeta_good(n, krylov_depth):
     tols = {"atol": small_value, "rtol": small_value}
 
     # Nooooo idea where the 1/2 comes from. But it works...
-    assert jnp.allclose(dv / 2, dv_ref, **tols)
-    assert jnp.allclose((dA + dA.T) / 2, dA_ref + dA_ref.T, **tols)
+    assert jnp.allclose(dv, dv_ref, **tols)
+    assert jnp.allclose((dA + dA.T), dA_ref + dA_ref.T, **tols)
+
+
+#
+#
+#
+# @pytest_cases.parametrize("krylov_depth", [3])
+# @pytest_cases.parametrize("n", [7])
+# @pytest_cases.case()
+# def test_vjp_all_but_dbeta_good(n, krylov_depth):
+#     eigvals = jnp.arange(1.0, 1.0 + n, step=1.0)
+#     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+#
+#     # Set up an initial vector
+#     vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
+#
+#     def fwd(v, mat):
+#         # Run Lanczos approximation
+#         return lanczos.matrix_forward(lambda s, p: p @ s, krylov_depth, v, mat)
+#
+#     (Qt, (alphas, betas), residual, length), vjp = jax.vjp(fwd, vector, matrix)
+#
+#     dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
+#         Qt, (alphas, betas), residual, length
+#     )
+#
+#     # If we set dbeta to 0, all gradients are exact.
+#     dbetas = dbetas.at[:].set(0.0)
+#
+#     dv_ref, dA_ref = vjp((dQt, (dalphas, dbetas), dresidual, dlength))
+#
+#     (dv, dA), (Lambda, lambda_, Gamma, Sigma, eta) = lanczos.matrix_adjoint(
+#         matvec=lambda s, p: p @ s,
+#         params=(matrix,),
+#         alphas=alphas,
+#         betas=betas,
+#         xs=Qt,
+#         residual=residual,
+#         initlength=length,
+#         dalphas=dalphas,
+#         dbetas=dbetas,
+#         dxs=dQt,
+#         dresidual=dresidual,
+#         dinitlength=dlength,
+#     )
+#
+#     # Tie the tolerance to the floating-point accuracy
+#     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(dv)).eps)
+#
+#     assert jnp.allclose(dv, dv_ref, rtol=small_value, atol=small_value)
+#     assert jnp.allclose(dA, dA_ref, rtol=small_value, atol=small_value)
+#
+#
+# @pytest_cases.parametrize("krylov_depth", [3])
+# @pytest_cases.parametrize("n", [7])
+# @pytest_cases.case()
+# def test_vjp_only_dbeta_good(n, krylov_depth):
+#     eigvals = jnp.arange(1.0, 1.0 + n, step=1.0)
+#     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+#
+#     # Set up an initial vector
+#     vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
+#
+#     def fwd(v, mat):
+#         # Run Lanczos approximation
+#         return lanczos.matrix_forward(lambda s, p: p @ s, krylov_depth, v, mat)
+#
+#     (Qt, (alphas, betas), residual, length), vjp = jax.vjp(fwd, vector, matrix)
+#
+#     dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
+#         Qt, (alphas, betas), residual, length
+#     )
+#
+#     # If we set all but dbeta to zero, we somehow get exact gradients.
+#     dalphas = jnp.zeros_like(dalphas)
+#     dQt = jnp.zeros_like(dQt)
+#     dresidual = jnp.zeros_like(dresidual)
+#     dlength = jnp.zeros_like(dlength)
+#
+#     dv_ref, dA_ref = vjp((dQt, (dalphas, dbetas), dresidual, dlength))
+#
+#     (dv, dA), (Lambda, lambda_, Gamma, Sigma, eta) = lanczos.matrix_adjoint(
+#         matvec=lambda s, p: p @ s,
+#         params=(matrix,),
+#         alphas=alphas,
+#         betas=betas,
+#         xs=Qt,
+#         residual=residual,
+#         initlength=length,
+#         dalphas=dalphas,
+#         dbetas=dbetas,
+#         dxs=dQt,
+#         dresidual=dresidual,
+#         dinitlength=dlength,
+#     )
+#
+#     # Tie the tolerance to the floating-point accuracy
+#     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(dv)).eps)
+#     tols = {"atol": small_value, "rtol": small_value}
+#
+#     # Nooooo idea where the 1/2 comes from. But it works...
+#     assert jnp.allclose(dv / 2, dv_ref, **tols)
+#     assert jnp.allclose((dA + dA.T) / 2, dA_ref + dA_ref.T, **tols)
 
 
 # anything 0 <= k < n works; k=n is full reconstruction
@@ -191,12 +172,12 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     vector = jnp.flip(jnp.arange(1.0, 1.0 + len(eigvals)))
 
     # Run Lanczos approximation
-    Qt, (alphas, betas), residual, length = lanczos.matrix_forward(
+    Qt, (alphas, *betas), residual, length = lanczos.matrix_forward(
         lambda s, p: p @ s, krylov_depth, vector, matrix
     )
 
-    dQt, (dalphas, dbetas), dresidual, dlength = _random_like(
-        Qt, (alphas, betas), residual, length
+    dQt, (dalphas, *dbetas), dresidual, dlength = _random_like(
+        Qt, (alphas, *betas), residual, length
     )
 
     _grads, (Lambda, rho, Gamma, Sigma, eta) = lanczos.matrix_adjoint(
@@ -215,8 +196,8 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
     )
 
     # Materialise the tridiagonal matrices
-    dT = _dense_tridiag(dalphas, dbetas)
-    T = _dense_tridiag(alphas, betas)
+    dT = _dense_tridiag(dalphas, *dbetas)
+    T = _dense_tridiag(alphas, *betas)
 
     # Construct basis vectors
     e_1 = jnp.eye(len(alphas))[0]
@@ -241,8 +222,7 @@ def case_constraints_mid_rank_decomposition(n, krylov_depth):
         "QtQ": (
             dQt @ Qt.T
             + Lambda.T @ matrix @ Qt.T
-            - T @ dT.T
-            - T @ Sigma.T
+            - T @ (dT.T + Sigma.T)
             - jnp.outer(e_1, (rho.T @ Qt.T))
             + Gamma
             + Gamma.T
@@ -263,8 +243,8 @@ def test_constraint_is_zero(constraints, key):
     assert jnp.allclose(constraint, 0.0, atol=small_value, rtol=small_value), constraint
 
 
-def _dense_tridiag(diagonal, off_diagonal):
-    return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
+def _dense_tridiag(diagonal, off_diagonal1, off_diagonal2):
+    return jnp.diag(diagonal) + jnp.diag(off_diagonal1, 1) + jnp.diag(off_diagonal2, -1)
 
 
 def _random_like(*tree):
