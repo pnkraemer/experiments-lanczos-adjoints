@@ -7,7 +7,9 @@ def forward(A, v, krylov_depth):
 
     H = jnp.zeros((k, k))
     Q = jnp.zeros((n, k))
-    length = 1.0
+
+    initlength = jnp.linalg.norm(v)
+    v /= initlength
 
     for i in range(k):
         # Save
@@ -26,4 +28,4 @@ def forward(A, v, krylov_depth):
         h = h.at[i + 1].set(length)
         H = H.at[:, i].set(h)
 
-    return Q, H, v * length
+    return Q, H, v * length, 1 / initlength
