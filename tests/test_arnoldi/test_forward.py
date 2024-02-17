@@ -27,7 +27,6 @@ def test_decomposition(n=10):
 
 def test_vjp(n=10):
     A = jax.random.normal(jax.random.PRNGKey(1), shape=(n, n))
-    # A = A + A.T
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(n,))
     v = v
 
