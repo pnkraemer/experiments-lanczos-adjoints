@@ -1,4 +1,5 @@
 import jax
+import jax.flatten_util
 import jax.numpy as jnp
 from matfree_extensions import arnoldi
 
@@ -36,10 +37,12 @@ def test_vjp(n=10):
         return arnoldi.forward(matrix, vector, k)
 
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
+    (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
+    da_ref, dv_ref = vjp((dQ, dH, dr, dc))
 
-    da_ref, dv_ref = vjp((Q, H, r, c))
-
-    (da, dv), _ = arnoldi.backward(A, v, k, Q=Q, H=H, r=r, c=c, dQ=Q, dH=H, dr=r, dc=c)
+    (da, dv), _ = arnoldi.backward(
+        A, v, k, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc
+    )
 
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
@@ -50,4 +53,12 @@ def test_vjp(n=10):
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(da, da_ref, **tols)
 
-    assert False
+
+def _random_like(*tree):
+    flat, unflatten = jax.flatten_util.ravel_pytree(tree)
+
+    key = jax.random.PRNGKey(1)
+    flat_like = 0.1 + jax.random.uniform(key, shape=flat.shape, dtype=flat.dtype)
+    # flat_like = flat_like * flat
+    unflat = unflatten(flat_like)
+    return jax.tree_util.tree_map(lambda s: s / jnp.mean(s), unflat)
