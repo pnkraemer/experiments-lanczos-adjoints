@@ -39,10 +39,11 @@ def test_vjp(n=10):
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
 
     da_ref, dv_ref = vjp((Q, H, r, c))
-    print(da_ref)
-    print(dv_ref)
 
-    (dv, da), _ = arnoldi.backward(A, v, k, Q=Q, H=H, r=r, c=c, dQ=Q, dH=H, dr=r, dc=c)
-    print(dv)
-    print(da)
-    assert False
+    (da, dv), _ = arnoldi.backward(A, v, k, Q=Q, H=H, r=r, c=c, dQ=Q, dH=H, dr=r, dc=c)
+
+    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
+    tols = {"atol": small_value, "rtol": small_value}
+
+    assert jnp.allclose(dv, dv_ref, **tols)
+    assert jnp.allclose(da, da_ref, **tols)

@@ -38,10 +38,8 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
 
+    # Prepare
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
-
-    alphas = jnp.diag(H)
-    betas = jnp.diag(H, 1)
 
     # Solve for eta
     eta = dH @ e_K - Q.T @ dr
@@ -65,14 +63,31 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
     xi = Xi[-idx]
 
-    lambda_kminus = (xi - (alphas[-idx] * lambda_k - A.T @ lambda_k)) / betas[-idx]
+    # Set up extended linear system
+    HH = jnp.zeros((len(H) + 1, len(H) + 1))
+    HH = HH.at[:-1, 1:].set(H)
+    HH = HH.at[0, 0].set(1.0)
+    HH = HH.at[-1, -1].set(1.0)
+
+    # Initialise the iteration
+    beta = HH[-2, -2]
+    alpha = HH[-2, -1]
+    lambda_kminus = (xi - (alpha * lambda_k - A.T @ lambda_k)) / beta
     lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
-    betas = jnp.concatenate([jnp.ones((1,)), betas])
-    for _ in range(len(alphas) - 1):
+    # todo: next:
+    #  then use the clever alphas (with zeros) and make tests pass,
+    #  then remove the tridiagonal T and use only H
+
+    for _ in range(len(H) - 1):
         idx += 1
         # Save result
         Lambda = Lambda.at[:, -idx].set(lambda_k)
+
+        # Read coefficeints
+        beta_minus = HH[-(idx + 1), -(idx + 1)]
+        alpha = HH[-(idx + 1), -idx]
+        beta_plus = HH[-(idx + 1), -(idx - 1)]
 
         # Solve or (Gamma + Gamma.T) e_K
         tmp = jnp.tril(e1p + H @ dH.T - Lambda.T @ A @ Q - (dQ.T @ Q))
@@ -83,15 +98,15 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
         Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
         xi = Xi[-idx]
         lambda_kminus = (
-            xi
-            - (alphas[-idx] * lambda_k - A.T @ lambda_k)
-            - betas[-(idx - 1)] * lambda_kplus
-        ) / betas[-idx]
+            xi - (alpha * lambda_k - A.T @ lambda_k) - beta_plus * lambda_kplus
+        ) / beta_minus
+
         lambda_kplus, lambda_k = lambda_k, lambda_kminus
 
+    # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
     # Return the solution
     dv = lambda_k * c
     dA = Lambda @ Q.T
-    return (dv, dA), (Lambda, lambda_k, Gamma, Sigma, eta)
+    return (dA, dv), (Lambda, lambda_k, Gamma, Sigma, eta)
