@@ -87,7 +87,7 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
         # Read coefficeints
         beta_minus = HH[-(idx + 1), -(idx + 1)]
         alpha = HH[-(idx + 1), -idx]
-        beta_plus = HH[-(idx + 1), -(idx - 1)]
+        beta_plus = HH[-(idx + 1), -(idx - 1) :]
 
         # Solve or (Gamma + Gamma.T) e_K
         tmp = jnp.tril(e1p + H @ dH.T - Lambda.T @ A @ Q - (dQ.T @ Q))
@@ -97,9 +97,8 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
         # Solve for the next lambda
         Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
         xi = Xi[-idx]
-        lambda_kminus = (
-            xi - (alpha * lambda_k - A.T @ lambda_k) - beta_plus * lambda_kplus
-        ) / beta_minus
+        asd = beta_plus @ Lambda[:, -(idx - 1) :].T
+        lambda_kminus = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
 
         lambda_kplus, lambda_k = lambda_k, lambda_kminus
 

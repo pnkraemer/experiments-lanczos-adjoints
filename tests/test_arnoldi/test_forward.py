@@ -27,7 +27,7 @@ def test_decomposition(n=10):
 
 def test_vjp(n=10):
     A = jax.random.normal(jax.random.PRNGKey(1), shape=(n, n))
-    A = A + A.T
+    # A = A + A.T
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(n,))
     v = v
 
@@ -45,5 +45,10 @@ def test_vjp(n=10):
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
 
+    print(da)
+    print()
+    print(da_ref)
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(da, da_ref, **tols)
+
+    assert False
