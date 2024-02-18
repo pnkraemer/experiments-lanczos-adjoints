@@ -47,11 +47,6 @@ def test_vjp(nrows, krylov_depth):
     tols = {"atol": small_value, "rtol": small_value}
 
     # Assert gradients match
-    print(dv)
-    print()
-    print(dv_ref)
-    print()
-    print(dv - dv_ref)
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(da, da_ref, **tols)
 

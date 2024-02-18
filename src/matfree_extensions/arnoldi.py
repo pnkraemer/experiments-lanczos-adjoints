@@ -95,14 +95,12 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
         if reortho:
             i = y["idx"]
-            p = ps[i]
-            P = P.at[i + 2].set(0.0)
+            p, P = ps[i], P.at[i].set(0.0)
             lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
         (lambda_k, Lambda, Gamma) = _adjoint_step(
             lambda_k, Lambda, Gamma, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r
         )
-
         return (lambda_k, Lambda, Gamma, P), ()
 
     # Scan
