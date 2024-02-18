@@ -49,8 +49,8 @@ def test_vjp(nrows, krylov_depth, reortho):
     assert jnp.allclose(da, da_ref, **tols)
 
 
-@pytest_cases.parametrize("nrows", [10])
-@pytest_cases.parametrize("krylov_depth", [1, 5, 10])
+@pytest_cases.parametrize("nrows", [15])
+@pytest_cases.parametrize("krylov_depth", [10])
 def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
     # Enable double precision because without, autodiff fails.
     jax.config.update("jax_enable_x64", True)

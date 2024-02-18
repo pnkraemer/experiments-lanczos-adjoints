@@ -93,6 +93,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     def adjoint_step(x, y):
         (lambda_k, Lambda, Gamma, P) = x
 
+        # todo: move this to _adjoint_step
         if reortho:
             i = y["idx"]
             p, P = ps[i], P.at[i + 1].set(0.0)
