@@ -37,9 +37,7 @@ def test_vjp(n=10):
     da_ref, dv_ref = vjp((dQ, dH, dr, dc))
 
     # Custom backward pass
-    (da, dv), _ = arnoldi.backward(
-        A, v, k, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc
-    )
+    (da, dv), _ = arnoldi.backward(A, k, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
 
     # Tolerance tied to accuracy
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)

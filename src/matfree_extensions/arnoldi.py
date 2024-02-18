@@ -31,9 +31,7 @@ def forward(A, v, krylov_depth):
     return Q, H, v * length, 1 / initlength
 
 
-def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
-    # Transpose the inputs (so code matches maths)
-
+def backward(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Allocate the multipliers
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
@@ -73,7 +71,7 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     beta = HH[-2, -2]
     alpha = HH[-2, -1]
     lambda_kminus = (xi - (alpha * lambda_k - A.T @ lambda_k)) / beta
-    lambda_kplus, lambda_k = lambda_k, lambda_kminus
+    lambda_k = lambda_kminus
 
     # todo: next:
     #  then use the clever alphas (with zeros) and make tests pass,
@@ -98,9 +96,7 @@ def backward(A, vector, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
         Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
         xi = Xi[-idx]
         asd = beta_plus @ Lambda[:, -(idx - 1) :].T
-        lambda_kminus = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
-
-        lambda_kplus, lambda_k = lambda_k, lambda_kminus
+        lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
