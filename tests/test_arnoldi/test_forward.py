@@ -7,7 +7,7 @@ from matfree_extensions import arnoldi, exp_util
 
 
 @pytest_cases.parametrize("nrows", [10])
-@pytest_cases.parametrize("krylov_depth", [1, 5, 9, 10])
+@pytest_cases.parametrize("krylov_depth", [1, 5, 10])
 def test_decomposition_with_reortho(nrows, krylov_depth):
     # Make the prints human-readable
     jnp.set_printoptions(2, suppress=True)

@@ -1,31 +1,30 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
+import pytest_cases
 from matfree_extensions import arnoldi
 
 # Make the prints human-readable
 jnp.set_printoptions(2, suppress=True)
 
 
-def test_vjp(n=10):
-    # todo: use a scan instead of a native loop
+@pytest_cases.parametrize("nrows", [10])
+@pytest_cases.parametrize("krylov_depth", [1, 5, 10])
+def test_vjp(nrows, krylov_depth):
     # todo: see whether re-orthogonalisation is possible (we know Lambda^\top Q!)
     # todo: see whether a wrap through Hessenberg(T) makes dH Hessenberg
     # todo: verify that the maths-constraints are correct
     #  (more of a maths check, not a code check)
     # todo: use a Hilbert matrix to verify numerical stability
     # todo: see which components simplify for symmetric matrices
-    # todo: test corner cases k=0, k=1, k=n
+    # todo: test that depth=0 and depth>n raise meaningful errors
 
     # A random, asymmetric matrix and a random direction as a test-bed
-    A = jax.random.normal(jax.random.PRNGKey(1), shape=(n, n))
-    v = jax.random.normal(jax.random.PRNGKey(2), shape=(n,))
-
-    # Krylov depth
-    k = n // 2
+    A = jax.random.normal(jax.random.PRNGKey(1), shape=(nrows, nrows))
+    v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     def fwd(matrix, vector):
-        return arnoldi.forward(matrix, vector, k)
+        return arnoldi.forward(matrix, vector, krylov_depth)
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
@@ -33,13 +32,17 @@ def test_vjp(n=10):
     # Random input gradients (no sparsity at all)
     (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
 
-    # Reference VJP
+    # Call the auto-diff VJP
     da_ref, dv_ref = vjp((dQ, dH, dr, dc))
 
-    # Custom backward pass
-    (da, dv) = arnoldi.vjp(A, k, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
+    # Call the custom VJP
+    (da, dv) = arnoldi.vjp(A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
 
-    # Tolerance tied to accuracy
+    # Verify the shapes
+    assert da.shape == (nrows, nrows)
+    assert dv.shape == (nrows,)
+
+    # Tie the tolerance to the floating-point accuracy
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
 

@@ -49,8 +49,8 @@ def _forward_step(Q, H, v, length, *, A, idx, reortho: bool):
     return Q, H, v, length
 
 
-def vjp(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
-    tmp = adjoint(A, krylov_depth, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
+def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc):
+    tmp = adjoint(A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
     Lambda, lambda_k, _Gamma, _Sigma, _eta = tmp
 
     # Return the solution
@@ -59,7 +59,10 @@ def vjp(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     return dA, dv
 
 
-def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
+def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc):
+    # Extract the matrix shapes from Q
+    nrows, krylov_depth = jnp.shape(Q)
+
     # Prepare a bunch of auxiliary matrices
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
     Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
