@@ -43,16 +43,6 @@ def vjp(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
 
 
 def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
-    # Allocate some needed matrices
-    Lambda = jnp.zeros_like(Q)
-    Gamma = jnp.zeros_like(dQ.T @ Q)
-
-    # Set up extended linear system
-    H_extended = jnp.zeros((len(H) + 1, len(H) + 1))
-    H_extended = H_extended.at[:-1, 1:].set(H)
-    H_extended = H_extended.at[0, 0].set(1.0)
-    H_extended = H_extended.at[-1, -1].set(1.0)
-
     # Prepare a bunch of auxiliary matrices
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
     Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
@@ -60,6 +50,14 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Initialise
     eta = dH @ e_K - Q.T @ dr
     lambda_k = dr + Q @ eta
+    Lambda = jnp.zeros_like(Q)
+    Gamma = jnp.zeros_like(dQ.T @ Q)
+
+    # Set up extended linear system (to prepare loop variables)
+    H_extended = jnp.zeros((len(H) + 1, len(H) + 1))
+    H_extended = H_extended.at[:-1, 1:].set(H)
+    H_extended = H_extended.at[0, 0].set(1.0)
+    H_extended = H_extended.at[-1, -1].set(1.0)
 
     # Loop over those values
     beta_minuses = jnp.diag(H_extended)[:-1]
@@ -73,18 +71,21 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
         "idx": indices,
     }
 
+    # Fix the step function
     def adjoint_step(x, y):
         carry = _adjoint_step(*x, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r)
         return carry, ()
 
-    (lambda_k, Lambda, Gamma), _ = jax.lax.scan(
-        adjoint_step, init=(lambda_k, Lambda, Gamma), xs=scan_over, reverse=True
-    )
+    # Scan
+    init = (lambda_k, Lambda, Gamma)
+    result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
+    (lambda_k, Lambda, Gamma) = result
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
-    return (Lambda, lambda_k, Gamma, Sigma, eta)
+    # Return the results
+    return Lambda, lambda_k, Gamma, Sigma, eta
 
 
 def _adjoint_step(
