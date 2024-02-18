@@ -59,19 +59,17 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Loop over those values
     beta_minuses = jnp.diag(H_extended)[:-1][::-1]
     alphas = jnp.diag(H)[::-1]
+    beta_pluses = (H - jnp.diag(jnp.diag(H)) - jnp.diag(jnp.diag(H, -1), -1))[::-1]
 
     # Initialise
     eta = dH @ e_K - Q.T @ dr
     lambda_k = dr + Q @ eta
 
-    for idx, beta_minus, alpha in zip(range(1, len(H) + 1), beta_minuses, alphas):
+    for idx, beta_minus, alpha, beta_plus in zip(
+        range(1, len(H) + 1), beta_minuses, alphas, beta_pluses
+    ):
         # Save result
         Lambda = Lambda.at[:, -idx].set(lambda_k)
-
-        # Read remainind coefficients
-        beta_plus = H_extended[-(idx + 1), 1:]
-        beta_plus = beta_plus.at[-idx].set(0.0)
-        beta_plus = beta_plus.at[-(idx + 1)].set(0.0)
 
         # Solve or (Gamma + Gamma.T) e_K
         tmp = _lower(Pi - Lambda.T @ A @ Q)
