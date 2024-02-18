@@ -3,12 +3,19 @@ import jax.numpy as jnp
 
 
 def forward(A, v, krylov_depth):
+    if krylov_depth < 1 or krylov_depth > len(v):
+        msg = f"Parameter depth {krylov_depth} is outside the expected range"
+        raise ValueError(msg)
+
     # Initialise the variables
     (n,), k = jnp.shape(v), krylov_depth
     Q = jnp.zeros((n, k))
     H = jnp.zeros((k, k))
     initlength = jnp.linalg.norm(v)
     init = (Q, H, v, initlength)
+
+    if krylov_depth == 0:
+        return Q, H, v, 1 / initlength
 
     # Fix the step function
     def forward_step(i, val):
