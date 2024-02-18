@@ -47,6 +47,8 @@ def test_vjp(n=10):
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(da, da_ref, **tols)
 
+    assert False
+
 
 def _random_like(*tree):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)

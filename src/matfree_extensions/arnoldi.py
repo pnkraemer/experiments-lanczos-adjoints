@@ -42,12 +42,16 @@ def vjp(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
 
 
 def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
-    # Allocate the multipliers
+    # Allocate some needed matrices
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
-
-    # Prepare
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
+
+    # Set up extended linear system
+    H_extended = jnp.zeros((len(H) + 1, len(H) + 1))
+    H_extended = H_extended.at[:-1, 1:].set(H)
+    H_extended = H_extended.at[0, 0].set(1.0)
+    H_extended = H_extended.at[-1, -1].set(1.0)
 
     # Solve for eta
     eta = dH @ e_K - Q.T @ dr
@@ -61,49 +65,54 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Save result
     Lambda = Lambda.at[:, -idx].set(lambda_k)
 
-    # Solve or (Gamma + Gamma.T) e_K
-    e1p = -dc * c * jnp.outer(e_1, e_1)
-    tmp = jnp.tril(e1p + H @ dH.T - Lambda.T @ A @ Q - (dQ.T @ Q))
-    tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
+    # Solve for (Gamma + Gamma.T) e_K
+    Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
+    tmp = _lower(Pi - Lambda.T @ A @ Q)
     Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
 
     # Solve for the next lambda
     Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
     xi = Xi[-idx]
 
-    # Set up extended linear system
-    HH = jnp.zeros((len(H) + 1, len(H) + 1))
-    HH = HH.at[:-1, 1:].set(H)
-    HH = HH.at[0, 0].set(1.0)
-    HH = HH.at[-1, -1].set(1.0)
-
     # Initialise the iteration
-    beta = HH[-2, -2]
-    alpha = HH[-2, -1]
-    lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k)) / beta
+    beta = H_extended[-(idx + 1), -(idx + 1)]
+    alpha = H_extended[-(idx + 1), -idx]
+    beta_plus = H_extended[-(idx + 1), 1:]
+    beta_plus = beta_plus.at[-idx].set(0.0)
+    beta_plus = beta_plus.at[-(idx + 1)].set(0.0)
+    asd = beta_plus @ Lambda.T
+    lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta
 
     for _ in range(len(H) - 1):
         idx += 1
         # Save result
         Lambda = Lambda.at[:, -idx].set(lambda_k)
 
-        # Read coefficeints
-        beta_minus = HH[-(idx + 1), -(idx + 1)]
-        alpha = HH[-(idx + 1), -idx]
-        beta_plus = HH[-(idx + 1), -(idx - 1) :]
+        # Read scalar coefficeints
+        beta_minus = H_extended[-(idx + 1), -(idx + 1)]
+        alpha = H_extended[-(idx + 1), -idx]
+
+        # Read remainind coefficients
+        beta_plus = H_extended[-(idx + 1), 1:]
+        beta_plus = beta_plus.at[-idx].set(0.0)
+        beta_plus = beta_plus.at[-(idx + 1)].set(0.0)
 
         # Solve or (Gamma + Gamma.T) e_K
-        tmp = jnp.tril(e1p + H @ dH.T - Lambda.T @ A @ Q - (dQ.T @ Q))
-        tmp = tmp - 0.5 * jnp.diag(jnp.diag(tmp))
+        tmp = _lower(Pi - Lambda.T @ A @ Q)
         Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
 
         # Solve for the next lambda
         Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
         xi = Xi[-idx]
-        asd = beta_plus @ Lambda[:, -(idx - 1) :].T
+        asd = beta_plus @ Lambda.T
         lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
     return (Lambda, lambda_k, Gamma, Sigma, eta)
+
+
+def _lower(m):
+    m_tril = jnp.tril(m)
+    return m_tril - 0.5 * jnp.diag(jnp.diag(m_tril))
