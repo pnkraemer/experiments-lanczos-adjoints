@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 
@@ -61,34 +62,24 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     lambda_k = dr + Q @ eta
 
     # Loop over those values
-    beta_minuses = jnp.diag(H_extended)[:-1][::-1]
-    alphas = jnp.diag(H)[::-1]
-    beta_pluses = (H - jnp.diag(jnp.diag(H)) - jnp.diag(jnp.diag(H, -1), -1))[::-1]
-    indices = jnp.arange(0, len(H), step=1)[::-1]
+    beta_minuses = jnp.diag(H_extended)[:-1]
+    alphas = jnp.diag(H)
+    beta_pluses = H - jnp.diag(jnp.diag(H)) - jnp.diag(jnp.diag(H, -1), -1)
+    indices = jnp.arange(0, len(H), step=1)
     scan_over = {
-        "beta_minuses": beta_minuses,
-        "alphas": alphas,
-        "beta_pluses": beta_pluses,
-        "indices": indices,
+        "beta_minus": beta_minuses,
+        "alpha": alphas,
+        "beta_plus": beta_pluses,
+        "idx": indices,
     }
 
-    def adjoint_step(*x, **y):
+    def adjoint_step(x, y):
         carry = _adjoint_step(*x, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r)
         return carry, ()
 
-    for idx, beta_minus, alpha, beta_plus in zip(
-        indices, beta_minuses, alphas, beta_pluses
-    ):
-        (lambda_k, Lambda, Gamma), _ = adjoint_step(
-            lambda_k,
-            Lambda,
-            Gamma,
-            # Variable inputs
-            idx=idx,
-            beta_minus=beta_minus,
-            alpha=alpha,
-            beta_plus=beta_plus,
-        )
+    (lambda_k, Lambda, Gamma), _ = jax.lax.scan(
+        adjoint_step, init=(lambda_k, Lambda, Gamma), xs=scan_over, reverse=True
+    )
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
