@@ -70,8 +70,7 @@ def backward(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Initialise the iteration
     beta = HH[-2, -2]
     alpha = HH[-2, -1]
-    lambda_kminus = (xi - (alpha * lambda_k - A.T @ lambda_k)) / beta
-    lambda_k = lambda_kminus
+    lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k)) / beta
 
     # todo: next:
     #  then use the clever alphas (with zeros) and make tests pass,
