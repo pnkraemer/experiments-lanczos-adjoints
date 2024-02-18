@@ -65,19 +65,21 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     eta = dH @ e_K - Q.T @ dr
     lambda_k = dr + Q @ eta
 
+    indices = jnp.arange(0, len(H), step=1)[::-1]
+
     for idx, beta_minus, alpha, beta_plus in zip(
-        range(1, len(H) + 1), beta_minuses, alphas, beta_pluses
+        indices, beta_minuses, alphas, beta_pluses
     ):
         # Save result
-        Lambda = Lambda.at[:, -idx].set(lambda_k)
+        Lambda = Lambda.at[:, idx].set(lambda_k)
 
         # Solve or (Gamma + Gamma.T) e_K
         tmp = _lower(Pi - Lambda.T @ A @ Q)
-        Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
+        Gamma = Gamma.at[idx, :].set(tmp[idx, :])
 
         # Solve for the next lambda
         Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
-        xi = Xi[-idx]
+        xi = Xi[idx]
         asd = beta_plus @ Lambda.T
         lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
 
