@@ -49,8 +49,8 @@ def _forward_step(Q, H, v, length, *, A, idx, reortho: bool):
     return Q, H, v, length
 
 
-def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc):
-    tmp = adjoint(A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
+def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+    tmp = adjoint(A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho)
     Lambda, lambda_k, _Gamma, _Sigma, _eta = tmp
 
     # Return the solution
@@ -59,7 +59,7 @@ def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc):
     return dA, dv
 
 
-def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc):
+def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # Extract the matrix shapes from Q
     nrows, krylov_depth = jnp.shape(Q)
 
@@ -72,6 +72,10 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc):
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
+
+    # The first reorthogonalisation...
+    lambda_k = lambda_k - Q @ (Q.T @ lambda_k) + Q @ dH[:, -1]
+    lambda_k = lambda_k - Q @ (Q.T @ lambda_k) + Q @ dH[:, -1]
 
     # Loop over those values
     indices = jnp.arange(0, len(H), step=1)
@@ -87,8 +91,19 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc):
 
     # Fix the step function
     def adjoint_step(x, y):
-        carry = _adjoint_step(*x, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r)
-        return carry, ()
+        lambda_k, Lambda, Gamma = x
+        (lambda_k, Lambda, Gamma) = _adjoint_step(
+            lambda_k, Lambda, Gamma, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r
+        )
+
+        if reortho:
+            i = y["idx"]
+            Pt = Q[:, :i]
+            pt = dH[:i, i - 1]
+            lambda_k = lambda_k - Pt @ (Pt.T @ lambda_k) + Pt @ pt.T
+            lambda_k = lambda_k - Pt @ (Pt.T @ lambda_k) + Pt @ pt.T
+
+        return (lambda_k, Lambda, Gamma), ()
 
     # Scan
     init = (lambda_k, Lambda, Gamma)

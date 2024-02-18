@@ -1,15 +1,13 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
+import pytest
 import pytest_cases
-from matfree_extensions import arnoldi
-
-# Make the prints human-readable
-jnp.set_printoptions(2, suppress=True)
+from matfree_extensions import arnoldi, exp_util
 
 
-@pytest_cases.parametrize("nrows", [10])
-@pytest_cases.parametrize("krylov_depth", [1, 5, 10])
+@pytest_cases.parametrize("nrows", [12])
+@pytest_cases.parametrize("krylov_depth", [12])
 def test_vjp(nrows, krylov_depth):
     # todo: see whether re-orthogonalisation is possible (we know Lambda^\top Q!)
     # todo: see whether a wrap through Hessenberg(T) makes dH Hessenberg
@@ -19,12 +17,12 @@ def test_vjp(nrows, krylov_depth):
     # todo: see which components simplify for symmetric matrices
     # todo: test that depth=0 and depth>n raise meaningful errors
 
-    # A random, asymmetric matrix and a random direction as a test-bed
-    A = jax.random.normal(jax.random.PRNGKey(1), shape=(nrows, nrows))
+    # Create a random, asymmetric matrix and a random direction as a test-bed
+    A = exp_util.hilbert(nrows)
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     def fwd(matrix, vector):
-        return arnoldi.forward(matrix, vector, krylov_depth)
+        return arnoldi.forward(matrix, vector, krylov_depth, reortho=True)
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
@@ -36,7 +34,9 @@ def test_vjp(nrows, krylov_depth):
     da_ref, dv_ref = vjp((dQ, dH, dr, dc))
 
     # Call the custom VJP
-    (da, dv) = arnoldi.vjp(A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
+    (da, dv) = arnoldi.vjp(
+        A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
+    )
 
     # Verify the shapes
     assert da.shape == (nrows, nrows)
@@ -47,15 +47,23 @@ def test_vjp(nrows, krylov_depth):
     tols = {"atol": small_value, "rtol": small_value}
 
     # Assert gradients match
+    print(dv)
+    print()
+    print(dv_ref)
+    print()
+    print(dv - dv_ref)
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(da, da_ref, **tols)
+
+    pytest.fail(".")
 
 
 def _random_like(*tree):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)
 
+    # Random values (strictly positive and bounded away from zero for good measure)
     key = jax.random.PRNGKey(1)
-    flat_like = 0.1 + jax.random.uniform(key, shape=flat.shape, dtype=flat.dtype)
+    flat_like = 0.1 + 0.9 * jax.random.uniform(key, shape=flat.shape, dtype=flat.dtype)
 
     unflat = unflatten(flat_like)
     return jax.tree_util.tree_map(lambda s: s / jnp.mean(s), unflat)
