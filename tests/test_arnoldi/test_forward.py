@@ -10,6 +10,7 @@ jnp.set_printoptions(2, suppress=True)
 def test_decomposition(n=10):
     # todo: use a Hilbert matrix to assert numerical stability
     # todo: test corner cases k=0, k=1, k=n as well.
+    # todo: use a scan for the forward pass
 
     A = jax.random.normal(jax.random.PRNGKey(1), shape=(n, n))
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(n,))

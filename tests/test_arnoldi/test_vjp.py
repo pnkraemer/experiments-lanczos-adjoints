@@ -1,7 +1,6 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-import pytest
 from matfree_extensions import arnoldi
 
 # Make the prints human-readable
@@ -47,8 +46,6 @@ def test_vjp(n=10):
     # Assert gradients match
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(da, da_ref, **tols)
-
-    pytest.fail("got here successfully")
 
 
 def _random_like(*tree):

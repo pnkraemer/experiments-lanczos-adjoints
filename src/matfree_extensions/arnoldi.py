@@ -53,17 +53,11 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
 
-    # Set up extended linear system (to prepare loop variables)
-    H_extended = jnp.zeros((len(H) + 1, len(H) + 1))
-    H_extended = H_extended.at[:-1, 1:].set(H)
-    H_extended = H_extended.at[0, 0].set(1.0)
-    H_extended = H_extended.at[-1, -1].set(1.0)
-
     # Loop over those values
-    beta_minuses = jnp.diag(H_extended)[:-1]
+    indices = jnp.arange(0, len(H), step=1)
+    beta_minuses = jnp.concatenate([jnp.ones((1,)), jnp.diag(H, -1)])
     alphas = jnp.diag(H)
     beta_pluses = H - jnp.diag(jnp.diag(H)) - jnp.diag(jnp.diag(H, -1), -1)
-    indices = jnp.arange(0, len(H), step=1)
     scan_over = {
         "beta_minus": beta_minuses,
         "alpha": alphas,
@@ -91,6 +85,16 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
 def _adjoint_step(
     lambda_k, Lambda, Gamma, *, idx, beta_minus, alpha, beta_plus, Pi, A, Q, dQ, eta, r
 ):
+    # todo: replace all Lambda.T @ A calls with lambda_k @ A
+    #
+    # todo: do we need to assemble Gamma via matrix-matrix arithmetic?
+    #  or can we use vector arithmetic and yield the row of gamma?
+    #
+    # todo: can we assemble a row of Xi with vector-arithmetic
+    #  instead of matrix arithmetic?
+    #
+    # todo: do we need the full Pi?
+
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
