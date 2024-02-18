@@ -3,33 +3,40 @@ import jax.numpy as jnp
 
 
 def forward(A, v, krylov_depth):
-    (n,) = jnp.shape(v)
-    k = krylov_depth
-
-    H = jnp.zeros((k, k))
+    # Initialise the variables
+    (n,), k = jnp.shape(v), krylov_depth
     Q = jnp.zeros((n, k))
-
+    H = jnp.zeros((k, k))
     initlength = jnp.linalg.norm(v)
-    v /= initlength
+    init = (Q, H, v, initlength)
 
-    for i in range(k):
-        # Save
-        Q = Q.at[:, i].set(v)
+    # Fix the step function
+    def forward_step(i, val):
+        return _forward_step(*val, A=A, idx=i)
 
-        # Evaluate
-        v = A @ v
+    # Loop and return
+    Q, H, v, _length = jax.lax.fori_loop(0, k, forward_step, init)
+    return Q, H, v, 1 / initlength
 
-        # Orthonormalise
-        h = Q.T @ v
-        v = v - Q @ h
-        length = jnp.linalg.norm(v)
-        v /= length
 
-        # Save
-        h = h.at[i + 1].set(length)
-        H = H.at[:, i].set(h)
+def _forward_step(Q, H, v, length, *, A, idx):
+    # Save
+    v /= length
+    Q = Q.at[:, idx].set(v)
 
-    return Q, H, v * length, 1 / initlength
+    # Evaluate
+    v = A @ v
+
+    # Orthonormalise
+    h = Q.T @ v
+    v = v - Q @ h
+    length = jnp.linalg.norm(v)
+
+    # Save
+    h = h.at[idx + 1].set(length)
+    H = H.at[:, idx].set(h)
+
+    return Q, H, v, length
 
 
 def vjp(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
