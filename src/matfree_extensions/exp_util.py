@@ -73,3 +73,8 @@ def matching_directory(file, where, /, replace="experiments/"):
     # Read directory name and replace "experiments" with e.g. "data"
     directory_file = os.path.dirname(file) + "/"
     return directory_file.replace(replace, where)
+
+
+def hilbert(ndim, /):
+    a = jnp.arange(ndim)
+    return 1 / (1 + a[:, None] + a[None, :])
