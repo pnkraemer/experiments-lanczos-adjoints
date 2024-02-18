@@ -45,7 +45,10 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Allocate some needed matrices
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
+
+    # Prepare a bunch of auxiliary matrices
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
+    Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
 
     # Set up extended linear system
     H_extended = jnp.zeros((len(H) + 1, len(H) + 1))
@@ -60,31 +63,8 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     lambda_k = dr + Q @ eta
 
     # Initialise
-    idx = 1
 
-    # Save result
-    Lambda = Lambda.at[:, -idx].set(lambda_k)
-
-    # Solve for (Gamma + Gamma.T) e_K
-    Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
-    tmp = _lower(Pi - Lambda.T @ A @ Q)
-    Gamma = Gamma.at[-idx, :].set(tmp[-idx, :])
-
-    # Solve for the next lambda
-    Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
-    xi = Xi[-idx]
-
-    # Initialise the iteration
-    beta = H_extended[-(idx + 1), -(idx + 1)]
-    alpha = H_extended[-(idx + 1), -idx]
-    beta_plus = H_extended[-(idx + 1), 1:]
-    beta_plus = beta_plus.at[-idx].set(0.0)
-    beta_plus = beta_plus.at[-(idx + 1)].set(0.0)
-    asd = beta_plus @ Lambda.T
-    lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta
-
-    for _ in range(len(H) - 1):
-        idx += 1
+    for idx in range(1, len(H) + 1):
         # Save result
         Lambda = Lambda.at[:, -idx].set(lambda_k)
 
