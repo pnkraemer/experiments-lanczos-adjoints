@@ -31,7 +31,17 @@ def forward(A, v, krylov_depth):
     return Q, H, v * length, 1 / initlength
 
 
-def backward(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
+def vjp(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
+    tmp = adjoint(A, krylov_depth, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc)
+    Lambda, lambda_k, _Gamma, _Sigma, _eta = tmp
+
+    # Return the solution
+    dv = lambda_k * c
+    dA = Lambda @ Q.T
+    return dA, dv
+
+
+def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Allocate the multipliers
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
@@ -72,10 +82,6 @@ def backward(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     alpha = HH[-2, -1]
     lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k)) / beta
 
-    # todo: next:
-    #  then use the clever alphas (with zeros) and make tests pass,
-    #  then remove the tridiagonal T and use only H
-
     for _ in range(len(H) - 1):
         idx += 1
         # Save result
@@ -100,7 +106,4 @@ def backward(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
-    # Return the solution
-    dv = lambda_k * c
-    dA = Lambda @ Q.T
-    return (dA, dv), (Lambda, lambda_k, Gamma, Sigma, eta)
+    return (Lambda, lambda_k, Gamma, Sigma, eta)
