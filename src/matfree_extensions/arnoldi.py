@@ -14,9 +14,6 @@ def forward(A, v, krylov_depth, *, reortho: bool = True):
     initlength = jnp.linalg.norm(v)
     init = (Q, H, v, initlength)
 
-    if krylov_depth == 0:
-        return Q, H, v, 1 / initlength
-
     # Fix the step function
     def forward_step(i, val):
         return _forward_step(*val, A=A, idx=i, reortho=reortho)
