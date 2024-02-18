@@ -75,7 +75,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # The first reorthogonalisation:
     P = Q.T
-    ps = (dH * jnp.triu(jnp.ones((krylov_depth, krylov_depth)), -1)).T
+    ps = (dH * jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 0)).T
 
     # Loop over those values
     indices = jnp.arange(0, len(H), step=1)
@@ -95,7 +95,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
         if reortho:
             i = y["idx"]
-            p, P = ps[i], P.at[i].set(0.0)
+            p, P = ps[i], P.at[i + 1].set(0.0)
             lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
         (lambda_k, Lambda, Gamma) = _adjoint_step(

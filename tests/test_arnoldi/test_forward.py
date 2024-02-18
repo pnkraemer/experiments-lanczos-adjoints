@@ -8,10 +8,35 @@ from matfree_extensions import arnoldi, exp_util
 
 @pytest_cases.parametrize("nrows", [10])
 @pytest_cases.parametrize("krylov_depth", [1, 5, 10])
-def test_decomposition_with_reortho(nrows, krylov_depth):
-    # Make the prints human-readable
-    jnp.set_printoptions(2, suppress=True)
+@pytest_cases.parametrize("reortho", [True, False])
+def test_decomposition(nrows, krylov_depth, reortho):
+    # Create a well-conditioned test-matrix
+    A = jax.random.normal(jax.random.PRNGKey(1), shape=(nrows, nrows))
+    v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
+    # Decompose
+    Q, H, r, c = arnoldi.forward(A, v, krylov_depth, reortho=reortho)
+
+    # Assert shapes
+    assert Q.shape == (nrows, krylov_depth)
+    assert H.shape == (krylov_depth, krylov_depth)
+    assert r.shape == (nrows,)
+    assert c.shape == ()
+
+    # Tie the test-strictness to the floating point accuracy
+    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
+    tols = {"atol": small_value, "rtol": small_value}
+
+    # Test the decompositions
+    e0, ek = jnp.eye(krylov_depth)[[0, -1], :]
+    assert jnp.allclose(A @ Q - Q @ H - jnp.outer(r, ek), 0.0, **tols)
+    assert jnp.allclose(Q.T @ Q - jnp.eye(krylov_depth), 0.0, **tols)
+    assert jnp.allclose(Q @ e0, c * v, **tols)
+
+
+@pytest_cases.parametrize("nrows", [10])
+@pytest_cases.parametrize("krylov_depth", [1, 5, 10])
+def test_reorthogonalisation(nrows, krylov_depth):
     # Create an ill-conditioned test-matrix (that requires reortho=True)
     A = exp_util.hilbert(nrows)
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
