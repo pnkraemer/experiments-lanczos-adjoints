@@ -46,31 +46,27 @@ def adjoint(A, krylov_depth, *, Q, H, r, c, dQ, dH, dr, dc):
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
 
-    # Prepare a bunch of auxiliary matrices
-    e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
-    Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
-
     # Set up extended linear system
     H_extended = jnp.zeros((len(H) + 1, len(H) + 1))
     H_extended = H_extended.at[:-1, 1:].set(H)
     H_extended = H_extended.at[0, 0].set(1.0)
     H_extended = H_extended.at[-1, -1].set(1.0)
 
-    # Solve for eta
-    eta = dH @ e_K - Q.T @ dr
+    # Prepare a bunch of auxiliary matrices
+    e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
+    Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
 
-    # Solve for L e_K
-    lambda_k = dr + Q @ eta
+    # Loop over those values
+    beta_minuses = jnp.diag(H_extended)[:-1][::-1]
+    alphas = jnp.diag(H)[::-1]
 
     # Initialise
+    eta = dH @ e_K - Q.T @ dr
+    lambda_k = dr + Q @ eta
 
-    for idx in range(1, len(H) + 1):
+    for idx, beta_minus, alpha in zip(range(1, len(H) + 1), beta_minuses, alphas):
         # Save result
         Lambda = Lambda.at[:, -idx].set(lambda_k)
-
-        # Read scalar coefficeints
-        beta_minus = H_extended[-(idx + 1), -(idx + 1)]
-        alpha = H_extended[-(idx + 1), -idx]
 
         # Read remainind coefficients
         beta_plus = H_extended[-(idx + 1), 1:]
