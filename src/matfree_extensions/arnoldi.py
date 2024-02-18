@@ -73,9 +73,9 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
 
-    # The first reorthogonalisation...
-    lambda_k = lambda_k - Q @ (Q.T @ lambda_k) + Q @ dH[:, -1]
-    lambda_k = lambda_k - Q @ (Q.T @ lambda_k) + Q @ dH[:, -1]
+    # The first reorthogonalisation:
+    P = Q.T
+    ps = (dH * jnp.triu(jnp.ones((krylov_depth, krylov_depth)), -1)).T
 
     # Loop over those values
     indices = jnp.arange(0, len(H), step=1)
@@ -91,24 +91,24 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Fix the step function
     def adjoint_step(x, y):
-        lambda_k, Lambda, Gamma = x
+        (lambda_k, Lambda, Gamma, P) = x
+
+        if reortho:
+            i = y["idx"]
+            p = ps[i]
+            P = P.at[i + 2].set(0.0)
+            lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
+
         (lambda_k, Lambda, Gamma) = _adjoint_step(
             lambda_k, Lambda, Gamma, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r
         )
 
-        if reortho:
-            i = y["idx"]
-            Pt = Q[:, :i]
-            pt = dH[:i, i - 1]
-            lambda_k = lambda_k - Pt @ (Pt.T @ lambda_k) + Pt @ pt.T
-            lambda_k = lambda_k - Pt @ (Pt.T @ lambda_k) + Pt @ pt.T
-
-        return (lambda_k, Lambda, Gamma), ()
+        return (lambda_k, Lambda, Gamma, P), ()
 
     # Scan
-    init = (lambda_k, Lambda, Gamma)
+    init = (lambda_k, Lambda, Gamma, P)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma) = result
+    (lambda_k, Lambda, Gamma, _P) = result
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
