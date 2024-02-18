@@ -3,6 +3,8 @@ import jax.numpy as jnp
 
 
 def forward(A, v, krylov_depth, *, reortho: bool = True):
+    # todo: matvec
+    # todo: parametric matvec
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
         raise ValueError(msg)
@@ -60,6 +62,13 @@ def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
 
 def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+    # todo: matvec
+    # todo: parametric matvec
+    # todo: error message if krylov depth is unexpected
+    # todo: improve efficiency (see step function)
+    # todo: differentiate parametric matvec
+    # todo: figure out simplifications for symmetric problems
+
     # Extract the matrix shapes from Q
     nrows, krylov_depth = jnp.shape(Q)
 
