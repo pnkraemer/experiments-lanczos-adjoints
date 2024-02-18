@@ -6,32 +6,32 @@ import pytest_cases
 from matfree_extensions import arnoldi
 
 
-@pytest_cases.parametrize("n", [10])
-@pytest_cases.parametrize("k", [1, 5, 9, 10])
-def test_decomposition(n, k):
-    # todo: use a Hilbert matrix to assert numerical stability
-    # todo: test corner cases k=0, k=1, k=n as well.
-    # todo: use a scan for the forward pass
-
+@pytest_cases.parametrize("nrows", [10])
+@pytest_cases.parametrize("krylov_depth", [1, 5, 9, 10])
+def test_decomposition_with_reortho(nrows, krylov_depth):
     # Make the prints human-readable
     jnp.set_printoptions(2, suppress=True)
 
-    A = jax.random.normal(jax.random.PRNGKey(1), shape=(n, n))
-    v = jax.random.normal(jax.random.PRNGKey(2), shape=(n,))
-    v = v
+    A = _hilbert(nrows)
+    v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
-    Q, H, r, c = arnoldi.forward(A, v, k)
+    Q, H, r, c = arnoldi.forward(A, v, krylov_depth, reortho=True)
 
-    assert Q.shape == (n, k)
-    assert H.shape == (k, k)
+    assert Q.shape == (nrows, krylov_depth)
+    assert H.shape == (krylov_depth, krylov_depth)
 
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
 
-    e0, ek = jnp.eye(k)[[0, -1], :]
+    e0, ek = jnp.eye(krylov_depth)[[0, -1], :]
     assert jnp.allclose(A @ Q - Q @ H - jnp.outer(r, ek), 0.0, **tols)
-    assert jnp.allclose(Q.T @ Q - jnp.eye(k), 0.0, **tols)
+    assert jnp.allclose(Q.T @ Q - jnp.eye(krylov_depth), 0.0, **tols)
     assert jnp.allclose(Q @ e0, c * v, **tols)
+
+
+def _hilbert(ndim, /):
+    a = jnp.arange(ndim)
+    return 1 / (1 + a[:, None] + a[None, :])
 
 
 def test_decomposition_raises_error_for_wrong_depth_too_small():

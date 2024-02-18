@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def forward(A, v, krylov_depth):
+def forward(A, v, krylov_depth, *, reortho: bool = True):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
         raise ValueError(msg)
@@ -19,14 +19,14 @@ def forward(A, v, krylov_depth):
 
     # Fix the step function
     def forward_step(i, val):
-        return _forward_step(*val, A=A, idx=i)
+        return _forward_step(*val, A=A, idx=i, reortho=reortho)
 
     # Loop and return
     Q, H, v, _length = jax.lax.fori_loop(0, k, forward_step, init)
     return Q, H, v, 1 / initlength
 
 
-def _forward_step(Q, H, v, length, *, A, idx):
+def _forward_step(Q, H, v, length, *, A, idx, reortho: bool):
     # Save
     v /= length
     Q = Q.at[:, idx].set(v)
@@ -37,6 +37,12 @@ def _forward_step(Q, H, v, length, *, A, idx):
     # Orthonormalise
     h = Q.T @ v
     v = v - Q @ h
+
+    # Re-orthonormalise
+    if reortho:
+        v = v - Q @ (Q.T @ v)
+
+    # Read the length
     length = jnp.linalg.norm(v)
 
     # Save
