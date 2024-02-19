@@ -50,18 +50,17 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
 
 
 def vjp(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
-    tmp = adjoint(
+    tmp = _adjoint(
         matvec, *params, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho
     )
-    Lambda, lambda_k, _Gamma, _Sigma, _eta, dp = tmp
+    (Lambda, lambda_k, _Gamma, _Sigma, _eta), (dp,) = tmp
 
     # Return the solution
     dv = lambda_k * c
     return dp, dv
 
 
-def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
-    # todo: differentiate parametric matvec
+def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # todo: figure out simplifications for symmetric problems
 
     # Extract the matrix shapes from Q
@@ -82,12 +81,12 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Prepare a bunch of auxiliary matrices
 
-    def _lower(m):
+    def lower(m):
         m_tril = jnp.tril(m)
         return m_tril - 0.5 * jnp.diag(jnp.diag(m_tril))
 
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
-    lower_mask = _lower(jnp.ones((krylov_depth, krylov_depth)))
+    lower_mask = lower(jnp.ones((krylov_depth, krylov_depth)))
 
     # Initialise
     eta = dH @ e_K - Q.T @ dr
@@ -137,7 +136,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     Sigma = (Lambda.T @ Q - dH.T).T
 
     # Return the results
-    return Lambda, lambda_k, Gamma, Sigma, eta, dp
+    return (Lambda, lambda_k, Gamma, Sigma, eta), (dp,)
 
 
 def _adjoint_step(

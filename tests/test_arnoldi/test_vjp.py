@@ -68,13 +68,23 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
     jax.config.update("jax_enable_x64", True)
 
     # Create a matrix and a direction as a test-case
-    A = exp_util.hilbert(nrows)
+    A = _lower(exp_util.hilbert(nrows))
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
+    def matvec(s, p):
+        # Force sparsity in dp
+        # Such an operation has no effect on the numerical values
+        # of the forward pass, but tells the vector-Jacobian product
+        # which values are irrelevant (i.e. zero). So by using
+        # this mask, we get gradients whose sparsity pattern
+        # matches that of p. The result da + da.T is not affected.
+        p = jnp.tril(p)
+
+        # Evaluate
+        return (p + p.T) @ s
+
     def fwd(matrix, vector):
-        return arnoldi.forward(
-            lambda s, p: p @ s, vector, krylov_depth, matrix, reortho=True
-        )
+        return arnoldi.forward(matvec, vector, krylov_depth, matrix, reortho=True)
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
@@ -87,17 +97,7 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
 
     # Call the custom VJP
     (da, dv) = arnoldi.vjp(
-        lambda s, p: p @ s,
-        A,
-        Q=Q,
-        H=H,
-        r=r,
-        c=c,
-        dQ=dQ,
-        dH=dH,
-        dr=dr,
-        dc=dc,
-        reortho=True,
+        matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
     )
 
     # Verify the shapes
@@ -122,3 +122,8 @@ def _random_like(*tree):
 
     unflat = unflatten(flat_like)
     return jax.tree_util.tree_map(lambda s: s / jnp.mean(s), unflat)
+
+
+def _lower(m):
+    m_tril = jnp.tril(m)
+    return m_tril - 0.5 * jnp.diag(jnp.diag(m_tril))
