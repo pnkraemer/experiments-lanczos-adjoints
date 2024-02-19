@@ -2,6 +2,39 @@ import jax
 import jax.numpy as jnp
 
 
+def arnoldi(matvec, krylov_depth, /, *, reortho: bool, custom_vjp: bool):
+    def estimate(v, *params):
+        return forward(matvec, v, krylov_depth, *params, reortho=reortho)
+
+    def estimate_fwd(v, *params):
+        outputs = estimate(v, *params)
+        return outputs, (outputs, params)
+
+    def estimate_bwd(cache, vjp_incoming):
+        (Q, H, r, c), params = cache
+        dQ, dH, dr, dc = vjp_incoming
+
+        grads, _ = adjoint(
+            matvec,
+            *params,
+            Q=Q,
+            H=H,
+            r=r,
+            c=c,
+            dQ=dQ,
+            dH=dH,
+            dr=dr,
+            dc=dc,
+            reortho=reortho,
+        )
+        return grads
+
+    if custom_vjp:
+        estimate = jax.custom_vjp(estimate)
+        estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
+    return estimate
+
+
 def forward(matvec, v, krylov_depth, *params, reortho: bool):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
