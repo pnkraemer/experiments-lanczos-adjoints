@@ -2,6 +2,7 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import pytest_cases
+from matfree import test_util
 from matfree_extensions import arnoldi, exp_util
 
 
@@ -63,7 +64,7 @@ def test_vjp(nrows, krylov_depth, reortho):
 
 @pytest_cases.parametrize("nrows", [15])
 @pytest_cases.parametrize("krylov_depth", [10])
-def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
+def test_reorthogonalisation(nrows, krylov_depth):
     # Enable double precision because without, autodiff fails.
     jax.config.update("jax_enable_x64", True)
 
@@ -111,6 +112,57 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
     # Assert gradients match
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(dp, dp_ref, **tols)
+
+
+@pytest_cases.parametrize("nrows", [10])
+def test_sparsity_in_sigma(nrows):
+    # Create a matrix and a direction as a test-case
+    eigvals = 1.1 ** jnp.arange(-nrows // 2, nrows // 2, step=1.0)
+    A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+    v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
+
+    def matvec(s, p):
+        # Force sparsity in dp
+        # Such an operation has no effect on the numerical values
+        # of the forward pass, but tells the vector-Jacobian product
+        # which values are irrelevant (i.e. zero). So by using
+        # this mask, we get gradients whose sparsity pattern
+        # matches that of p. The result da + da.T is not affected.
+        p = jnp.tril(p)
+
+        # Evaluate
+        return (p + p.T) @ s
+
+    def fwd(vector, params):
+        krylov_depth = nrows
+        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=True)
+
+    # Forward pass
+    (Q, H, r, c), vjp = jax.vjp(fwd, v, A)
+
+    # Random input gradients (no sparsity at all)
+    (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
+
+    # Call the auto-diff VJP
+    dv_ref, dp_ref = vjp((dQ, dH, dr, dc))
+
+    # jnp.set_printoptions(3, suppress=True)
+    # Call the custom VJP
+    (dv, dp), multipliers = arnoldi.adjoint(
+        matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
+    )
+
+    # Tie the tolerance to the floating-point accuracy
+    small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
+    tols = {"atol": small_value, "rtol": small_value}
+
+    import matplotlib.pyplot as plt
+
+    colors = plt.imshow(jnp.log10(small_value**2 + jnp.abs(multipliers["Sigma"].T)))
+    plt.colorbar(colors)
+    plt.show()
+
+    assert False
 
 
 def _random_like(*tree):
