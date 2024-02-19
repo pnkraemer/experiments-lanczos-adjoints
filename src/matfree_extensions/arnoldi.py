@@ -51,27 +51,16 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
 
 def vjp(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     tmp = adjoint(
-        matvec,
-        params=params,
-        Q=Q,
-        H=H,
-        r=r,
-        c=c,
-        dQ=dQ,
-        dH=dH,
-        dr=dr,
-        dc=dc,
-        reortho=reortho,
+        matvec, *params, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho
     )
-    Lambda, lambda_k, _Gamma, _Sigma, _eta = tmp
+    Lambda, lambda_k, _Gamma, _Sigma, _eta, dp = tmp
 
     # Return the solution
     dv = lambda_k * c
-    dA = Lambda @ Q.T
-    return dA, dv
+    return dp, dv
 
 
-def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # todo: differentiate parametric matvec
     # todo: figure out simplifications for symmetric problems
 
@@ -105,6 +94,7 @@ def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
+    dp = jax.tree_util.tree_map(jnp.zeros_like, *params)
 
     # Prepare more  auxiliary matrices
     Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
@@ -128,6 +118,7 @@ def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "Pi_gamma": Pi_gamma,
         "Pi_xi": Pi_xi,
         "p": ps,
+        "q": Q.T,
     }
 
     # Fix the step function
@@ -138,15 +129,15 @@ def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         return output, ()
 
     # Scan
-    init = (lambda_k, Lambda, Gamma, P)
+    init = (lambda_k, Lambda, Gamma, P, dp)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, _P) = result
+    (lambda_k, Lambda, Gamma, _P, dp) = result
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
     # Return the results
-    return Lambda, lambda_k, Gamma, Sigma, eta
+    return Lambda, lambda_k, Gamma, Sigma, eta, dp
 
 
 def _adjoint_step(
@@ -155,6 +146,7 @@ def _adjoint_step(
     Lambda,
     Gamma,
     P,
+    dp,
     *,
     vecmat,
     params,
@@ -168,6 +160,7 @@ def _adjoint_step(
     lower_mask,
     Pi_gamma,
     Pi_xi,
+    q,
     # Loop over: reorthogonalisation
     p,
     # Fixed parameters
@@ -183,7 +176,9 @@ def _adjoint_step(
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
     # A single vector-matrix product
-    l_At = vecmat(lambda_k, *params)
+    l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
+    (dp_increment,) = vjp(q)
+    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, dp_increment)
 
     # Solve or (Gamma + Gamma.T) e_K
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
@@ -193,4 +188,4 @@ def _adjoint_step(
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
-    return lambda_k, Lambda, Gamma, P
+    return lambda_k, Lambda, Gamma, P, dp
