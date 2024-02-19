@@ -90,7 +90,8 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # The first reorthogonalisation:
     P = Q.T
-    ps = (dH * jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 0)).T
+    ps = dH.T
+    ps_mask = jnp.tril(jnp.ones((krylov_depth, krylov_depth)), 1)
 
     # Loop over those values
     indices = jnp.arange(0, len(H), step=1)
@@ -106,6 +107,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "Pi_gamma": Pi_gamma,
         "Pi_xi": Pi_xi,
         "p": ps,
+        "p_mask": ps_mask,
         "q": Q.T,
     }
 
@@ -124,9 +126,18 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
-    # Return the solution
+    # Solve for the input gradient
     dv = lambda_k * c
-    return (dv, dp), (Lambda, lambda_k, Gamma, Sigma, eta)
+
+    # Bundle the Lagrange multipliers and return
+    multipliers = {
+        "Lambda": Lambda,
+        "rho": lambda_k,
+        "Gamma": Gamma,
+        "Sigma": Sigma,
+        "eta": eta,
+    }
+    return (dv, dp), multipliers
 
 
 def _adjoint_step(
@@ -152,14 +163,16 @@ def _adjoint_step(
     q,
     # Loop over: reorthogonalisation
     p,
+    p_mask,
     # Fixed parameters
     Q,
     reortho: bool,
 ):
     # Reorthogonalise
     if reortho:
-        # todo: I still do not trust this indexing...
-        P = P.at[idx].set(0.0)
+        # todo: I do not entirely trust the test for this indexing...
+        p = p * p_mask
+        P = P * p_mask[:, None]
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Save result

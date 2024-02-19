@@ -152,16 +152,7 @@ def test_sparsity_in_sigma(nrows):
     tols = {"atol": small_value, "rtol": small_value}
 
     Sigma = multipliers["Sigma"]
-    print(Sigma)
-    print()
-    print(jnp.tril(Sigma, -2))
     assert jnp.allclose(Sigma, jnp.tril(Sigma, -2), **tols)
-
-    import matplotlib.pyplot as plt
-
-    colors = plt.imshow(jnp.log10(small_value + jnp.abs(multipliers["Sigma"])))
-    plt.colorbar(colors)
-    plt.show()
 
 
 def _random_like(*tree):
