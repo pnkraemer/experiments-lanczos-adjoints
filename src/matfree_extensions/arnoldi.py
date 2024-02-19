@@ -168,6 +168,7 @@ def _adjoint_step(
 ):
     # Reorthogonalise
     if reortho:
+        # todo: I still do not trust this indexing...
         P = P.at[idx].set(0.0)
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 

@@ -113,8 +113,6 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
             dalphas=dalphas,
             dbetas=dbetas,
             dxs=dxs,
-            # Always set to 'False' until we figure this out properly.
-            reortho=False,
         )
         return grads
 
@@ -203,90 +201,11 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(
-    *, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs, reortho
-):
-    if not reortho:
-        return _adjoint_pass(
-            matvec=matvec,
-            params=params,
-            initvec_norm=initvec_norm,
-            alphas=alphas,
-            betas=betas,
-            xs=xs,
-            dalphas=dalphas,
-            dbetas=dbetas,
-            dxs=dxs,
-            reortho=reortho,
-        )
-
-    dxs_in = dxs @ (xs.T @ xs)
-    dxs_out = dxs - dxs_in
-
-    dalphas_out = dalphas
-    dbetas_out = dbetas
-    output_out = _adjoint_pass(
-        matvec=matvec,
-        params=params,
-        initvec_norm=initvec_norm,
-        alphas=alphas,
-        betas=betas,
-        xs=xs,
-        dalphas=dalphas_out,
-        dbetas=dbetas_out,
-        dxs=dxs_out,
-        reortho=True,
-        reortho_mode="out",
-    )
-
-    dalphas_in = jnp.zeros_like(dalphas)
-    dbetas_in = jnp.zeros_like(dbetas)
-    output_in = _adjoint_pass(
-        matvec=matvec,
-        params=params,
-        initvec_norm=initvec_norm,
-        alphas=alphas,
-        betas=betas,
-        xs=xs,
-        dalphas=dalphas_in,
-        dbetas=dbetas_in,
-        dxs=dxs_in,
-        reortho=True,
-        reortho_mode="in",
-    )
-    return jax.tree_util.tree_map(lambda a, b: a + b, output_out, output_in)
-
-
-def _adjoint_pass(
-    *,
-    matvec,
-    params,
-    initvec_norm,
-    alphas,
-    betas,
-    xs,
-    dalphas,
-    dbetas,
-    dxs,
-    reortho,
-    reortho_mode=None,
-):
-    # If reortho_mode is selected, reortho must be true
-    if reortho_mode is not None and not reortho:
-        raise ValueError
-
+def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
     def adjoint_step(xi_and_lambda, inputs):
-        return _adjoint_step(
-            *xi_and_lambda,
-            matvec=matvec,
-            params=params,
-            **inputs,
-            reortho=reortho,
-            reortho_mode=reortho_mode,
-        )
+        return _adjoint_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
 
     # Scan over all input gradients and output values
-    indices = jnp.arange(0, len(xs), step=1)
     xs0 = xs
     xs0 = xs0.at[-1, :].set(jnp.zeros_like(xs[-1, :]))
 
@@ -294,7 +213,6 @@ def _adjoint_pass(
         "dx": dxs[:-1],
         "da": dalphas,
         "db": dbetas,
-        "idx": indices[:-1],
         "xs": (xs[1:], xs[:-1]),
         "a": alphas,
         "b": betas,
@@ -312,24 +230,7 @@ def _adjoint_pass(
     return (grad_initvec, grad_matvec), (lambda_1, *other)
 
 
-def _adjoint_step(
-    xs_all,
-    xi,
-    lambda_plus,
-    /,
-    *,
-    matvec,
-    params,
-    idx,
-    dx,
-    da,
-    db,
-    xs,
-    a,
-    b,
-    reortho: bool,
-    reortho_mode: str,
-):
+def _adjoint_step(xs_all, xi, lambda_plus, /, *, matvec, params, dx, da, db, xs, a, b):
     # Read inputs
     (xplus, x) = xs
 
@@ -338,21 +239,6 @@ def _adjoint_step(
     mu = db - lambda_plus.T @ x + xplus.T @ xi
     nu = da + x.T @ xi
     lambda_ = -xi + mu * xplus + nu * x
-
-    # lambda_ = xs_all.T @ xs_all @ lambda_
-    if reortho:
-        if reortho_mode == "out":
-            zeros = jnp.zeros_like(lambda_)
-            xs_all = xs_all.at[idx, :].set(zeros)
-            lambda_ = lambda_ - xs_all.T @ (xs_all @ lambda_)
-        elif reortho_mode == "in":
-            lambda_ = xs_all.T @ xs_all @ lambda_
-            # print(lambda_)
-            # print(lambda_new)
-            # print()
-        else:
-            msg = "reortho_mode not provided"
-            raise ValueError(msg)
 
     # Value-and-grad of matrix-vector product
     matvec_lambda, vjp = jax.vjp(lambda *p: matvec(lambda_, *p), *params)
