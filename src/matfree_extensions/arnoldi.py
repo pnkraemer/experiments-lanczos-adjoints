@@ -49,18 +49,7 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
     return Q, H, v, length
 
 
-def vjp(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
-    tmp = _adjoint(
-        matvec, *params, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho
-    )
-    (Lambda, lambda_k, _Gamma, _Sigma, _eta), (dp,) = tmp
-
-    # Return the solution
-    dv = lambda_k * c
-    return dp, dv
-
-
-def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # todo: figure out simplifications for symmetric problems
 
     # Extract the matrix shapes from Q
@@ -135,8 +124,9 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
 
-    # Return the results
-    return (Lambda, lambda_k, Gamma, Sigma, eta), (dp,)
+    # Return the solution
+    dv = lambda_k * c
+    return (dv, dp), (Lambda, lambda_k, Gamma, Sigma, eta)
 
 
 def _adjoint_step(

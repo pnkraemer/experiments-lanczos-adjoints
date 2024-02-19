@@ -19,22 +19,22 @@ def test_vjp(nrows, krylov_depth, reortho):
     A = jax.random.normal(jax.random.PRNGKey(1), shape=(nrows, nrows))
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
-    def fwd(matrix, vector):
+    def fwd(vector, params):
         return arnoldi.forward(
-            lambda s, p: p @ s, vector, krylov_depth, matrix, reortho=True
+            lambda s, p: p @ s, vector, krylov_depth, params, reortho=True
         )
 
     # Forward pass
-    (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
+    (Q, H, r, c), vjp = jax.vjp(fwd, v, A)
 
     # Random input gradients (no sparsity at all)
     (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
 
     # Call the auto-diff VJP
-    da_ref, dv_ref = vjp((dQ, dH, dr, dc))
+    dv_ref, dp_ref = vjp((dQ, dH, dr, dc))
 
     # Call the custom VJP
-    (da, dv) = arnoldi.vjp(
+    (dv, dp), _ = arnoldi.adjoint(
         lambda s, p: p @ s,
         A,
         Q=Q,
@@ -49,7 +49,7 @@ def test_vjp(nrows, krylov_depth, reortho):
     )
 
     # Verify the shapes
-    assert da.shape == (nrows, nrows)
+    assert dp.shape == (nrows, nrows)
     assert dv.shape == (nrows,)
 
     # Tie the tolerance to the floating-point accuracy
@@ -58,7 +58,7 @@ def test_vjp(nrows, krylov_depth, reortho):
 
     # Assert gradients match
     assert jnp.allclose(dv, dv_ref, **tols)
-    assert jnp.allclose(da, da_ref, **tols)
+    assert jnp.allclose(dp, dp_ref, **tols)
 
 
 @pytest_cases.parametrize("nrows", [15])
@@ -83,25 +83,25 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
         # Evaluate
         return (p + p.T) @ s
 
-    def fwd(matrix, vector):
-        return arnoldi.forward(matvec, vector, krylov_depth, matrix, reortho=True)
+    def fwd(vector, params):
+        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=True)
 
     # Forward pass
-    (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
+    (Q, H, r, c), vjp = jax.vjp(fwd, v, A)
 
     # Random input gradients (no sparsity at all)
     (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
 
     # Call the auto-diff VJP
-    da_ref, dv_ref = vjp((dQ, dH, dr, dc))
+    dv_ref, dp_ref = vjp((dQ, dH, dr, dc))
 
     # Call the custom VJP
-    (da, dv) = arnoldi.vjp(
+    (dv, dp), _ = arnoldi.adjoint(
         matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
     )
 
     # Verify the shapes
-    assert da.shape == (nrows, nrows)
+    assert dp.shape == (nrows, nrows)
     assert dv.shape == (nrows,)
 
     # Tie the tolerance to the floating-point accuracy
@@ -110,7 +110,7 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
 
     # Assert gradients match
     assert jnp.allclose(dv, dv_ref, **tols)
-    assert jnp.allclose(da, da_ref, **tols)
+    assert jnp.allclose(dp, dp_ref, **tols)
 
 
 def _random_like(*tree):
