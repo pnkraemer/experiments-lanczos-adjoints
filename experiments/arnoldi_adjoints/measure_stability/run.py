@@ -38,13 +38,21 @@ def evaluate_numerical_deviation_from_identity(
 
     # Measure loss of orthogonality (for reference)
     Q, *_ = algorithm(vector, matrix)
-    return (jacobian, jnp.eye(len(jacobian))), (Q.T @ Q, jnp.eye(len(Q)))
+
+    # Measure deviation
+    Q, H, *_ = algorithm(vector, matrix)
+
+    return (
+        (jacobian, jnp.eye(len(jacobian))),
+        (Q.T @ Q, jnp.eye(len(Q))),
+        (Q @ H @ Q.T - matrix, 0.0),
+    )
 
 
 def root_mean_square_error(x, y, /):
     # Absolute error because the target is the identity,
     # which has a lot of zeros.
-    return jnp.linalg.norm(jnp.abs(x - y)) / jnp.sqrt(y.size)
+    return jnp.linalg.norm(jnp.abs(x - y)) / jnp.sqrt(x.size)
 
 
 if __name__ == "__main__":
@@ -53,7 +61,11 @@ if __name__ == "__main__":
     for custom_vjp_ in [True, False]:
         for reortho_ in [True, False]:
             for n_ in jnp.arange(1, 10, step=1):
-                output, orthogonality = evaluate_numerical_deviation_from_identity(
+                (
+                    output,
+                    orthogonality,
+                    reconstruction,
+                ) = evaluate_numerical_deviation_from_identity(
                     n=n_, reortho=reortho_, custom_vjp=custom_vjp_
                 )
                 received, expected = output
@@ -62,10 +74,12 @@ if __name__ == "__main__":
                 received, expected = orthogonality
                 rmse_ = root_mean_square_error(received, expected)
 
-                print()
+                received, expected = reconstruction
+                rmse__ = root_mean_square_error(received, expected)
+
                 print(
                     f"reortho={reortho_}, custom_vjp={custom_vjp_}, "
-                    f"n={n_}, rmse={rmse}, ortho={rmse_}"
+                    f"n={n_}, rmse={rmse}, ortho={rmse_}, recon={rmse__}"
                 )
                 print()
             print()

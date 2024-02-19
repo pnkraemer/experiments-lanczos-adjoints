@@ -204,6 +204,7 @@ def _adjoint_step(
     # Reorthogonalise
     if reortho:
         # todo: I do not entirely trust the test for this indexing...
+        # todo: can we solve for sigma and orthogonalise better?
         p = p * p_mask
         P = P * p_mask[:, None]
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
