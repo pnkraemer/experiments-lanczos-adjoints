@@ -74,6 +74,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Prepare a bunch of auxiliary matrices
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
+    lower_mask = _lower(jnp.ones((krylov_depth, krylov_depth)))
 
     # Initialise
     eta = dH @ e_K - Q.T @ dr
@@ -99,6 +100,8 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "alpha": alphas,
         "beta_plus": beta_pluses,
         "idx": indices,
+        "lower_mask": lower_mask,
+        "Pi_gamma": Pi_gamma,
     }
 
     # Fix the step function
@@ -112,7 +115,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
             lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
         (lambda_k, Lambda, Gamma) = _adjoint_step(
-            lambda_k, Lambda, Gamma, **y, Pi_gamma=Pi_gamma, A=A, Q=Q, Pi_xi=Pi_xi
+            lambda_k, Lambda, Gamma, **y, A=A, Q=Q, Pi_xi=Pi_xi
         )
         return (lambda_k, Lambda, Gamma, P), ()
 
@@ -129,7 +132,19 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
 
 def _adjoint_step(
-    lambda_k, Lambda, Gamma, *, idx, beta_minus, alpha, beta_plus, Pi_gamma, A, Q, Pi_xi
+    lambda_k,
+    Lambda,
+    Gamma,
+    *,
+    idx,
+    beta_minus,
+    alpha,
+    beta_plus,
+    lower_mask,
+    Pi_gamma,
+    A,
+    Q,
+    Pi_xi,
 ):
     # todo: replace all Lambda.T @ A calls with lambda_k @ A
     #
@@ -145,8 +160,9 @@ def _adjoint_step(
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
     # Solve or (Gamma + Gamma.T) e_K
-    tmp = _lower(Pi_gamma - Lambda.T @ A @ Q)
-    Gamma = Gamma.at[idx, :].set(tmp[idx, :])
+    # pass the mask
+    tmp = lower_mask * (Pi_gamma - lambda_k @ A @ Q)
+    Gamma = Gamma.at[idx, :].set(tmp)
 
     # Solve for the next lambda
     Xi = Pi_xi + (Gamma + Gamma.T) @ Q.T
