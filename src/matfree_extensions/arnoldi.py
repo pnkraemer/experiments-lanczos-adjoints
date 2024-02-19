@@ -72,6 +72,11 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     nrows, krylov_depth = jnp.shape(Q)
 
     # Prepare a bunch of auxiliary matrices
+
+    def _lower(m):
+        m_tril = jnp.tril(m)
+        return m_tril - 0.5 * jnp.diag(jnp.diag(m_tril))
+
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
     lower_mask = _lower(jnp.ones((krylov_depth, krylov_depth)))
 
@@ -102,22 +107,13 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "lower_mask": lower_mask,
         "Pi_gamma": Pi_gamma,
         "Pi_xi": Pi_xi,
+        "p": ps,
     }
 
     # Fix the step function
     def adjoint_step(x, y):
-        (lambda_k, Lambda, Gamma, P) = x
-
-        # todo: move this to _adjoint_step
-        if reortho:
-            i = y["idx"]
-            p, P = ps[i], P.at[i + 1].set(0.0)
-            lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
-
-        (lambda_k, Lambda, Gamma) = _adjoint_step(
-            lambda_k, Lambda, Gamma, **y, A=A, Q=Q
-        )
-        return (lambda_k, Lambda, Gamma, P), ()
+        output = _adjoint_step(*x, **y, A=A, Q=Q, reortho=reortho)
+        return output, ()
 
     # Scan
     init = (lambda_k, Lambda, Gamma, P)
@@ -135,6 +131,7 @@ def _adjoint_step(
     lambda_k,
     Lambda,
     Gamma,
+    P,
     *,
     idx,
     beta_minus,
@@ -143,9 +140,16 @@ def _adjoint_step(
     lower_mask,
     Pi_gamma,
     Pi_xi,
+    p,
     A,
     Q,
+    reortho: bool,
 ):
+    # Reorthogonalise
+    if reortho:
+        P = P.at[idx].set(0.0)
+        lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
+
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
@@ -163,9 +167,4 @@ def _adjoint_step(
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
-    return lambda_k, Lambda, Gamma
-
-
-def _lower(m):
-    m_tril = jnp.tril(m)
-    return m_tril - 0.5 * jnp.diag(jnp.diag(m_tril))
+    return lambda_k, Lambda, Gamma, P
