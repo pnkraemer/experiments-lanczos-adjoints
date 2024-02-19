@@ -142,13 +142,8 @@ def test_sparsity_in_sigma(nrows):
 
     # Random input gradients (no sparsity at all)
     (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
-
-    # Call the auto-diff VJP
-    dv_ref, dp_ref = vjp((dQ, dH, dr, dc))
-
-    # jnp.set_printoptions(3, suppress=True)
     # Call the custom VJP
-    (dv, dp), multipliers = arnoldi.adjoint(
+    _, multipliers = arnoldi.adjoint(
         matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
     )
 
@@ -156,13 +151,17 @@ def test_sparsity_in_sigma(nrows):
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
 
+    Sigma = multipliers["Sigma"]
+    print(Sigma)
+    print()
+    print(jnp.tril(Sigma, -2))
+    assert jnp.allclose(Sigma, jnp.tril(Sigma, -2), **tols)
+
     import matplotlib.pyplot as plt
 
-    colors = plt.imshow(jnp.log10(small_value**2 + jnp.abs(multipliers["Sigma"].T)))
+    colors = plt.imshow(jnp.log10(small_value + jnp.abs(multipliers["Sigma"])))
     plt.colorbar(colors)
     plt.show()
-
-    assert False
 
 
 def _random_like(*tree):
