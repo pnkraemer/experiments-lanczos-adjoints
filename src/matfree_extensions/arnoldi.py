@@ -74,13 +74,16 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Prepare a bunch of auxiliary matrices
     e_1, e_K = jnp.eye(krylov_depth)[[0, -1], :]
-    Pi = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
 
     # Initialise
     eta = dH @ e_K - Q.T @ dr
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
+
+    # Prepare more  auxiliary matrices
+    Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
+    Pi_xi = dQ.T + jnp.outer(eta, r)
 
     # The first reorthogonalisation:
     P = Q.T
@@ -109,7 +112,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
             lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
         (lambda_k, Lambda, Gamma) = _adjoint_step(
-            lambda_k, Lambda, Gamma, **y, Pi=Pi, A=A, Q=Q, dQ=dQ, eta=eta, r=r
+            lambda_k, Lambda, Gamma, **y, Pi_gamma=Pi_gamma, A=A, Q=Q, Pi_xi=Pi_xi
         )
         return (lambda_k, Lambda, Gamma, P), ()
 
@@ -126,7 +129,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
 
 def _adjoint_step(
-    lambda_k, Lambda, Gamma, *, idx, beta_minus, alpha, beta_plus, Pi, A, Q, dQ, eta, r
+    lambda_k, Lambda, Gamma, *, idx, beta_minus, alpha, beta_plus, Pi_gamma, A, Q, Pi_xi
 ):
     # todo: replace all Lambda.T @ A calls with lambda_k @ A
     #
@@ -142,11 +145,11 @@ def _adjoint_step(
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
     # Solve or (Gamma + Gamma.T) e_K
-    tmp = _lower(Pi - Lambda.T @ A @ Q)
+    tmp = _lower(Pi_gamma - Lambda.T @ A @ Q)
     Gamma = Gamma.at[idx, :].set(tmp[idx, :])
 
     # Solve for the next lambda
-    Xi = dQ.T + (Gamma + Gamma.T) @ Q.T + jnp.outer(eta, r)
+    Xi = Pi_xi + (Gamma + Gamma.T) @ Q.T
     xi = Xi[idx]
     asd = beta_plus @ Lambda.T
     lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
