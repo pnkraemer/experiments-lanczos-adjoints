@@ -65,7 +65,6 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # todo: matvec
     # todo: parametric matvec
     # todo: error message if krylov depth is unexpected
-    # todo: improve efficiency (see step function)
     # todo: differentiate parametric matvec
     # todo: figure out simplifications for symmetric problems
 
@@ -147,20 +146,23 @@ def _adjoint_step(
     A,
     Q,
 ):
-    # todo: replace all Lambda.T @ A calls with lambda_k @ A
-
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
+    # todo: make this a parametrized matrix-vector product.
+    #  (but for this, we need to use jax.linear_transpose...)
+    # A single vector-matrix product
+    l_At = lambda_k @ A
+
     # Solve or (Gamma + Gamma.T) e_K
     # pass the mask
-    tmp = lower_mask * (Pi_gamma - lambda_k @ A @ Q)
+    tmp = lower_mask * (Pi_gamma - l_At @ Q)
     Gamma = Gamma.at[idx, :].set(tmp)
 
     # Solve for the next lambda
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
-    lambda_k = (xi - (alpha * lambda_k - lambda_k @ A) - asd) / beta_minus
+    lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
     return lambda_k, Lambda, Gamma
 
 
