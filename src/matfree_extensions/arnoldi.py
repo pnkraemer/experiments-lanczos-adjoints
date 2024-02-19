@@ -128,19 +128,25 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
 
 def _adjoint_step(
+    # Running variables
     lambda_k,
     Lambda,
     Gamma,
     P,
     *,
+    # Loop over: index
     idx,
+    # Loop over: submatrices of H
     beta_minus,
     alpha,
     beta_plus,
+    # Loop over: auxiliary variables
     lower_mask,
     Pi_gamma,
     Pi_xi,
+    # Loop over: reorthogonalisation
     p,
+    # Fixed parameters
     A,
     Q,
     reortho: bool,
