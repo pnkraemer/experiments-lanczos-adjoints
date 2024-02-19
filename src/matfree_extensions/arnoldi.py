@@ -102,6 +102,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "idx": indices,
         "lower_mask": lower_mask,
         "Pi_gamma": Pi_gamma,
+        "Pi_xi": Pi_xi,
     }
 
     # Fix the step function
@@ -115,7 +116,7 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
             lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
         (lambda_k, Lambda, Gamma) = _adjoint_step(
-            lambda_k, Lambda, Gamma, **y, A=A, Q=Q, Pi_xi=Pi_xi
+            lambda_k, Lambda, Gamma, **y, A=A, Q=Q
         )
         return (lambda_k, Lambda, Gamma, P), ()
 
@@ -142,19 +143,11 @@ def _adjoint_step(
     beta_plus,
     lower_mask,
     Pi_gamma,
+    Pi_xi,
     A,
     Q,
-    Pi_xi,
 ):
     # todo: replace all Lambda.T @ A calls with lambda_k @ A
-    #
-    # todo: do we need to assemble Gamma via matrix-matrix arithmetic?
-    #  or can we use vector arithmetic and yield the row of gamma?
-    #
-    # todo: can we assemble a row of Xi with vector-arithmetic
-    #  instead of matrix arithmetic?
-    #
-    # todo: do we need the full Pi?
 
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
@@ -165,10 +158,9 @@ def _adjoint_step(
     Gamma = Gamma.at[idx, :].set(tmp)
 
     # Solve for the next lambda
-    Xi = Pi_xi + (Gamma + Gamma.T) @ Q.T
-    xi = Xi[idx]
+    xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
-    lambda_k = (xi - (alpha * lambda_k - A.T @ lambda_k) - asd) / beta_minus
+    lambda_k = (xi - (alpha * lambda_k - lambda_k @ A) - asd) / beta_minus
     return lambda_k, Lambda, Gamma
 
 
