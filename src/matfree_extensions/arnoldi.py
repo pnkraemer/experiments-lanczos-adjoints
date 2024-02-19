@@ -51,8 +51,20 @@ def _forward_step(Q, H, v, length, *, A, idx, reortho: bool):
     return Q, H, v, length
 
 
-def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
-    tmp = adjoint(A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho)
+def vjp(matvec, /, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+    tmp = adjoint(
+        matvec,
+        params=params,
+        Q=Q,
+        H=H,
+        r=r,
+        c=c,
+        dQ=dQ,
+        dH=dH,
+        dr=dr,
+        dc=dc,
+        reortho=reortho,
+    )
     Lambda, lambda_k, _Gamma, _Sigma, _eta = tmp
 
     # Return the solution
@@ -61,15 +73,21 @@ def vjp(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     return dA, dv
 
 
-def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
-    # todo: matvec
-    # todo: parametric matvec
-    # todo: error message if krylov depth is unexpected
+def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+    # todo: transposed matvec
+    # todo: parametric transposed matvec
     # todo: differentiate parametric matvec
     # todo: figure out simplifications for symmetric problems
 
     # Extract the matrix shapes from Q
     nrows, krylov_depth = jnp.shape(Q)
+
+    # Transpose matvec
+    def vecmat(x, *p):
+        x_like = jnp.ones_like(x)
+        vecmat = jax.linear_transpose(lambda s: matvec(s, *p), x_like)
+        (a,) = vecmat(x)
+        return a
 
     # Prepare a bunch of auxiliary matrices
 
@@ -112,7 +130,9 @@ def adjoint(A, *, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Fix the step function
     def adjoint_step(x, y):
-        output = _adjoint_step(*x, **y, A=A, Q=Q, reortho=reortho)
+        output = _adjoint_step(
+            *x, **y, vecmat=vecmat, params=params, Q=Q, reortho=reortho
+        )
         return output, ()
 
     # Scan
@@ -134,6 +154,8 @@ def _adjoint_step(
     Gamma,
     P,
     *,
+    vecmat,
+    params,
     # Loop over: index
     idx,
     # Loop over: submatrices of H
@@ -147,7 +169,6 @@ def _adjoint_step(
     # Loop over: reorthogonalisation
     p,
     # Fixed parameters
-    A,
     Q,
     reortho: bool,
 ):
@@ -162,7 +183,7 @@ def _adjoint_step(
     # todo: make this a parametrized matrix-vector product.
     #  (but for this, we need to use jax.linear_transpose...)
     # A single vector-matrix product
-    l_At = lambda_k @ A
+    l_At = vecmat(lambda_k, *params)
 
     # Solve or (Gamma + Gamma.T) e_K
     # pass the mask

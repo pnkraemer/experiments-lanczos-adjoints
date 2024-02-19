@@ -33,7 +33,17 @@ def test_vjp(nrows, krylov_depth, reortho):
 
     # Call the custom VJP
     (da, dv) = arnoldi.vjp(
-        A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho
+        lambda s, p: p @ s,
+        params=(A,),
+        Q=Q,
+        H=H,
+        r=r,
+        c=c,
+        dQ=dQ,
+        dH=dH,
+        dr=dr,
+        dc=dc,
+        reortho=reortho,
     )
 
     # Verify the shapes
@@ -73,7 +83,17 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
 
     # Call the custom VJP
     (da, dv) = arnoldi.vjp(
-        A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
+        lambda s, p: p @ s,
+        params=(A,),
+        Q=Q,
+        H=H,
+        r=r,
+        c=c,
+        dQ=dQ,
+        dH=dH,
+        dr=dr,
+        dc=dc,
+        reortho=True,
     )
 
     # Verify the shapes
