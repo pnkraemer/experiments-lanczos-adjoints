@@ -2,9 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def forward(A, v, krylov_depth, *, reortho: bool = True):
-    # todo: matvec
-    # todo: parametric matvec
+def forward(matvec, v, krylov_depth, *params, reortho: bool):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
         raise ValueError(msg)
@@ -18,20 +16,20 @@ def forward(A, v, krylov_depth, *, reortho: bool = True):
 
     # Fix the step function
     def forward_step(i, val):
-        return _forward_step(*val, A=A, idx=i, reortho=reortho)
+        return _forward_step(*val, matvec, *params, idx=i, reortho=reortho)
 
     # Loop and return
     Q, H, v, _length = jax.lax.fori_loop(0, k, forward_step, init)
     return Q, H, v, 1 / initlength
 
 
-def _forward_step(Q, H, v, length, *, A, idx, reortho: bool):
+def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
     # Save
     v /= length
     Q = Q.at[:, idx].set(v)
 
     # Evaluate
-    v = A @ v
+    v = matvec(v, *params)
 
     # Orthonormalise
     h = Q.T @ v
@@ -51,7 +49,7 @@ def _forward_step(Q, H, v, length, *, A, idx, reortho: bool):
     return Q, H, v, length
 
 
-def vjp(matvec, /, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+def vjp(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     tmp = adjoint(
         matvec,
         params=params,
@@ -74,8 +72,6 @@ def vjp(matvec, /, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
 
 def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
-    # todo: transposed matvec
-    # todo: parametric transposed matvec
     # todo: differentiate parametric matvec
     # todo: figure out simplifications for symmetric problems
 
@@ -84,8 +80,14 @@ def adjoint(matvec, *, params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Transpose matvec
     def vecmat(x, *p):
-        x_like = jnp.ones_like(x)
+        # Use that input shape/dtype == output shape/dtype
+        x_like = x
+
+        # Transpose the matrix vector product
+        # (as a function of v, not of p)
         vecmat = jax.linear_transpose(lambda s: matvec(s, *p), x_like)
+
+        # The output of the transpose is a tuple of length 1
         (a,) = vecmat(x)
         return a
 
@@ -180,13 +182,10 @@ def _adjoint_step(
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
-    # todo: make this a parametrized matrix-vector product.
-    #  (but for this, we need to use jax.linear_transpose...)
     # A single vector-matrix product
     l_At = vecmat(lambda_k, *params)
 
     # Solve or (Gamma + Gamma.T) e_K
-    # pass the mask
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
     Gamma = Gamma.at[idx, :].set(tmp)
 

@@ -15,7 +15,9 @@ def test_decomposition(nrows, krylov_depth, reortho):
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     # Decompose
-    Q, H, r, c = arnoldi.forward(A, v, krylov_depth, reortho=reortho)
+    Q, H, r, c = arnoldi.forward(
+        lambda s, p: p @ s, v, krylov_depth, A, reortho=reortho
+    )
 
     # Assert shapes
     assert Q.shape == (nrows, krylov_depth)
@@ -42,7 +44,7 @@ def test_reorthogonalisation(nrows, krylov_depth):
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     # Decompose
-    Q, H, r, c = arnoldi.forward(A, v, krylov_depth, reortho=True)
+    Q, H, r, c = arnoldi.forward(lambda s, p: p @ s, v, krylov_depth, A, reortho=True)
 
     # Assert shapes
     assert Q.shape == (nrows, krylov_depth)
@@ -63,9 +65,9 @@ def test_reorthogonalisation(nrows, krylov_depth):
 
 def test_decomposition_raises_error_for_wrong_depth_too_small():
     with pytest.raises(ValueError, match="depth"):
-        _ = arnoldi.forward(jnp.eye(2), jnp.ones((2,)), 0)
+        _ = arnoldi.forward(lambda v: v, jnp.ones((2,)), 0, reortho=True)
 
 
 def test_decomposition_raises_error_for_wrong_depth_too_high():
     with pytest.raises(ValueError, match="depth"):
-        _ = arnoldi.forward(jnp.eye(2), jnp.ones((2,)), 3)
+        _ = arnoldi.forward(lambda v: v, jnp.ones((2,)), 3, reortho=True)

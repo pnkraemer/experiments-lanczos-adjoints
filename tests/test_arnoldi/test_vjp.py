@@ -20,7 +20,9 @@ def test_vjp(nrows, krylov_depth, reortho):
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     def fwd(matrix, vector):
-        return arnoldi.forward(matrix, vector, krylov_depth, reortho=reortho)
+        return arnoldi.forward(
+            lambda s, p: p @ s, vector, krylov_depth, matrix, reortho=True
+        )
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
@@ -34,7 +36,7 @@ def test_vjp(nrows, krylov_depth, reortho):
     # Call the custom VJP
     (da, dv) = arnoldi.vjp(
         lambda s, p: p @ s,
-        params=(A,),
+        A,
         Q=Q,
         H=H,
         r=r,
@@ -70,7 +72,9 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     def fwd(matrix, vector):
-        return arnoldi.forward(matrix, vector, krylov_depth, reortho=True)
+        return arnoldi.forward(
+            lambda s, p: p @ s, vector, krylov_depth, matrix, reortho=True
+        )
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, A, v)
@@ -84,7 +88,7 @@ def test_vjp_with_reorthogonalisation(nrows, krylov_depth):
     # Call the custom VJP
     (da, dv) = arnoldi.vjp(
         lambda s, p: p @ s,
-        params=(A,),
+        A,
         Q=Q,
         H=H,
         r=r,
