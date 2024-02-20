@@ -115,11 +115,16 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
+    Sigma = jnp.zeros_like(dQ.T @ Q)
     dp = jax.tree_util.tree_map(jnp.zeros_like, *params)
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
     Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
+    Pi_sigma = dQ.T @ Q - H @ dH.T
+    Pi_sigma_mask = jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 1)
+    H_padded = jnp.eye(len(Sigma))
+    H_padded = H_padded.at[1:-1, 1:-1].set(H[1:-1, :-2])
 
     # The first reorthogonalisation:
     P = Q.T
@@ -139,6 +144,9 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "lower_mask": lower_mask,
         "Pi_gamma": Pi_gamma,
         "Pi_xi": Pi_xi,
+        "Pi_sigma": Pi_sigma,
+        "Pi_sigma_mask": Pi_sigma_mask,
+        "h_padded": H_padded,
         "p": ps,
         "p_mask": ps_mask,
         "q": Q.T,
@@ -152,19 +160,19 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         return output, ()
 
     # Scan
-    init = (lambda_k, Lambda, Gamma, P, dp)
+    init = (lambda_k, Lambda, Gamma, Sigma, P, dp)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, _P, dp) = result
+    (lambda_k, Lambda, Gamma, Sigma_t_, _P, dp) = result
 
     # Solve for Sigma
-    Sigma = (Lambda.T @ Q - dH.T).T
-    print(Sigma.T)
+    Sigma_t = Lambda.T @ Q - dH.T
+    print(Sigma_t)
+    print(Sigma_t_)
     print()
+    assert False
     (A,) = params
-    Pi_sigma = jnp.triu(dQ.T @ Q - H @ dH.T + Gamma + Gamma.T + Lambda.T @ A @ Q, 1)
 
     LHS = jnp.eye(len(Sigma))
-    RHS = Pi_sigma
     LHS = LHS.at[1:-1, 1:-1].set(H[1:-1, :-2])
     X = jnp.zeros_like(RHS)
 
@@ -192,6 +200,7 @@ def _adjoint_step(
     lambda_k,
     Lambda,
     Gamma,
+    Sigma,
     P,
     dp,
     *,
@@ -207,6 +216,9 @@ def _adjoint_step(
     lower_mask,
     Pi_gamma,
     Pi_xi,
+    Pi_sigma,
+    Pi_sigma_mask,
+    h_padded,
     q,
     # Loop over: reorthogonalisation
     p,
@@ -240,4 +252,11 @@ def _adjoint_step(
     asd = beta_plus @ Lambda.T
     lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
 
-    return lambda_k, Lambda, Gamma, P, dp
+    # Solve for the next Sigma
+    sigma = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
+    print(sigma.shape)
+    print((h_padded @ Sigma).shape)
+    print()
+    Sigma = Sigma.at[idx, :].set((sigma - h_padded @ Sigma) / beta_minus)
+
+    return lambda_k, Lambda, Gamma, Sigma, P, dp
