@@ -179,7 +179,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         Sigma_t = Sigma_t.at[0, :].set(0.0)
         Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
     else:
-        Sigma_t = jnp.triu(Lambda.T @ Q - dH.T, 2)
+        Sigma_t = Lambda.T @ Q - dH.T
 
     # Solve for the input gradient
     dv = lambda_k * c
@@ -189,7 +189,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         "Lambda": Lambda,
         "rho": lambda_k,
         "Gamma": Gamma,
-        "Sigma": Sigma_t.T,
+        "Sigma": (Sigma_t).T,
         "eta": eta,
     }
     return (dv, dp), multipliers
