@@ -162,24 +162,28 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     # Scan
     init = (lambda_k, Lambda, Gamma, Sigma, P, dp)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, Sigma_t_, _P, dp) = result
+    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp) = result
 
-    # Solve for Sigma
-    Sigma_t = Lambda.T @ Q - dH.T
-    print(Sigma_t)
-    print(Sigma_t_)
-    print()
-    assert False
-    (A,) = params
-
-    LHS = jnp.eye(len(Sigma))
-    LHS = LHS.at[1:-1, 1:-1].set(H[1:-1, :-2])
-    X = jnp.zeros_like(RHS)
-
-    # First row
-    for i in range(len(LHS) - 1, -1, -1):
-        X = X.at[i, :].set((RHS[i, :] - LHS[i, :] @ X) / LHS[i, i])
-    print(X)
+    # Finalise Sigma
+    Sigma_t = Sigma_t.at[0, :].set(0.0)
+    Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
+    # Sigma_t = Lambda.T @ Q - dH.T
+    # print("--------------------------------------------")
+    # print(Sigma_t)
+    # print()
+    # print(Sigma_t_)
+    # print()
+    # assert False
+    # (A,) = params
+    #
+    # LHS = jnp.eye(len(Sigma))
+    # LHS = LHS.at[1:-1, 1:-1].set(H[1:-1, :-2])
+    # X = jnp.zeros_like(RHS)
+    #
+    # # First row
+    # for i in range(len(LHS) - 1, -1, -1):
+    #     X = X.at[i, :].set((RHS[i, :] - LHS[i, :] @ X) / LHS[i, i])
+    # print(X)
 
     # Solve for the input gradient
     dv = lambda_k * c
@@ -189,7 +193,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
         "Lambda": Lambda,
         "rho": lambda_k,
         "Gamma": Gamma,
-        "Sigma": Sigma,
+        "Sigma": Sigma_t.T,
         "eta": eta,
     }
     return (dv, dp), multipliers
@@ -230,9 +234,10 @@ def _adjoint_step(
     # Reorthogonalise
     if reortho:
         # todo: I do not entirely trust the test for this indexing...
-        # todo: can we solve for sigma and orthogonalise better?
-        p = p * p_mask
-        P = P * p_mask[:, None]
+        p += jnp.roll(Sigma, -1, axis=0)[idx, :]
+        # P = p_mask[:, None] * P
+        # p = p_mask * p
+        # print(P @ lambda_k - p)
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Save result
@@ -254,9 +259,6 @@ def _adjoint_step(
 
     # Solve for the next Sigma
     sigma = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
-    print(sigma.shape)
-    print((h_padded @ Sigma).shape)
-    print()
     Sigma = Sigma.at[idx, :].set((sigma - h_padded @ Sigma) / beta_minus)
 
     return lambda_k, Lambda, Gamma, Sigma, P, dp

@@ -1,7 +1,6 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-import pytest
 import pytest_cases
 from matfree import test_util
 from matfree_extensions import arnoldi, exp_util
@@ -117,7 +116,6 @@ def test_reorthogonalisation(nrows, krylov_depth):
 
 @pytest_cases.parametrize("nrows", [10])
 def test_sparsity_in_sigma(nrows):
-    jnp.set_printoptions(2, suppress=True)
     # Create a matrix and a direction as a test-case
     eigvals = 1.1 ** jnp.arange(-nrows // 2, nrows // 2, step=1.0)
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -146,7 +144,6 @@ def test_sparsity_in_sigma(nrows):
 
     Sigma = multipliers["Sigma"]
     assert jnp.allclose(Sigma, jnp.tril(Sigma, -2), **tols)
-    pytest.fail(".")
 
 
 def _random_like(*tree):
