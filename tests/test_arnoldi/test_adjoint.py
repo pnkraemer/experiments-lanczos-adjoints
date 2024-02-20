@@ -59,6 +59,13 @@ def test_vjp(nrows, krylov_depth, reortho):
     # Tie the tolerance to the floating-point accuracy
     small_value = 10 * jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
+    print()
+    print(dv)
+    print()
+    print(dv_ref)
+    print()
+    print(dp)
+    print(dp_ref)
 
     # Assert gradients match
     assert jnp.allclose(dv, dv_ref, **tols)

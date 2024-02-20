@@ -172,10 +172,12 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # Scan
     init = (lambda_k, Lambda, Gamma, Sigma, P, dp, jnp.zeros((krylov_depth,)), 1.0)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma, _length) = result
+    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma, length) = result
 
     # Finalise Sigma
-    if reortho != "full_with_sparsity":
+    if reortho == "full_with_sparsity":
+        Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
+    else:
         Sigma_t = Lambda.T @ Q - dH.T
 
     # Solve for the input gradient
@@ -226,22 +228,21 @@ def _adjoint_step(
     Q,
     reortho: str,
 ):
-    lambda_k /= length
-    sigma /= length
     # Reorthogonalise
     if reortho != "none":
         # todo: I do not entirely trust the test for this indexing...
         if reortho == "full_with_sparsity":
             p = p + sigma
+
         elif reortho == "full_without_sparsity":
             P = p_mask[:, None] * P
             p = p_mask * p
-        for _ in range(1):
-            lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
+
+        lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
-    Sigma = Sigma.at[idx, :].set(sigma)
+    Sigma = Sigma.at[idx + 1, :].set(sigma)
 
     # A single vector-matrix product
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
@@ -255,10 +256,12 @@ def _adjoint_step(
     # Solve for the next Sigma
     sigma_ = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
     sigma = sigma_ - h_padded @ Sigma
+    sigma /= beta_minus
 
     # Solve for the next lambda
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = xi - (alpha * lambda_k - l_At) - asd
+    lambda_k /= beta_minus
 
     return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma, beta_minus
