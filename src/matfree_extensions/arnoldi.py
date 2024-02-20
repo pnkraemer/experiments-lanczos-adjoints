@@ -189,7 +189,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         "Lambda": Lambda,
         "rho": lambda_k,
         "Gamma": Gamma,
-        "Sigma": (Sigma_t).T,
+        "Sigma": jnp.triu(Sigma_t, 2).T,
         "eta": eta,
     }
     return (dv, dp), multipliers
@@ -249,13 +249,23 @@ def _adjoint_step(
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
     Gamma = Gamma.at[idx, :].set(tmp)
 
+    # Solve for the next Sigma
+    sigma = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
+    Sigma = Sigma.at[idx, :].set((sigma - h_padded @ Sigma) / beta_minus)
+
     # Solve for the next lambda
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
 
-    # Solve for the next Sigma
-    sigma = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
-    Sigma = Sigma.at[idx, :].set((sigma - h_padded @ Sigma) / beta_minus)
+    # # Reorthogonalise
+    # if reortho != "none":
+    #     # todo: I do not entirely trust the test for this indexing...
+    #     if reortho == "full_with_sparsity":
+    #         p += jnp.roll(Sigma, -1, axis=0)[idx, :]
+    #     elif reortho == "full_without_sparsity":
+    #         P = p_mask[:, None] * P
+    #         p = p_mask * p
+    #     lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     return lambda_k, Lambda, Gamma, Sigma, P, dp
