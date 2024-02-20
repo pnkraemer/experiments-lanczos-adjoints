@@ -6,7 +6,7 @@ from matfree_extensions import arnoldi, exp_util
 
 
 def evaluate_numerical_deviation_from_identity(
-    *, n: int, reortho: bool, custom_vjp: bool
+    *, n: int, reortho: str, custom_vjp: bool
 ):
     # Set up a test-matrix
     matrix = exp_util.hilbert(n)
@@ -57,28 +57,30 @@ def root_mean_square_error(x, y, /):
 
 if __name__ == "__main__":
     jnp.set_printoptions(7, suppress=True)
-    jax.config.update("jax_enable_x64", True)
 
-    for custom_vjp_ in [True, False]:
-        for reortho_ in [True]:
-            for n_ in jnp.arange(1, 10, step=1):
-                evals = evaluate_numerical_deviation_from_identity(
-                    n=n_, reortho=reortho_, custom_vjp=custom_vjp_
-                )
-                (output, orthogonality, reconstruction) = evals
+    for x64 in [True, False]:
+        jax.config.update("jax_enable_x64", x64)
+        for custom_vjp_ in [True, False]:
+            for reortho_ in ["none", "full_with_sparsity", "full_without_sparsity"]:
+                for n_ in jnp.arange(2, 10, step=1):
+                    evals = evaluate_numerical_deviation_from_identity(
+                        n=n_, reortho=reortho_, custom_vjp=custom_vjp_
+                    )
+                    (output, orthogonality, reconstruction) = evals
 
-                received, expected = output
-                rmse = root_mean_square_error(received, expected)
+                    received, expected = output
+                    rmse = root_mean_square_error(received, expected)
 
-                received, expected = orthogonality
-                rmse_ = root_mean_square_error(received, expected)
+                    received, expected = orthogonality
+                    rmse_ = root_mean_square_error(received, expected)
 
-                received, expected = reconstruction
-                rmse__ = root_mean_square_error(received, expected)
+                    received, expected = reconstruction
+                    rmse__ = root_mean_square_error(received, expected)
 
-                print(
-                    f"reortho={reortho_}, custom_vjp={custom_vjp_}, "
-                    f"n={n_}, rmse={rmse}, ortho={rmse_}, recon={rmse__}"
-                )
+                    print(
+                        f"reortho={reortho_}, custom_vjp={custom_vjp_}, "
+                        f"n={n_}, rmse={rmse}, ortho={rmse_}, recon={rmse__}"
+                    )
+                    print()
                 print()
             print()
