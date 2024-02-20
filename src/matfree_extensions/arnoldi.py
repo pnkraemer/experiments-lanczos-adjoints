@@ -161,10 +161,11 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     print(Sigma.T)
     print()
     (A,) = params
-    RHS = jnp.triu(dQ.T @ Q - H @ dH.T + Gamma + Gamma.T + Lambda.T @ A @ Q, 1)[
-        1:-1, 2:
-    ]
-    LHS = H[1:-1, :-2]
+    Pi_sigma = jnp.triu(dQ.T @ Q - H @ dH.T + Gamma + Gamma.T + Lambda.T @ A @ Q, 1)
+
+    LHS = jnp.eye(len(Sigma))
+    RHS = Pi_sigma
+    LHS = LHS.at[1:-1, 1:-1].set(H[1:-1, :-2])
     X = jnp.zeros_like(RHS)
 
     # First row
