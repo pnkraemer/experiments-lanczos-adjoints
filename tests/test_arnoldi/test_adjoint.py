@@ -1,6 +1,7 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
+import pytest
 import pytest_cases
 from matfree import test_util
 from matfree_extensions import arnoldi, exp_util
@@ -8,7 +9,9 @@ from matfree_extensions import arnoldi, exp_util
 
 @pytest_cases.parametrize("nrows", [10])
 @pytest_cases.parametrize("krylov_depth", [1, 5, 10])
-@pytest_cases.parametrize("reortho", [False, True])
+@pytest_cases.parametrize(
+    "reortho", ["none", "full_with_sparsity", "full_without_sparsity"]
+)
 def test_vjp(nrows, krylov_depth, reortho):
     # todo: see whether a wrap through Hessenberg(T) makes dH Hessenberg
     # todo: verify that the maths-constraints are correct
@@ -22,7 +25,7 @@ def test_vjp(nrows, krylov_depth, reortho):
 
     def fwd(vector, params):
         return arnoldi.forward(
-            lambda s, p: p @ s, vector, krylov_depth, params, reortho=True
+            lambda s, p: p @ s, vector, krylov_depth, params, reortho=reortho
         )
 
     # Forward pass
@@ -64,7 +67,8 @@ def test_vjp(nrows, krylov_depth, reortho):
 
 @pytest_cases.parametrize("nrows", [15])
 @pytest_cases.parametrize("krylov_depth", [10])
-def test_reorthogonalisation(nrows, krylov_depth):
+@pytest_cases.parametrize("reortho", ["full_with_sparsity", "full_without_sparsity"])
+def test_reorthogonalisation(nrows, krylov_depth, reortho):
     # Enable double precision because without, autodiff fails.
     jax.config.update("jax_enable_x64", True)
 
@@ -85,7 +89,7 @@ def test_reorthogonalisation(nrows, krylov_depth):
         return (p + p.T) @ s
 
     def fwd(vector, params):
-        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=True)
+        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=reortho)
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, v, A)
@@ -98,7 +102,7 @@ def test_reorthogonalisation(nrows, krylov_depth):
 
     # Call the custom VJP
     (dv, dp), _ = arnoldi.adjoint(
-        matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
+        matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho
     )
 
     # Verify the shapes
@@ -115,7 +119,10 @@ def test_reorthogonalisation(nrows, krylov_depth):
 
 
 @pytest_cases.parametrize("nrows", [10])
-def test_sparsity_in_sigma(nrows):
+@pytest_cases.parametrize(
+    "reortho", ["none", "full_without_sparsity", "full_with_sparsity"]
+)
+def test_sparsity_in_sigma(nrows, reortho):
     # Create a matrix and a direction as a test-case
     eigvals = 1.1 ** jnp.arange(-nrows // 2, nrows // 2, step=1.0)
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -126,7 +133,7 @@ def test_sparsity_in_sigma(nrows):
 
     def fwd(vector, params):
         krylov_depth = nrows
-        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=True)
+        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=reortho)
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, v, A)
@@ -135,7 +142,7 @@ def test_sparsity_in_sigma(nrows):
     (dQ, dH, dr, dc) = _random_like(Q, H, r, c)
     # Call the custom VJP
     _, multipliers = arnoldi.adjoint(
-        matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=True
+        matvec, A, Q=Q, H=H, r=r, c=c, dQ=dQ, dH=dH, dr=dr, dc=dc, reortho=reortho
     )
 
     # Tie the tolerance to the floating-point accuracy
@@ -160,3 +167,21 @@ def _random_like(*tree):
 def _lower(m):
     m_tril = jnp.tril(m)
     return m_tril - 0.5 * jnp.diag(jnp.diag(m_tril))
+
+
+@pytest_cases.parametrize("reortho", [True, "full", "None"])
+def test_type_error_for_wrong_reorthogonalisation_flag(reortho):
+    eye = jnp.eye(1)
+    one = jnp.ones((1,))
+    kwargs = {
+        "Q": eye,
+        "H": eye,
+        "r": one,
+        "c": 1.0,
+        "dQ": eye,
+        "dH": eye,
+        "dr": one,
+        "dc": 1.0,
+    }
+    with pytest.raises(TypeError, match="Unexpected input"):
+        arnoldi.adjoint(lambda s: s, **kwargs, reortho=reortho)

@@ -57,17 +57,16 @@ def root_mean_square_error(x, y, /):
 
 if __name__ == "__main__":
     jnp.set_printoptions(7, suppress=True)
+    jax.config.update("jax_enable_x64", True)
 
     for custom_vjp_ in [True, False]:
-        for reortho_ in [True, False]:
+        for reortho_ in [True]:
             for n_ in jnp.arange(1, 10, step=1):
-                (
-                    output,
-                    orthogonality,
-                    reconstruction,
-                ) = evaluate_numerical_deviation_from_identity(
+                evals = evaluate_numerical_deviation_from_identity(
                     n=n_, reortho=reortho_, custom_vjp=custom_vjp_
                 )
+                (output, orthogonality, reconstruction) = evals
+
                 received, expected = output
                 rmse = root_mean_square_error(received, expected)
 

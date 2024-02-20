@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def arnoldi(matvec, krylov_depth, /, *, reortho: bool, custom_vjp: bool):
+def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
     def estimate(v, *params):
         return forward(matvec, v, krylov_depth, *params, reortho=reortho)
 
@@ -35,10 +35,15 @@ def arnoldi(matvec, krylov_depth, /, *, reortho: bool, custom_vjp: bool):
     return estimate
 
 
-def forward(matvec, v, krylov_depth, *params, reortho: bool):
+def forward(matvec, v, krylov_depth, *params, reortho: str):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
         raise ValueError(msg)
+
+    reortho_expected = ["none", "full_with_sparsity", "full_without_sparsity"]
+    if not isinstance(reortho, str) or reortho not in reortho_expected:
+        msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
+        raise TypeError(msg)
 
     # Initialise the variables
     (n,), k = jnp.shape(v), krylov_depth
@@ -56,7 +61,7 @@ def forward(matvec, v, krylov_depth, *params, reortho: bool):
     return Q, H, v, 1 / initlength
 
 
-def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
+def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: str):
     # Save
     v /= length
     Q = Q.at[:, idx].set(v)
@@ -69,7 +74,7 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
     v = v - Q @ h
 
     # Re-orthonormalise
-    if reortho:
+    if reortho != "none":
         v = v - Q @ (Q.T @ v)
 
     # Read the length
@@ -82,8 +87,13 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: bool):
     return Q, H, v, length
 
 
-def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
+def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # todo: figure out simplifications for symmetric problems
+
+    reortho_expected = ["none", "full_with_sparsity", "full_without_sparsity"]
+    if not isinstance(reortho, str) or reortho not in reortho_expected:
+        msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
+        raise TypeError(msg)
 
     # Extract the matrix shapes from Q
     nrows, krylov_depth = jnp.shape(Q)
@@ -165,25 +175,11 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     (lambda_k, Lambda, Gamma, Sigma_t, _P, dp) = result
 
     # Finalise Sigma
-    Sigma_t = Sigma_t.at[0, :].set(0.0)
-    Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
-    # Sigma_t = Lambda.T @ Q - dH.T
-    # print("--------------------------------------------")
-    # print(Sigma_t)
-    # print()
-    # print(Sigma_t_)
-    # print()
-    # assert False
-    # (A,) = params
-    #
-    # LHS = jnp.eye(len(Sigma))
-    # LHS = LHS.at[1:-1, 1:-1].set(H[1:-1, :-2])
-    # X = jnp.zeros_like(RHS)
-    #
-    # # First row
-    # for i in range(len(LHS) - 1, -1, -1):
-    #     X = X.at[i, :].set((RHS[i, :] - LHS[i, :] @ X) / LHS[i, i])
-    # print(X)
+    if reortho == "full_with_sparsity":
+        Sigma_t = Sigma_t.at[0, :].set(0.0)
+        Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
+    else:
+        Sigma_t = jnp.triu(Lambda.T @ Q - dH.T, 2)
 
     # Solve for the input gradient
     dv = lambda_k * c
@@ -229,15 +225,16 @@ def _adjoint_step(
     p_mask,
     # Fixed parameters
     Q,
-    reortho: bool,
+    reortho: str,
 ):
     # Reorthogonalise
-    if reortho:
+    if reortho != "none":
         # todo: I do not entirely trust the test for this indexing...
-        p += jnp.roll(Sigma, -1, axis=0)[idx, :]
-        # P = p_mask[:, None] * P
-        # p = p_mask * p
-        # print(P @ lambda_k - p)
+        if reortho == "full_with_sparsity":
+            p += jnp.roll(Sigma, -1, axis=0)[idx, :]
+        elif reortho == "full_without_sparsity":
+            P = p_mask[:, None] * P
+            p = p_mask * p
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Save result
