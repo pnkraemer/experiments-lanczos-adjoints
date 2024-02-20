@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
 
+# todo: make a three_term_recurrence function to be able to run lanczos backwards in some simulations
+
 
 def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
     def estimate(v, *params):
@@ -90,7 +92,9 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: str):
 
 
 def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
-    # todo: figure out simplifications for symmetric problems
+    # todo: implement simplifications for symmetric problems
+    # todo: full reorthogonalisation should only be the full_without_sparsity one.
+    #  the other should be a different function adjoint_with_sigma?
 
     reortho_expected = ["none", "full_with_sparsity", "full_without_sparsity"]
     if not isinstance(reortho, str) or reortho not in reortho_expected:
@@ -148,6 +152,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     beta_minuses = jnp.concatenate([jnp.ones((1,)), jnp.diag(H, -1)])
     alphas = jnp.diag(H)
     beta_pluses = H - jnp.diag(jnp.diag(H)) - jnp.diag(jnp.diag(H, -1), -1)
+    # todo: the number of loop-variables is getting out of hand...
     scan_over = {
         "beta_minus": beta_minuses,
         "alpha": alphas,
@@ -244,7 +249,7 @@ def _adjoint_step(
 
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
-    Sigma = Sigma.at[idx + 1, :].set(sigma)
+    Sigma = Sigma.at[idx + 1, :].set(sigma)  # todo: yield, dont carry
 
     # A single vector-matrix product
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
@@ -266,4 +271,5 @@ def _adjoint_step(
     lambda_k = xi - (alpha * lambda_k - l_At) - asd
     lambda_k /= beta_minus
 
+    # todo: no need to return beta_minus
     return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma, beta_minus

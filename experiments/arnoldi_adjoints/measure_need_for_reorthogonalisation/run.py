@@ -1,5 +1,3 @@
-"""Measure the numerical deviation from the identity operator."""
-
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
@@ -71,10 +69,8 @@ def root_mean_square_error(x, y, /):
 
 if __name__ == "__main__":
     jnp.set_printoptions(2, suppress=False)
-    intersect = "--------------------------------------------------"
     for x64 in [True]:
         jax.config.update("jax_enable_x64", x64)
-
         for custom_vjp_ in [True]:
             for reortho_ in ["full_with_sparsity", "full_without_sparsity", "none"]:
                 for n_ in jnp.arange(3, 33, step=2):
