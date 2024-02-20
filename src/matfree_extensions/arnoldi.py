@@ -93,8 +93,6 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: str):
 
 def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # todo: implement simplifications for symmetric problems
-    # todo: full reorthogonalisation should only be the full_without_sparsity one.
-    #  the other should be a different function adjoint_with_sigma?
 
     reortho_expected = ["none", "full", "full_with_sigma"]
     if not isinstance(reortho, str) or reortho not in reortho_expected:
@@ -135,6 +133,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     dp = jax.tree_util.tree_map(jnp.zeros_like, *params) if params != () else ()
 
     # Prepare more  auxiliary matrices
+    # todo: this is getting out of hand...
     Pi_xi = dQ.T + jnp.outer(eta, r)
     Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
     Pi_sigma = dQ.T @ Q - H @ dH.T
@@ -142,7 +141,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     H_padded = jnp.eye(len(Sigma))
     H_padded = H_padded.at[1:-1, 1:-1].set(H[1:-1, :-2])
 
-    # The first reorthogonalisation:
+    # Prepare reorthogonalisation:
     P = Q.T
     ps = dH.T
     ps_mask = jnp.tril(jnp.ones((krylov_depth, krylov_depth)), 1)
@@ -211,6 +210,7 @@ def _adjoint_step(
     dp,
     sigma,
     *,
+    # Matrix-vector product
     vecmat,
     params,
     # Loop over: index
@@ -219,7 +219,7 @@ def _adjoint_step(
     beta_minus,
     alpha,
     beta_plus,
-    # Loop over: auxiliary variables
+    # Loop over: auxiliary variables for Gamma and Sigma
     lower_mask,
     Pi_gamma,
     Pi_xi,
@@ -230,13 +230,12 @@ def _adjoint_step(
     # Loop over: reorthogonalisation
     p,
     p_mask,
-    # Fixed parameters
+    # Other parameters
     Q,
     reortho: str,
 ):
     # Reorthogonalise
     if reortho != "none":
-        # todo: I do not entirely trust the test for this indexing...
         if reortho == "full_with_sigma":
             p = p + sigma
         elif reortho == "full":
@@ -248,16 +247,15 @@ def _adjoint_step(
 
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
-    Sigma = Sigma.at[idx + 1, :].set(sigma)  # todo: yield, dont carry
+    Sigma = Sigma.at[idx + 1, :].set(
+        sigma
+    )  # todo: do we prefer the save-and-roll impl?
 
     # A single vector-matrix product
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
-    dp_increment = vjp(q)
-    dp = (
-        jax.tree_util.tree_map(lambda g, h: g + h, dp, *dp_increment)
-        if params != ()
-        else ()
-    )
+
+    # Update the parameter-gradients
+    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, *vjp(q)) if params != () else ()
 
     # Solve or (Gamma + Gamma.T) e_K
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
