@@ -29,10 +29,7 @@ def evaluate_deviation_from_identity(*, n: int, reortho: str, custom_vjp: bool):
 
     offdiag = jnp.diag(H, -1)
 
-    if krylov_depth > 2:
-        cond = jnp.amax(offdiag) / jnp.amin(offdiag)
-    else:
-        cond = 0.0
+    cond = jnp.amax(offdiag) / jnp.amin(offdiag) if krylov_depth > 2 else 0.0
     display2 = jnp.log10(cond) + jnp.log10(jnp.finfo(matrix.dtype).eps)
 
     _, multipliers = arnoldi.adjoint(

@@ -3,7 +3,8 @@
 import jax.numpy as jnp
 from matfree_extensions import arnoldi, exp_util
 
-# todo: merge this with the stability scripts to measure the reorthogonalisation-need over time.
+# todo: merge this with the stability scripts
+#  to measure the reorthogonalisation-need over time.
 
 for nrows in range(3, 33, 2):
     # Set up a test-matrix

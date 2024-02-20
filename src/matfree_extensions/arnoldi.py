@@ -39,13 +39,12 @@ def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
 
 
 # todo: swap krylov_depth and v (so v and *params are together)
-# todo: reortho should be either "none" or "full". not "full_with_...".
 def forward(matvec, v, krylov_depth, *params, reortho: str):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
         raise ValueError(msg)
 
-    reortho_expected = ["none", "full_with_sparsity", "full_without_sparsity"]
+    reortho_expected = ["none", "full"]
     if not isinstance(reortho, str) or reortho not in reortho_expected:
         msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
         raise TypeError(msg)
@@ -97,7 +96,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # todo: full reorthogonalisation should only be the full_without_sparsity one.
     #  the other should be a different function adjoint_with_sigma?
 
-    reortho_expected = ["none", "full_with_sparsity", "full_without_sparsity"]
+    reortho_expected = ["none", "full", "full_with_sigma"]
     if not isinstance(reortho, str) or reortho not in reortho_expected:
         msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
         raise TypeError(msg)
@@ -133,7 +132,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
     Sigma = jnp.zeros_like(dQ.T @ Q)
-    dp = jax.tree_util.tree_map(jnp.zeros_like, *params)
+    dp = jax.tree_util.tree_map(jnp.zeros_like, *params) if params != () else ()
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
@@ -183,7 +182,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma) = result
 
     # Finalise Sigma
-    if reortho == "full_with_sparsity":
+    if reortho == "full_with_sigma":
         Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
     else:
         Sigma_t = Lambda.T @ Q - dH.T
@@ -238,13 +237,13 @@ def _adjoint_step(
     # Reorthogonalise
     if reortho != "none":
         # todo: I do not entirely trust the test for this indexing...
-        if reortho == "full_with_sparsity":
+        if reortho == "full_with_sigma":
             p = p + sigma
-
-        elif reortho == "full_without_sparsity":
+        elif reortho == "full":
             P = p_mask[:, None] * P
             p = p_mask * p
-
+        else:
+            raise ValueError
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Save result
@@ -253,8 +252,12 @@ def _adjoint_step(
 
     # A single vector-matrix product
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
-    (dp_increment,) = vjp(q)
-    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, dp_increment)
+    dp_increment = vjp(q)
+    dp = (
+        jax.tree_util.tree_map(lambda g, h: g + h, dp, *dp_increment)
+        if params != ()
+        else ()
+    )
 
     # Solve or (Gamma + Gamma.T) e_K
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
@@ -271,5 +274,4 @@ def _adjoint_step(
     lambda_k = xi - (alpha * lambda_k - l_At) - asd
     lambda_k /= beta_minus
 
-    # todo: no need to return beta_minus
     return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma
