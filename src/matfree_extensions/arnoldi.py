@@ -170,15 +170,12 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         return output, ()
 
     # Scan
-    init = (lambda_k, Lambda, Gamma, Sigma, P, dp)
+    init = (lambda_k, Lambda, Gamma, Sigma, P, dp, jnp.zeros((krylov_depth,)), 1.0)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp) = result
+    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma, _length) = result
 
     # Finalise Sigma
-    if reortho == "full_with_sparsity":
-        Sigma_t = Sigma_t.at[0, :].set(0.0)
-        Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
-    else:
+    if reortho != "full_with_sparsity":
         Sigma_t = Lambda.T @ Q - dH.T
 
     # Solve for the input gradient
@@ -203,6 +200,8 @@ def _adjoint_step(
     Sigma,
     P,
     dp,
+    sigma,
+    length,
     *,
     vecmat,
     params,
@@ -227,18 +226,22 @@ def _adjoint_step(
     Q,
     reortho: str,
 ):
+    lambda_k /= length
+    sigma /= length
     # Reorthogonalise
     if reortho != "none":
         # todo: I do not entirely trust the test for this indexing...
         if reortho == "full_with_sparsity":
-            p += jnp.roll(Sigma, -1, axis=0)[idx, :]
+            p = p + sigma
         elif reortho == "full_without_sparsity":
             P = p_mask[:, None] * P
             p = p_mask * p
-        lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
+        for _ in range(1):
+            lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Save result
     Lambda = Lambda.at[:, idx].set(lambda_k)
+    Sigma = Sigma.at[idx, :].set(sigma)
 
     # A single vector-matrix product
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
@@ -250,22 +253,12 @@ def _adjoint_step(
     Gamma = Gamma.at[idx, :].set(tmp)
 
     # Solve for the next Sigma
-    sigma = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
-    Sigma = Sigma.at[idx, :].set((sigma - h_padded @ Sigma) / beta_minus)
+    sigma_ = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
+    sigma = sigma_ - h_padded @ Sigma
 
     # Solve for the next lambda
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
-    lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
+    lambda_k = xi - (alpha * lambda_k - l_At) - asd
 
-    # # Reorthogonalise
-    # if reortho != "none":
-    #     # todo: I do not entirely trust the test for this indexing...
-    #     if reortho == "full_with_sparsity":
-    #         p += jnp.roll(Sigma, -1, axis=0)[idx, :]
-    #     elif reortho == "full_without_sparsity":
-    #         P = p_mask[:, None] * P
-    #         p = p_mask * p
-    #     lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
-
-    return lambda_k, Lambda, Gamma, Sigma, P, dp
+    return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma, beta_minus
