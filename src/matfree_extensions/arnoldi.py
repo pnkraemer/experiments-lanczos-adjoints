@@ -118,8 +118,8 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
     dp = jax.tree_util.tree_map(jnp.zeros_like, *params)
 
     # Prepare more  auxiliary matrices
-    Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
     Pi_xi = dQ.T + jnp.outer(eta, r)
+    Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
 
     # The first reorthogonalisation:
     P = Q.T
@@ -158,6 +158,19 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: bool):
 
     # Solve for Sigma
     Sigma = (Lambda.T @ Q - dH.T).T
+    print(Sigma.T)
+    print()
+    (A,) = params
+    RHS = jnp.triu(dQ.T @ Q - H @ dH.T + Gamma + Gamma.T + Lambda.T @ A @ Q, 1)[
+        1:-1, 2:
+    ]
+    LHS = H[1:-1, :-2]
+    X = jnp.zeros_like(RHS)
+
+    # First row
+    for i in range(len(LHS) - 1, -1, -1):
+        X = X.at[i, :].set((RHS[i, :] - LHS[i, :] @ X) / LHS[i, i])
+    print(X)
 
     # Solve for the input gradient
     dv = lambda_k * c
@@ -225,4 +238,5 @@ def _adjoint_step(
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = (xi - (alpha * lambda_k - l_At) - asd) / beta_minus
+
     return lambda_k, Lambda, Gamma, P, dp

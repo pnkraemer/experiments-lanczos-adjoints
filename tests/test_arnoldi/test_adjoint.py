@@ -1,6 +1,7 @@
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
+import pytest
 import pytest_cases
 from matfree import test_util
 from matfree_extensions import arnoldi, exp_util
@@ -116,22 +117,14 @@ def test_reorthogonalisation(nrows, krylov_depth):
 
 @pytest_cases.parametrize("nrows", [10])
 def test_sparsity_in_sigma(nrows):
+    jnp.set_printoptions(2, suppress=True)
     # Create a matrix and a direction as a test-case
     eigvals = 1.1 ** jnp.arange(-nrows // 2, nrows // 2, step=1.0)
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
 
     def matvec(s, p):
-        # Force sparsity in dp
-        # Such an operation has no effect on the numerical values
-        # of the forward pass, but tells the vector-Jacobian product
-        # which values are irrelevant (i.e. zero). So by using
-        # this mask, we get gradients whose sparsity pattern
-        # matches that of p. The result da + da.T is not affected.
-        p = jnp.tril(p)
-
-        # Evaluate
-        return (p + p.T) @ s
+        return p @ s
 
     def fwd(vector, params):
         krylov_depth = nrows
@@ -153,6 +146,7 @@ def test_sparsity_in_sigma(nrows):
 
     Sigma = multipliers["Sigma"]
     assert jnp.allclose(Sigma, jnp.tril(Sigma, -2), **tols)
+    pytest.fail(".")
 
 
 def _random_like(*tree):
