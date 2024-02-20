@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-# todo: make a three_term_recurrence function to be able to run lanczos backwards in some simulations
+# todo: make a three_term_recurrence function
+#  to be able to run lanczos backwards in some simulations
 
 
 def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
@@ -177,9 +178,9 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         return output, ()
 
     # Scan
-    init = (lambda_k, Lambda, Gamma, Sigma, P, dp, jnp.zeros((krylov_depth,)), 1.0)
+    init = (lambda_k, Lambda, Gamma, Sigma, P, dp, jnp.zeros((krylov_depth,)))
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma, length) = result
+    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma) = result
 
     # Finalise Sigma
     if reortho == "full_with_sparsity":
@@ -210,7 +211,6 @@ def _adjoint_step(
     P,
     dp,
     sigma,
-    length,
     *,
     vecmat,
     params,
@@ -272,4 +272,4 @@ def _adjoint_step(
     lambda_k /= beta_minus
 
     # todo: no need to return beta_minus
-    return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma, beta_minus
+    return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma
