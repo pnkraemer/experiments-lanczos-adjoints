@@ -35,6 +35,8 @@ def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
     return estimate
 
 
+# todo: swap krylov_depth and v (so v and *params are together)
+# todo: reortho should be either "none" or "full". not "full_with_...".
 def forward(matvec, v, krylov_depth, *params, reortho: str):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
