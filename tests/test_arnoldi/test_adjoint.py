@@ -23,7 +23,7 @@ def test_vjp(nrows, krylov_depth, reortho):
 
     def fwd(vector, params):
         return arnoldi.forward(
-            lambda s, p: p @ s, vector, krylov_depth, params, reortho=reortho_
+            lambda s, p: p @ s, krylov_depth, vector, params, reortho=reortho_
         )
 
     # Forward pass
@@ -90,7 +90,7 @@ def test_reorthogonalisation(nrows, krylov_depth, reortho):
     reortho_ = reortho_fwd[reortho]
 
     def fwd(vector, params):
-        return arnoldi.forward(matvec, vector, krylov_depth, params, reortho=reortho_)
+        return arnoldi.forward(matvec, krylov_depth, vector, params, reortho=reortho_)
 
     # Forward pass
     (Q, H, r, c), vjp = jax.vjp(fwd, v, A)

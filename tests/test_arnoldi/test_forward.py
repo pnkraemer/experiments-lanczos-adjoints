@@ -16,7 +16,7 @@ def test_decomposition(nrows, krylov_depth, reortho):
 
     # Decompose
     Q, H, r, c = arnoldi.forward(
-        lambda s, p: p @ s, v, krylov_depth, A, reortho=reortho
+        lambda s, p: p @ s, krylov_depth, v, A, reortho=reortho
     )
 
     # Assert shapes
@@ -46,7 +46,7 @@ def test_reorthogonalisation(nrows, krylov_depth, reortho):
 
     # Decompose
     Q, H, r, c = arnoldi.forward(
-        lambda s, p: p @ s, v, krylov_depth, A, reortho=reortho
+        lambda s, p: p @ s, krylov_depth, v, A, reortho=reortho
     )
 
     # Assert shapes
@@ -68,16 +68,16 @@ def test_reorthogonalisation(nrows, krylov_depth, reortho):
 
 def test_forward_raises_error_for_wrong_depth_too_small():
     with pytest.raises(ValueError, match="depth"):
-        _ = arnoldi.forward(lambda v: v, jnp.ones((2,)), 0, reortho="none")
+        _ = arnoldi.forward(lambda v: v, 0, jnp.ones((2,)), reortho="none")
 
 
 def test_forward_raises_value_error_for_wrong_depth_too_high():
     with pytest.raises(ValueError, match="depth"):
-        _ = arnoldi.forward(lambda v: v, jnp.ones((2,)), 3, reortho="none")
+        _ = arnoldi.forward(lambda v: v, 3, jnp.ones((2,)), reortho="none")
 
 
 @pytest_cases.parametrize("reortho", [True, "full_with_sparsity", "None"])
 def test_forward_raises_type_error_for_wrong_reorthogonalisation_flag(reortho):
     one = jnp.ones((1,))
     with pytest.raises(TypeError, match="Unexpected input"):
-        arnoldi.forward(lambda s: s, one, 1, reortho=reortho)
+        arnoldi.forward(lambda s: s, 1, one, reortho=reortho)
