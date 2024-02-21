@@ -1,7 +1,4 @@
-# todo: use a proper optimizer
 # todo: use a wave instead of heat for identifiability?
-# todo: matrix-free implementation
-# todo: use more parameters
 # todo: 2d
 # todo: have a comparison
 
