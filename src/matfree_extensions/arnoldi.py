@@ -133,18 +133,19 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     dp = jax.tree_util.tree_map(jnp.zeros_like, *params) if params != () else ()
 
     # Prepare more  auxiliary matrices
-    # todo: this is getting out of hand...
     Pi_xi = dQ.T + jnp.outer(eta, r)
     Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
-    Pi_sigma = dQ.T @ Q - H @ dH.T
-    Pi_sigma_mask = jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 1)
-    H_padded = jnp.eye(len(Sigma))
-    H_padded = H_padded.at[1:-1, 1:-1].set(H[1:-1, :-2])
 
     # Prepare reorthogonalisation:
     P = Q.T
     ps = dH.T
     ps_mask = jnp.tril(jnp.ones((krylov_depth, krylov_depth)), 1)
+
+    # Prepare fancy reorthogonalisation
+    Pi_sigma = dQ.T @ Q - H @ dH.T
+    Pi_sigma_mask = jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 1)
+    H_padded = jnp.eye(len(Sigma))
+    H_padded = H_padded.at[1:-1, 1:-1].set(H[1:-1, :-2])
 
     # Loop over those values
     indices = jnp.arange(0, len(H), step=1)
