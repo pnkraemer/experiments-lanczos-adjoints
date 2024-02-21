@@ -1,4 +1,5 @@
 # todo: use a proper optimizer
+# todo: use a wave instead of heat for identifiability?
 # todo: matrix-free implementation
 # todo: use more parameters
 # todo: 2d
@@ -12,10 +13,13 @@ import jax.numpy as jnp
 import jax.scipy.linalg
 import matplotlib.pyplot as plt
 import optax
+from matfree_extensions import arnoldi
 
 # Set discretisation parameters
-dx = 0.01
+dx = 1e-3
 xs = jnp.arange(0.0, 1.0 + dx, step=dx)
+
+krylov_depth = 10
 
 
 # Set problem parameters
@@ -35,6 +39,9 @@ def rhs(x, d):
     return jnp.convolve(-d * stencil, x_padded, mode="valid")
 
 
+algorithm = arnoldi.arnoldi(rhs, krylov_depth, reortho="full", custom_vjp=True)
+
+
 # Parameter-to-solution/error operators
 
 
@@ -47,11 +54,20 @@ def parameter_to_error(params, targets):
 
 
 @jax.jit
-def parameter_to_solution(t, params):
+def parameter_to_solution_dense(t, params):
     coeff_ = unflatten(params)
     y0 = init(xs, coeff_["init"])
     A = jax.jacfwd(lambda s: rhs(s, coeff_["rhs"]))(y0)
     return jax.scipy.linalg.expm(t * A) @ y0
+
+
+@jax.jit
+def parameter_to_solution(t, params):
+    coeff_ = unflatten(params)
+    y0 = init(xs, coeff_["init"])
+    Q, H, _r, c = algorithm(y0, coeff_["rhs"])
+    e1 = jnp.eye(len(H))[0, :]
+    return c * Q @ jax.scipy.linalg.expm(t * H) @ e1
 
 
 # Create an optimization problem
@@ -82,7 +98,7 @@ while jnp.linalg.norm(gradient) > jnp.power(jnp.finfo(value.dtype).eps, 0.5):
     updates, opt_state = optimizer.update(gradient, opt_state)
     coeff = optax.apply_updates(coeff, updates)
 
-    if count % 10 == 0:
+    if count % 1 == 0:
         print(count, coeff, jnp.linalg.norm(gradient))
     count += 1
 
