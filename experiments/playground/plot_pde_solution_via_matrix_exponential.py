@@ -9,6 +9,7 @@ import functools
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg
+import optax
 
 # Set discretisation parameters
 dx = 0.01
@@ -52,16 +53,27 @@ solution_true = parameter_to_solution(1.0, coeff_true)
 noise = 0.01 * jax.random.normal(jax.random.PRNGKey(1), shape=y0.shape)
 data = solution_true + noise
 loss_value_and_grad = functools.partial(parameter_to_error, targets=data)
+coeff = 0.2  # initial guess
+
+
+# Optimizer
+learning_rate = 1e-3
+optimizer = optax.adam(learning_rate)
+opt_state = optimizer.init(coeff)
+
 
 # Optimize
 
-learning_rate = 0.01
-coeff = 0.2  # initial guess
-val, grad = loss_value_and_grad(coeff)  # JIT-compile
-
-while jnp.linalg.norm(grad) > jnp.sqrt(jnp.finfo(val.dtype).eps):
+value, gradient = loss_value_and_grad(coeff)  # JIT-compile
+count = 0
+while jnp.linalg.norm(gradient) > jnp.power(jnp.finfo(value.dtype).eps, 0.25):
     value, gradient = loss_value_and_grad(coeff)
 
-    # Gradient descent
-    coeff = coeff - learning_rate * gradient
-    print(coeff)
+    updates, opt_state = optimizer.update(gradient, opt_state)
+    coeff = optax.apply_updates(coeff, updates)
+
+    if count % 5 == 0:
+        print(count, gradient)
+    count += 1
+
+print(f"Found coefficient coeff={coeff}")
