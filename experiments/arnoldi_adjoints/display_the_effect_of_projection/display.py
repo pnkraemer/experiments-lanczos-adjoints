@@ -13,7 +13,7 @@ from tueplots import axes, figsizes, fontsizes
 plt.rcParams.update(figsizes.icml2024_full(ncols=4, nrows=1, height_to_width_ratio=1.0))
 plt.rcParams.update(fontsizes.icml2024())
 plt.rcParams.update(axes.lines())
-jnp.set_printoptions(1, suppress=False)
+jnp.set_printoptions(4, suppress=False)
 
 
 # A few auxiliary functions
