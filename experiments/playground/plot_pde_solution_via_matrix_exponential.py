@@ -1,4 +1,4 @@
-# todo: use a wave instead of heat for identifiability?
+# todo: use a different differential equation?
 # todo: 2d
 # todo: have a comparison
 
@@ -16,12 +16,13 @@ from matfree_extensions import arnoldi
 dx = 1e-3
 xs = jnp.arange(0.0, 1.0 + dx, step=dx)
 
-krylov_depth = 10
+krylov_depth = 20
+print(xs.shape)
 
 
 # Set problem parameters
 def init(x, s):
-    return jnp.exp(-100 * (x - s) ** 2)
+    return jnp.exp(-20 * (x - s) ** 2)
 
 
 coeff_true = {"init": 0.5, "rhs": 0.1}
@@ -70,7 +71,7 @@ def parameter_to_solution(t, params):
 # Create an optimization problem
 coeff_true_flat, _unflatten = jax.flatten_util.ravel_pytree(coeff_true)
 solution_true = parameter_to_solution(1.0, coeff_true_flat)
-noise = 1e-3 * jax.random.normal(jax.random.PRNGKey(2), shape=xs.shape)
+noise = 1e-5 * jax.random.normal(jax.random.PRNGKey(2), shape=xs.shape)
 data = solution_true + noise
 loss_value_and_grad = functools.partial(parameter_to_error, targets=data)
 
@@ -105,13 +106,21 @@ ts = jnp.arange(0.0, 1.0 + dt, step=dt)
 
 # Simulation
 sol = jax.vmap(lambda s: parameter_to_solution(s, coeff), out_axes=1)(ts)
-plt.plot(xs, sol, color="gray")
+plt.plot(xs, sol, color="gray", alpha=0.5, label="truth")
 
 # Truth
 sol = jax.vmap(lambda s: parameter_to_solution(s, coeff_true_flat), out_axes=1)(ts)
-plt.plot(xs, sol, color="blue")
+plt.plot(xs, sol, color="blue", alpha=0.5, label="truth")
 
 # Data
-plt.plot(xs, data)
+plt.plot(xs, data, label="data")
+
+
+# https://stackoverflow.com/questions/13588920/stop-matplotlib-repeating-labels-in-legend
+handles, labels = plt.gca().get_legend_handles_labels()
+by_label = dict(zip(labels, handles))
+plt.legend(by_label.values(), by_label.keys())
+
+
 plt.show()
 print(f"Found coefficient coeff={unflatten(coeff)}")
