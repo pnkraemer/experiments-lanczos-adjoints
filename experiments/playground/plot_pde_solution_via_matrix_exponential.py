@@ -16,7 +16,8 @@ from matfree_extensions import arnoldi
 dx = 1e-1
 xs_1 = jnp.arange(0.0, 1.0 + dx, step=dx)
 xs_2 = jnp.arange(0.0, 1.0 + dx, step=dx)
-xs = jnp.stack(jnp.meshgrid(xs_1, xs_2)).reshape((2, -1))
+mesh = jnp.stack(jnp.meshgrid(xs_1, xs_2))
+xs = mesh.reshape((2, -1))
 xs_flat, unflatten_xs = jax.flatten_util.ravel_pytree(xs)
 
 
@@ -30,7 +31,9 @@ krylov_depth = 10
 def init(x, s):
     x = unflatten_xs(x)
     diff = x - s[:, None]
-    fx = jax.vmap(lambda d: jnp.exp(-20 * jnp.dot(d, d)), in_axes=-1, out_axes=-1)(diff)
+    fx = jax.vmap(lambda d: jnp.exp(-100 * jnp.dot(d, d)), in_axes=-1, out_axes=-1)(
+        diff
+    )
     return jax.flatten_util.ravel_pytree(fx)[0]
 
 
@@ -42,6 +45,7 @@ _, unflatten_y = jax.flatten_util.ravel_pytree(jnp.meshgrid(xs_1, xs_2)[0])
 
 
 def rhs(x, d):
+    d = 0.01
     x = unflatten_y(x)
     x_padded = jnp.pad(x, 1, mode="constant", constant_values=0.0)
 
@@ -63,16 +67,18 @@ def parameter_to_error(params, targets):
     return jnp.dot(diff, diff)
 
 
+#
+# @jax.jit
+# def parameter_to_solution(t, params):
+#     coeff_ = unflatten_p(params)
+#     y0 = init(xs, coeff_["init"])
+#     A = jax.jacfwd(lambda s: rhs(s, coeff_["rhs"]))(y0)
+#     return jax.scipy.linalg.expm(t * A) @ y0
+#
+
+
 @jax.jit
 def parameter_to_solution(t, params):
-    coeff_ = unflatten_p(params)
-    y0 = init(xs, coeff_["init"])
-    A = jax.jacfwd(lambda s: rhs(s, coeff_["rhs"]))(y0)
-    return jax.scipy.linalg.expm(t * A) @ y0
-
-
-@jax.jit
-def parameter_to_solution_matfree(t, params):
     coeff_ = unflatten_p(params)
     y0 = init(xs, coeff_["init"])
     Q, H, _r, c = algorithm(y0, coeff_["rhs"])
@@ -87,19 +93,42 @@ noise = 1e-5 * jax.random.normal(jax.random.PRNGKey(2), shape=solution_true.shap
 data = solution_true + noise
 loss_value_and_grad = functools.partial(parameter_to_error, targets=data)
 
+
+print("....", loss_value_and_grad(coeff_true_flat))
+
+
+y0 = init(xs_flat, coeff_true["init"])
+
+
+ts = jnp.arange(0.0, 1.0, step=0.1)
+y1 = jax.vmap(lambda t_: parameter_to_solution(t_, coeff_true_flat))(ts)
+
+fig, (axes, axes_after) = plt.subplots(
+    nrows=2, ncols=len(ts), figsize=(len(ts) * 2, 3), sharex=True, sharey=True
+)
+
+for y1_, ax in zip(y1, axes):
+    ax.contourf(mesh[0], mesh[1], unflatten_y(y1_))
+
+axes[0].set_ylabel("Truth")
+
+
 # initial guess
-noise = 1e-1 * jax.random.normal(jax.random.PRNGKey(2), shape=coeff_true_flat.shape)
+noise = 1e-2 * jax.random.normal(jax.random.PRNGKey(2), shape=coeff_true_flat.shape)
 coeff = coeff_true_flat + noise
 
 # Optimizer
-learning_rate = 1e-2
+learning_rate = 1e-3
 optimizer = optax.adam(learning_rate)
 opt_state = optimizer.init(coeff)
 
 
 # Optimize
 
+
 value, gradient = loss_value_and_grad(coeff)  # JIT-compile
+
+
 gradient = jnp.ones_like(gradient)
 count = 0
 while jnp.linalg.norm(gradient) > jnp.power(jnp.finfo(value.dtype).eps, 0.5):
@@ -113,26 +142,10 @@ while jnp.linalg.norm(gradient) > jnp.power(jnp.finfo(value.dtype).eps, 0.5):
     count += 1
 
 
-dt = 0.1
-ts = jnp.arange(0.0, 1.0 + dt, step=dt)
+y1 = jax.vmap(lambda t_: parameter_to_solution(t_, coeff))(ts)
 
-# Simulation
-sol = jax.vmap(lambda s: parameter_to_solution(s, coeff), out_axes=1)(ts)
-plt.plot(xs, sol, color="gray", alpha=0.5, label="truth")
-
-# Truth
-sol = jax.vmap(lambda s: parameter_to_solution(s, coeff_true_flat), out_axes=1)(ts)
-plt.plot(xs, sol, color="blue", alpha=0.5, label="truth")
-
-# Data
-plt.plot(xs, data, label="data")
-
-
-# https://stackoverflow.com/questions/13588920/stop-matplotlib-repeating-labels-in-legend
-handles, labels = plt.gca().get_legend_handles_labels()
-by_label = dict(zip(labels, handles))
-plt.legend(by_label.values(), by_label.keys())
-
+for y1_, ax in zip(y1, axes_after):
+    ax.contourf(mesh[0], mesh[1], unflatten_y(y1_))
+axes_after[0].set_ylabel("Recovered")
 
 plt.show()
-print(f"Found coefficient coeff={unflatten_p(coeff)}")
