@@ -78,3 +78,9 @@ def matching_directory(file, where, /, replace="experiments/"):
 def hilbert(ndim, /):
     a = jnp.arange(ndim)
     return 1 / (1 + a[:, None] + a[None, :])
+
+
+def tree_random_like(key, tree, *, generate_func=jax.random.normal):
+    flat, unflatten = jax.flatten_util.ravel_pytree(tree)
+    flat_like = generate_func(key, shape=flat.shape, dtype=flat.dtype)
+    return unflatten(flat_like)

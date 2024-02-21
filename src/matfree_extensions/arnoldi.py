@@ -7,7 +7,7 @@ import jax.numpy as jnp
 
 def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
     def estimate(v, *params):
-        return forward(matvec, v, krylov_depth, *params, reortho=reortho)
+        return forward(matvec, krylov_depth, v, *params, reortho=reortho)
 
     def estimate_fwd(v, *params):
         outputs = estimate(v, *params)
