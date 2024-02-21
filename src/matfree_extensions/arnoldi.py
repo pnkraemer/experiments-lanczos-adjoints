@@ -245,12 +245,6 @@ def _adjoint_step(
             raise ValueError
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
-    # Save result
-    Lambda = Lambda.at[:, idx].set(lambda_k)
-    Sigma = Sigma.at[idx + 1, :].set(
-        sigma
-    )  # todo: do we prefer the save-and-roll impl?
-
     # A single vector-matrix product
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
 
@@ -265,6 +259,10 @@ def _adjoint_step(
     sigma_ = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
     sigma = sigma_ - h_padded @ Sigma
     sigma /= beta_minus
+
+    # Save Lambda and Sigma
+    Lambda = Lambda.at[:, idx].set(lambda_k)
+    Sigma = Sigma.at[idx, :].set(sigma)
 
     # Solve for the next lambda
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T

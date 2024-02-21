@@ -10,11 +10,9 @@ from matfree_extensions import arnoldi, exp_util
 @pytest_cases.parametrize("krylov_depth", [1, 5, 10])
 @pytest_cases.parametrize("reortho", ["none", "full", "full_with_sigma"])
 def test_vjp(nrows, krylov_depth, reortho):
-    # todo: see whether a wrap through Hessenberg(T) makes dH Hessenberg
     # todo: verify that the maths-constraints are correct
     #  (more of a maths check, not a code check)
     # todo: see which components simplify for symmetric matrices
-    # todo: test that depth=0 and depth>n raise meaningful errors
 
     # Create a matrix and a direction as a test-case
     A = jax.random.normal(jax.random.PRNGKey(1), shape=(nrows, nrows))
@@ -59,13 +57,6 @@ def test_vjp(nrows, krylov_depth, reortho):
     # Tie the tolerance to the floating-point accuracy
     small_value = 10 * jnp.sqrt(jnp.finfo(jnp.dtype(H)).eps)
     tols = {"atol": small_value, "rtol": small_value}
-    print()
-    print(dv)
-    print()
-    print(dv_ref)
-    print()
-    print(dp)
-    print(dp_ref)
 
     # Assert gradients match
     assert jnp.allclose(dv, dv_ref, **tols)
