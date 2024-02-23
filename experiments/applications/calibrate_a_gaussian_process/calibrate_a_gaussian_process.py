@@ -1,10 +1,5 @@
 # todo: make multi-dimensional
-# todo: use a proper optimizer
-# todo: plot initial guess and final guess
-# todo: write a plotting function (learned from the PDE mess...)
-# todo: use a different kernel
 # todo: make matrix-free
-# todo: make the target a sample from a the GP with known parameters
 
 
 import jax

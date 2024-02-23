@@ -3,11 +3,13 @@ import jax.numpy as jnp
 
 
 def kernel_quadratic_exponential(*, gram_matrix: bool):
+    """Construct a square exponential kernel."""
+
     def parametrize(*, scale_in, scale_out):
         def k(x, y):
             diff = x - y
-            log_k = scale_in * jnp.dot(diff, diff)
-            return scale_out * jnp.exp(log_k)
+            log_k = scale_in**2 * jnp.dot(diff, diff)
+            return scale_out**2 * jnp.exp(log_k)
 
         if gram_matrix:
             return _vmap_gram(k)
@@ -17,6 +19,8 @@ def kernel_quadratic_exponential(*, gram_matrix: bool):
 
 
 def kernel_quadratic_rational(*, gram_matrix: bool):
+    """Construct a rational quadratic kernel."""
+
     def parametrize(*, scale_in, scale_out):
         def k(x, y):
             diff = x - y
@@ -36,6 +40,7 @@ def _vmap_gram(fun):
 
 
 def process_sample(key, *, noise, inputs, kernel, shape=()):
+    """Sample a Gaussian process."""
     assert inputs.ndim == 2
     key_sample, key_noise = jax.random.split(key, num=2)
 
@@ -56,6 +61,7 @@ def process_sample(key, *, noise, inputs, kernel, shape=()):
 
 
 def process_condition(inputs, targets, *, noise, kernel):
+    """Condition a Gaussian process."""
     assert inputs.ndim == 2
 
     K = kernel(inputs, inputs.T)
@@ -77,6 +83,7 @@ def process_condition(inputs, targets, *, noise, kernel):
 
 
 def log_likelihood(inputs, targets, *, kernel, noise):
+    """Evaluate the log-likelihood of observations."""
     assert inputs.ndim == 2
     assert targets.ndim == 1
     K = kernel(inputs, inputs.T)
