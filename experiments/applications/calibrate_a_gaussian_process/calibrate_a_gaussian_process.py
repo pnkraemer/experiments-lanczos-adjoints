@@ -7,6 +7,7 @@ import jax.flatten_util
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
+from matfree import hutchinson, lanczos
 from matfree_extensions import gp
 
 
@@ -28,9 +29,12 @@ kernel = gp.kernel_quadratic_rational(gram_matrix=True)
 
 
 # Training data
-key = jax.random.PRNGKey(2)
+key_ = jax.random.PRNGKey(2)
+key_data, key_slq = jax.random.split(key_, num=2)
 xs = jnp.linspace(0, 1, num=100, endpoint=True)[..., None]
-ys = gp.process_sample(key, **params_obs, inputs=xs, kernel=kernel(**params_kernel))
+ys = gp.process_sample(
+    key_data, **params_obs, inputs=xs, kernel=kernel(**params_kernel)
+)
 
 
 # Parametrize and condition
@@ -46,7 +50,23 @@ def loss_value_and_grad(p_flat):
     params_ = unflatten_p(p_flat)
     kernel_p = kernel(**params_["kernel"])
     obs_p = params_["observation"]
-    score, _coeff = gp.log_likelihood(xs, ys, kernel=kernel_p, **obs_p)
+
+    def solve_fun(M, v):
+        result, _info = jax.scipy.sparse.linalg.cg(lambda s: M @ s, v)
+        return result
+
+    def slogdet_fun(M):
+        x_like = jnp.ones((len(M),))
+        krylov_depth = 2
+        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s: M @ s)
+        sampler = hutchinson.sampler_rademacher(x_like, num=1)
+        estimate = hutchinson.hutchinson(integrand, sampler)
+        logdet = estimate(key_slq)
+        return jnp.sign(logdet), jnp.abs(logdet)
+
+    score, _coeff = gp.log_likelihood(
+        xs, ys, kernel=kernel_p, solve_fun=solve_fun, slogdet_fun=slogdet_fun, **obs_p
+    )
     return score
 
 

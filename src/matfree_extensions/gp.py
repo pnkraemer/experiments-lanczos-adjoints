@@ -4,6 +4,7 @@ import jax.numpy as jnp
 
 def kernel_quadratic_exponential(*, gram_matrix: bool):
     """Construct a square exponential kernel."""
+    assert gram_matrix
 
     def parametrize(*, scale_in, scale_out):
         def k(x, y):
@@ -11,9 +12,14 @@ def kernel_quadratic_exponential(*, gram_matrix: bool):
             log_k = scale_in**2 * jnp.dot(diff, diff)
             return scale_out**2 * jnp.exp(log_k)
 
-        if gram_matrix:
-            return _vmap_gram(k)
-        return k
+        return _vmap_gram(k)
+
+        # k = _vmap_gram(k)
+        # def matvec(v, x, y):
+        #     return k(x, y) @ v
+        #
+        #
+        raise ValueError
 
     return parametrize
 
@@ -28,8 +34,9 @@ def kernel_quadratic_rational(*, gram_matrix: bool):
             return scale_out**2 / (1 + tmp)
 
         if gram_matrix:
-            return _vmap_gram(k)
-        return k
+            k = _vmap_gram(k)
+            return k
+        raise ValueError
 
     return parametrize
 
@@ -83,15 +90,7 @@ def process_condition(inputs, targets, *, noise, kernel):
 
 
 # todo: use an actual logpdf function here.
-def log_likelihood(
-    inputs,
-    targets,
-    *,
-    kernel,
-    noise,
-    solve_fun=jnp.linalg.solve,
-    slogdet_fun=jnp.linalg.slogdet,
-):
+def log_likelihood(inputs, targets, *, kernel, noise, solve_fun, slogdet_fun):
     """Evaluate the log-likelihood of observations."""
     assert inputs.ndim == 2
     assert targets.ndim == 1
