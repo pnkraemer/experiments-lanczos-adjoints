@@ -1,8 +1,8 @@
 import jax.numpy as jnp
 
 
-def kernel_exponentiated_quadratic():
-    def parametrize(scale_in, scale_out):
+def kernel_quadratic_exponential():
+    def parametrize(*, scale_in, scale_out):
         def k(x, y):
             diff = x - y
             log_k = scale_in * jnp.dot(diff, diff)
@@ -13,8 +13,8 @@ def kernel_exponentiated_quadratic():
     return parametrize
 
 
-def kernel_rational_quadratic():
-    def parametrize(scale_in, scale_out):
+def kernel_quadratic_rational():
+    def parametrize(*, scale_in, scale_out):
         def k(x, y):
             diff = x - y
             tmp = scale_in**2 * jnp.dot(diff, diff)

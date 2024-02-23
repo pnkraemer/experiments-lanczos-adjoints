@@ -60,7 +60,7 @@ def vect(fun):
 # Parameters
 params_true = {"observation_noise": 1e-3, "scale_in": 1e1, "scale_out": 1e-1}
 params_true_flat, unflatten_p = jax.flatten_util.ravel_pytree(params_true)
-kernel = gp.kernel_rational_quadratic()
+kernel = gp.kernel_quadratic_rational()
 
 
 # Training data
