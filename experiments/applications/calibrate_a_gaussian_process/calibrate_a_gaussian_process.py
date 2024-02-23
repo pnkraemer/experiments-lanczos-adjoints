@@ -59,7 +59,7 @@ def loss_value_and_grad(p_flat):
         x_like = jnp.ones((len(M),))
         krylov_depth = 2
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s: M @ s)
-        sampler = hutchinson.sampler_rademacher(x_like, num=1)
+        sampler = hutchinson.sampler_rademacher(x_like, num=10)
         estimate = hutchinson.hutchinson(integrand, sampler)
         logdet = estimate(key_slq)
         return jnp.sign(logdet), jnp.abs(logdet)
