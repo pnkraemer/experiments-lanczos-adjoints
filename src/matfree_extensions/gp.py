@@ -82,15 +82,26 @@ def process_condition(inputs, targets, *, noise, kernel):
     return mean, cov
 
 
-def log_likelihood(inputs, targets, *, kernel, noise):
+# todo: use an actual logpdf function here.
+def log_likelihood(
+    inputs,
+    targets,
+    *,
+    kernel,
+    noise,
+    solve_fun=jnp.linalg.solve,
+    slogdet_fun=jnp.linalg.slogdet,
+):
     """Evaluate the log-likelihood of observations."""
     assert inputs.ndim == 2
     assert targets.ndim == 1
+
     K = kernel(inputs, inputs.T)
     shift = noise * jnp.eye(len(K))
 
-    coeffs = jnp.linalg.solve(K + shift, targets)
-    mahalanobis = jnp.dot(targets, coeffs)
-    _sign, entropy = jnp.linalg.slogdet(K)
+    coeffs = solve_fun(K + shift, targets)
+    residual_white = jnp.dot(targets, coeffs)
 
-    return -(mahalanobis + entropy), (coeffs, jnp.linalg.cond(K))
+    _sign, logdet = slogdet_fun(K)
+
+    return -(residual_white + logdet), (coeffs, jnp.linalg.cond(K))
