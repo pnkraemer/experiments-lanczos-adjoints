@@ -6,8 +6,8 @@ def kernel_quadratic_exponential(*, gram_matrix: bool):
     def parametrize(*, scale_in, scale_out):
         def k(x, y):
             diff = x - y
-            log_k = scale_in**2 * jnp.dot(diff, diff)
-            return scale_out**2 * jnp.exp(log_k)
+            log_k = scale_in * jnp.dot(diff, diff)
+            return scale_out * jnp.exp(log_k)
 
         if gram_matrix:
             return _vmap_gram(k)
@@ -20,8 +20,8 @@ def kernel_quadratic_rational(*, gram_matrix: bool):
     def parametrize(*, scale_in, scale_out):
         def k(x, y):
             diff = x - y
-            tmp = scale_in * jnp.dot(diff, diff)
-            return scale_out / (1 + tmp)
+            tmp = scale_in**2 * jnp.dot(diff, diff)
+            return scale_out**2 / (1 + tmp)
 
         if gram_matrix:
             return _vmap_gram(k)

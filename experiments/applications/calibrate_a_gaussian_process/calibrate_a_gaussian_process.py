@@ -11,10 +11,22 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import optax
 from matfree_extensions import gp
 
+
+def solve(xs_, p_flat):
+    parameters = unflatten_p(p_flat)
+    p_obs = parameters["observation"]
+    p_kernel = parameters["kernel"]
+    kernel_calibrated = kernel(**p_kernel)
+    cond = gp.process_condition(xs, ys, kernel=kernel_calibrated, noise=p_obs["noise"])
+    mean_cond, cov_cond = cond
+    return mean_cond(xs_)
+
+
 # Parameters
-params_obs = {"noise": 1e-7}
+params_obs = {"noise": 1e-5}
 params_kernel = {"scale_in": 1e1, "scale_out": 1e0}
 params_true = {"observation": params_obs, "kernel": params_kernel}
 kernel = gp.kernel_quadratic_rational(gram_matrix=True)
@@ -40,14 +52,24 @@ def loss_value_and_grad(p_flat):
     kernel_p = kernel(**params_["kernel"])
     obs_p = params_["observation"]
     score, _coeff = gp.log_likelihood(xs, ys, kernel=kernel_p, **obs_p)
-    return -score
+    return score
 
+
+# Initial guess:
+xs_new = jnp.linspace(0, 1, num=200, endpoint=True)[..., None]
+ys_new_init = solve(xs_new, params_flat)
 
 # Train
-num_steps = 110
+learning_rate = 1e-3
+optimizer = optax.sgd(learning_rate)
+opt_state = optimizer.init(params_flat)
+
+num_steps = 100
 for i in range(num_steps):
     score, grad = loss_value_and_grad(params_flat)
-    params_flat += 0.001 * grad
+
+    updates, opt_state = optimizer.update(grad, opt_state)
+    params_flat = optax.apply_updates(params_flat, updates)
 
     if i % (num_steps // 10) == 0:
         print("index =", i)
@@ -56,24 +78,14 @@ for i in range(num_steps):
         print()
 
 
-# Condition
-# Read the solution
-parameters = unflatten_p(params_flat)
-params_obs = parameters["observation"]
-params_kernel = parameters["kernel"]
-kernel_calibrated = kernel(**params_kernel)
-cond = gp.process_condition(xs, ys, kernel=kernel_calibrated, noise=params_obs["noise"])
-mean_cond, cov_cond = cond
-
-# Evaluate
-
-xs_new = jnp.linspace(0, 1, num=200, endpoint=True)[..., None]
-ys_new = mean_cond(xs_new)
-
+# Read the final solution
+ys_new_final = solve(xs_new, params_flat)
 
 # Plot
 plt.plot(xs, ys, "x", label="Truth")
-plt.plot(xs_new, ys_new, label="Estimate")
+plt.plot(xs_new, ys_new_init, label="Initial estimate")
+plt.plot(xs_new, ys_new_final, label="Final estimate")
 plt.xlim((jnp.amin(xs), jnp.amax(xs)))
+plt.ylim((jnp.amin(ys), jnp.amax(ys)))
 plt.legend()
 plt.show()
