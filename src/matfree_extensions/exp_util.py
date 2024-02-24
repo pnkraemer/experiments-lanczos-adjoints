@@ -102,6 +102,11 @@ def goldstein_price(X, Y, /):
 
 
 def uci_air_quality():
+    if os.path.exists("./data/uci_processed/air_quality/"):
+        inputs = jnp.load("data/uci_processed/air_quality/inputs.npy")
+        targets = jnp.load("data/uci_processed/air_quality/targets.npy")
+        return inputs, targets
+
     dataset = ucimlrepo.fetch_ucirepo(id=360)
 
     # Data (as pandas dataframes)
@@ -113,4 +118,8 @@ def uci_air_quality():
 
     # Ignore missing values:
     idx = (targets != -200).nonzero()[0]
-    return inputs[idx], targets[idx]
+    inputs, targets = inputs[idx], targets[idx]
+    os.mkdir("data/uci_processed/air_quality/")
+    jnp.save("data/uci_processed/air_quality/inputs.npy", inputs)
+    jnp.save("data/uci_processed/air_quality/targets.npy", targets)
+    return inputs, targets
