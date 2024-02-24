@@ -13,6 +13,11 @@ import jax.numpy as jnp
 import jaxopt
 import matplotlib.pyplot as plt
 from matfree_extensions import gp
+from tueplots import axes, figsizes, fontsizes
+
+plt.rcParams.update(figsizes.icml2022_full(nrows=1, ncols=4, height_to_width_ratio=1.0))
+plt.rcParams.update(fontsizes.icml2022())
+plt.rcParams.update(axes.lines())
 
 
 @dataclasses.dataclass
@@ -37,10 +42,9 @@ def data_generate(key, inputs_meshgrid, targets_meshgrid, standard_deviation, /)
     return SpatialData(inputs_meshgrid, targets_meshgrid + noise_scaled)
 
 
-def data_plot(
-    axis, d: SpatialData, /, *, title="", title_fontsize="medium", **axis_kwargs
-):
-    axis.set_title(title, fontsize=title_fontsize)
+def data_plot(axis, d: SpatialData, /, *, title="", **axis_kwargs):
+    axis.set_title(title)
+    axis.set_aspect("equal")
     return axis.contourf(*d.inputs_meshgrid, d.targets_meshgrid, **axis_kwargs)
 
 
@@ -96,11 +100,12 @@ key_ = jax.random.PRNGKey(1)
 key_data, key_init = jax.random.split(key_, num=2)
 
 # How many points per dimension?
-num_pts = 50
+# n=60 is nicely slow but still feasible...
+num_pts = 2
 
 # Figures
 mosaic = [["post-before", "post-after", "truth", "data"]]
-fig_kwargs = {"dpi": 150, "sharex": True, "sharey": True, "figsize": (8, 2)}
+fig_kwargs = {"dpi": 150, "sharex": True, "sharey": True}
 fig, axes = plt.subplot_mosaic(mosaic, **fig_kwargs)
 fig.suptitle(f"N={num_pts**2} points")
 
@@ -151,7 +156,7 @@ title_init = f"Init. (nmll={jnp.round((nll_init), 1):.1f} $\\Downarrow$)"
 data_plot(axes["post-before"], evals, title=title_init, **ax_kwargs)
 
 # Optimize parameters
-optim = jaxopt.BFGS(loss, verbose=True, maxiter=1)
+optim = jaxopt.BFGS(loss, verbose=True, maxiter=10)
 result = optim.run(params)
 params_opt = result.params
 
