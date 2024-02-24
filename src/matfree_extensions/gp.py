@@ -1,3 +1,6 @@
+import dataclasses
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 
@@ -55,61 +58,73 @@ def _vmap_gram(fun):
     return jax.vmap(tmp, in_axes=(None, 1), out_axes=1)
 
 
-def process_sample(key, *, noise_std, inputs, kernel, shape=()):
-    """Sample a Gaussian process."""
-    assert inputs.ndim == 2
-    key_sample, key_noise = jax.random.split(key, num=2)
+@dataclasses.dataclass
+class TimeSeriesData:
+    inputs: jax.Array
+    targets: jax.Array
 
-    K = kernel(inputs, inputs.T)
-    U, s, Vt = jnp.linalg.svd(K)
-
-    def transform(a, b):
-        return U @ jnp.diag(jnp.sqrt(s)) @ Vt @ a + noise_std * b
-
-    if shape == ():
-        xi = jax.random.normal(key_sample, shape=(len(K),))
-        eta = jax.random.normal(key_noise, shape=(len(K),))
-        return transform(xi, eta)
-
-    xi = jax.random.normal(key_sample, shape=(*shape, len(K)))
-    eta = jax.random.normal(key_noise, shape=(*shape, len(K)))
-    return jax.vmap(transform)(xi, eta)
+    def __getitem__(self, item):
+        return TimeSeriesData(self.inputs[item], self.targets[item])
 
 
-def process_condition(inputs, targets, *, noise_std, kernel):
-    """Condition a Gaussian process."""
-    assert inputs.ndim == 2
-
-    K = kernel(inputs, inputs.T)
-    K += noise_std**2 * jnp.eye(len(K))
-    coeff = jnp.linalg.solve(K, targets)
-
-    def mean(x):
-        assert x.ndim == 2
-        return kernel(x, inputs.T) @ coeff
-
-    def cov(x, y):
-        assert x.ndim == 2
-        assert y.ndim == 2
-        k_xx = kernel(x, y.T)
-        k_xy = jnp.linalg.solve(K, kernel(inputs, y.T))
-        return k_xx - kernel(x, inputs.T) @ k_xy
-
-    return mean, cov
+def data_plot(axis, d: TimeSeriesData, /, *, title="", **axis_kwargs):
+    axis.set_title(title)
+    axis.set_aspect("equal")
+    return axis.contourf(*d.inputs, d.targets, **axis_kwargs)
 
 
-# todo: use an actual logpdf function here.
-def log_likelihood(inputs, targets, *, kernel, noise_std, solve_fun, slogdet_fun):
-    """Evaluate the log-likelihood of observations."""
-    assert inputs.ndim == 2
-    assert targets.ndim == 1
+@dataclasses.dataclass
+class Params:
+    ravelled: jax.Array
+    unravel: Callable
 
-    K = kernel(inputs, inputs.T)
-    shift = noise_std**2 * jnp.eye(len(K))
+    @property
+    def unravelled(self):
+        return self.unravel(self.ravelled)
 
-    coeffs = solve_fun(K + shift, targets)
-    residual_white = jnp.dot(targets, coeffs)
 
-    _sign, logdet = slogdet_fun(K + shift)
+def _flatten(p):
+    return (p.ravelled,), (p.unravel,)
 
-    return -1 / 2 * (residual_white + logdet), (coeffs, jnp.linalg.cond(K + shift))
+
+def _unflatten(a, c):
+    return Params(*c, *a)
+
+
+jax.tree_util.register_pytree_node(Params, _flatten, _unflatten)
+
+
+def parameters_init(key, p, /):
+    flat, unflatten = jax.flatten_util.ravel_pytree(p)
+    flat_like = jax.random.normal(key, shape=flat.shape)
+    return Params(flat_like, unflatten)
+
+
+def condition_mean(parameters, noise_std, /, *, kernel_fun, spatial_data):
+    kernel_fun_p = kernel_fun(**parameters.unravelled)
+    K = kernel_fun_p(spatial_data.inputs, spatial_data.inputs.T)
+    eye = jnp.eye(len(K))
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, spatial_data.targets)
+    mean = K @ coeffs
+    return TimeSeriesData(spatial_data.inputs, mean)
+
+
+def condition_std(parameters, noise_std, /, *, kernel_fun, spatial_data):
+    kernel_fun_p = kernel_fun(**parameters.unravelled)
+    K = kernel_fun_p(spatial_data.inputs, spatial_data.inputs.T)
+    eye = jnp.eye(len(K))
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, K)
+    stds = jnp.sqrt(jnp.diag(K - K.T @ coeffs))
+    return TimeSeriesData(spatial_data.inputs, stds)
+
+
+def negative_log_likelihood(parameters_and_noise, /, *, kernel_fun, spatial_data):
+    parameters, noise_std = parameters_and_noise
+    kernel_fun_p = kernel_fun(**parameters.unravelled)
+    K = kernel_fun_p(spatial_data.inputs, spatial_data.inputs.T)
+    eye = jnp.eye(len(K))
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, spatial_data.targets)
+
+    mahalanobis = spatial_data.targets @ coeffs
+    _sign, entropy = jnp.linalg.slogdet(K + noise_std**2 * eye)
+    return mahalanobis + entropy
