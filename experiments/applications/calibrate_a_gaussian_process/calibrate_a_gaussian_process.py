@@ -101,7 +101,7 @@ key_data, key_init = jax.random.split(key_, num=2)
 
 # How many points per dimension?
 # n=60 is nicely slow but still feasible...
-num_pts = 2
+num_pts = 20
 
 # Figures
 mosaic = [["post-before", "post-after", "truth", "data"]]
@@ -112,12 +112,21 @@ fig.suptitle(f"N={num_pts**2} points")
 # Create data
 
 
+def beale(x, y):
+    """Evaluate the log of the Beale function."""
+    z1 = (1.5 - x + x * y) ** 2
+    z2 = (2.25 - x + x * y**2) ** 2
+    z3 = (2.626 - x + x * y**3) ** 2
+    return jnp.log(z1 + z2 + z3)
+
+
 def fun(x, y):
-    return 1.0 * ((x - 0.5) ** 2 + jnp.sin(y**2))
+    z1 = (1.5 - x + x * y) ** 2
+    return jnp.log(z1 + jnp.sin(x**2 * y) ** 2)
 
 
 noise_std = 1e-1
-xs_1d = jnp.linspace(0, 1, num=num_pts, endpoint=True)
+xs_1d = jnp.linspace(-4, 4, num=num_pts, endpoint=True)
 mesh_list = jnp.meshgrid(xs_1d, xs_1d)
 mesh_in = jnp.stack(mesh_list)
 mesh_out = fun(*mesh_in)

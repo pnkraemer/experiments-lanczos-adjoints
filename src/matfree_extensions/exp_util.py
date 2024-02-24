@@ -6,6 +6,7 @@ import jax.experimental.sparse
 import jax.numpy as jnp
 import scipy.io
 import ssgetpy
+import ucimlrepo
 
 
 def suite_sparse_download(
@@ -98,3 +99,18 @@ def goldstein_price(X, Y, /):
         + (2 * X - 3 * Y) ** 2
         * (18 - 32 * X + 12 * X**2 + 48 * Y - 36 * X * Y + 27 * Y**2)
     )
+
+
+def uci_air_quality():
+    dataset = ucimlrepo.fetch_ucirepo(id=360)
+
+    # Data (as pandas dataframes)
+    X = dataset.data.features
+
+    # Inputs/targets
+    inputs = jnp.arange(0, len(X["Date"]))
+    targets = jnp.asarray(X["CO(GT)"])
+
+    # Ignore missing values:
+    idx = (targets != -200).nonzero()[0]
+    return inputs[idx], targets[idx]
