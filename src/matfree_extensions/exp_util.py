@@ -105,7 +105,7 @@ def uci_air_quality():
     if os.path.exists("./data/uci_processed/air_quality/"):
         inputs = jnp.load("data/uci_processed/air_quality/inputs.npy")
         targets = jnp.load("data/uci_processed/air_quality/targets.npy")
-        return inputs, targets
+        return (inputs, targets)
 
     dataset = ucimlrepo.fetch_ucirepo(id=360)
 
@@ -122,4 +122,4 @@ def uci_air_quality():
     os.mkdir("data/uci_processed/air_quality/")
     jnp.save("data/uci_processed/air_quality/inputs.npy", inputs)
     jnp.save("data/uci_processed/air_quality/targets.npy", targets)
-    return inputs, targets
+    return (inputs, targets)

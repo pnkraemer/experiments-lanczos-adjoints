@@ -67,12 +67,6 @@ class TimeSeriesData:
         return TimeSeriesData(self.inputs[item], self.targets[item])
 
 
-def data_plot(axis, d: TimeSeriesData, /, *, title="", **axis_kwargs):
-    axis.set_title(title)
-    axis.set_aspect("equal")
-    return axis.contourf(*d.inputs, d.targets, **axis_kwargs)
-
-
 @dataclasses.dataclass
 class Params:
     ravelled: jax.Array
@@ -100,31 +94,41 @@ def parameters_init(key, p, /):
     return Params(flat_like, unflatten)
 
 
-def condition_mean(parameters, noise_std, /, *, kernel_fun, spatial_data):
+# todo: data -> data
+def condition_mean(parameters, noise_std, /, *, kernel_fun, data, inputs_eval):
     kernel_fun_p = kernel_fun(**parameters.unravelled)
-    K = kernel_fun_p(spatial_data.inputs, spatial_data.inputs.T)
+
+    K = kernel_fun_p(data.inputs, data.inputs.T)
     eye = jnp.eye(len(K))
-    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, spatial_data.targets)
-    mean = K @ coeffs
-    return TimeSeriesData(spatial_data.inputs, mean)
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, data.targets)
+
+    K_eval = kernel_fun_p(inputs_eval, data.inputs.T)
+    mean = K_eval @ coeffs
+    return TimeSeriesData(inputs_eval, mean)
 
 
-def condition_std(parameters, noise_std, /, *, kernel_fun, spatial_data):
+def condition_std(parameters, noise_std, /, *, kernel_fun, data, inputs_eval):
     kernel_fun_p = kernel_fun(**parameters.unravelled)
-    K = kernel_fun_p(spatial_data.inputs, spatial_data.inputs.T)
+
+    K = kernel_fun_p(data.inputs, data.inputs.T)
     eye = jnp.eye(len(K))
-    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, K)
-    stds = jnp.sqrt(jnp.diag(K - K.T @ coeffs))
-    return TimeSeriesData(spatial_data.inputs, stds)
+
+    K_xy = kernel_fun_p(inputs_eval, data.inputs.T)
+    K_xx = kernel_fun_p(inputs_eval, inputs_eval.T)
+
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, K_xy.T)
+    stds = jnp.sqrt(jnp.diag(K_xx - K_xy @ coeffs))
+
+    return TimeSeriesData(inputs_eval, stds)
 
 
-def negative_log_likelihood(parameters_and_noise, /, *, kernel_fun, spatial_data):
+def negative_log_likelihood(parameters_and_noise, /, *, kernel_fun, data):
     parameters, noise_std = parameters_and_noise
     kernel_fun_p = kernel_fun(**parameters.unravelled)
-    K = kernel_fun_p(spatial_data.inputs, spatial_data.inputs.T)
+    K = kernel_fun_p(data.inputs, data.inputs.T)
     eye = jnp.eye(len(K))
-    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, spatial_data.targets)
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, data.targets)
 
-    mahalanobis = spatial_data.targets @ coeffs
+    mahalanobis = data.targets @ coeffs
     _sign, entropy = jnp.linalg.slogdet(K + noise_std**2 * eye)
     return mahalanobis + entropy
