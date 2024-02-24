@@ -1,8 +1,8 @@
-# todo: use more points
-# todo: dense evaluation of the STD
-# todo: why does the hyperparameter optimization not do much?
-# todo: optimize noise
+# todo: use the full time-series
+# todo: use all output features
+# todo: dense evaluation of the posterior (for plitting)
 # todo: start with waaay worse parameters (so plots make sense)
+# todo: make matrix-free
 
 
 import functools
@@ -79,7 +79,7 @@ loss_p = functools.partial(
 loss = jax.jit(loss_p)
 
 # Optimise
-optim = jaxopt.BFGS(loss, verbose=True, maxiter=10)
+optim = jaxopt.BFGS(loss, verbose=True, maxiter=15)
 result = optim.run((params, noise_std))
 params_opt, noise_opt = result.params
 
