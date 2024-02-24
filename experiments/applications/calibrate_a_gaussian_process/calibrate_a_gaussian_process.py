@@ -37,8 +37,10 @@ def data_generate(key, inputs_meshgrid, targets_meshgrid, standard_deviation, /)
     return SpatialData(inputs_meshgrid, targets_meshgrid + noise_scaled)
 
 
-def data_plot(axis, d: SpatialData, /, *, title="", **axis_kwargs):
-    axis.set_title(title)
+def data_plot(
+    axis, d: SpatialData, /, *, title="", title_fontsize="medium", **axis_kwargs
+):
+    axis.set_title(title, fontsize=title_fontsize)
     return axis.contourf(*d.inputs_meshgrid, d.targets_meshgrid, **axis_kwargs)
 
 
@@ -91,14 +93,16 @@ def negative_log_likelihood(parameters, /, *, kernel_fun, spatial_data):
 
 # Random states
 key_ = jax.random.PRNGKey(1)
-key_data, key_sol, key_slq, key_init = jax.random.split(key_, num=4)
+key_data, key_init = jax.random.split(key_, num=2)
 
+# How many points per dimension?
+num_pts = 50
 
 # Figures
 mosaic = [["post-before", "post-after", "truth", "data"]]
 fig_kwargs = {"dpi": 150, "sharex": True, "sharey": True, "figsize": (8, 2)}
 fig, axes = plt.subplot_mosaic(mosaic, **fig_kwargs)
-
+fig.suptitle(f"N={num_pts**2} points")
 
 # Create data
 
@@ -108,7 +112,7 @@ def fun(x, y):
 
 
 noise_std = 1e-1
-xs_1d = jnp.linspace(0, 1, num=10, endpoint=True)
+xs_1d = jnp.linspace(0, 1, num=num_pts, endpoint=True)
 mesh_list = jnp.meshgrid(xs_1d, xs_1d)
 mesh_in = jnp.stack(mesh_list)
 mesh_out = fun(*mesh_in)
@@ -147,7 +151,7 @@ title_init = f"Init. (nmll={jnp.round((nll_init), 1):.1f} $\\Downarrow$)"
 data_plot(axes["post-before"], evals, title=title_init, **ax_kwargs)
 
 # Optimize parameters
-optim = jaxopt.LBFGS(loss, verbose=False)
+optim = jaxopt.BFGS(loss, verbose=True, maxiter=1)
 result = optim.run(params)
 params_opt = result.params
 
