@@ -6,7 +6,9 @@
 # todo: train-test split
 # todo: reduce this down to a single quantity (NMLL/RMSE on test set?)
 # todo: load and plot the input labels
-
+# todo: do we need a better (periodic) kernel?
+# todo: training is too tedious/brittle.
+#  Solution? Replicate a paper experiment! Win-win!
 import functools
 
 import jax
@@ -42,8 +44,8 @@ def plot_gp(ax, ms: gp.TimeSeriesData, ss: gp.TimeSeriesData, ds: gp.TimeSeriesD
     ax.plot(ms.inputs.squeeze(), ms.targets.squeeze(), **style_mean)
 
     style_std = {"color": "black", "alpha": 0.3}
-    plus = ms.targets + 2 * ss.targets
-    minus = ms.targets - 2 * ss.targets
+    plus = ms.targets + 3 * ss.targets
+    minus = ms.targets - 3 * ss.targets
     ax.fill_between(ms.inputs.squeeze(), minus.squeeze(), plus.squeeze(), **style_std)
 
     ax.set_xlim((jnp.amin(ms.inputs), jnp.amax(ms.inputs)))
@@ -54,19 +56,22 @@ def plot_gp(ax, ms: gp.TimeSeriesData, ss: gp.TimeSeriesData, ds: gp.TimeSeriesD
 key_ = jax.random.PRNGKey(3)
 key_data, key_init = jax.random.split(key_, num=2)
 
-# Load the dataset
-num_pts = 100
+# Load and subsample the dataset
 (inputs, targets) = exp_util.uci_air_quality()
 inputs = inputs[..., None]  # (N, d) shape
-inputs, targets = data_subsample(inputs[:500], targets[:500], key=key_data, num=num_pts)
+num_pts = len(inputs) // 2
+inputs, targets = data_subsample(
+    inputs[:num_pts], targets[:num_pts], key=key_data, num=num_pts
+)
 
+# Center the data
 targets = jnp.log(targets)
 bias = jnp.mean(targets)
 targets = targets - bias
 
 
 # Set up the model
-kernel, params_like = gp.kernel_quadratic_rational()
+kernel, params_like = gp.kernel_matern_12()
 params = gp.parameters_init(key_init, params_like)
 data = gp.TimeSeriesData(inputs, targets)
 
@@ -93,7 +98,7 @@ loss_p = functools.partial(nmll, kernel_fun=kernel, data=data)
 loss = jax.jit(loss_p)
 
 # Optimise
-optim = jaxopt.BFGS(loss, verbose=True, maxiter=100)
+optim = jaxopt.BFGS(loss, verbose=True, maxiter=3)
 result = optim.run((params, noise_std))
 params_opt, noise_opt = result.params
 
