@@ -95,7 +95,7 @@ key_data, key_sol, key_slq, key_init = jax.random.split(key_, num=4)
 
 
 # Figures
-mosaic = [["post-before", "post-after", "truth"]]
+mosaic = [["post-before", "post-after", "truth", "data"]]
 fig_kwargs = {"dpi": 150, "sharex": True, "sharey": True, "figsize": (8, 2)}
 fig, axes = plt.subplot_mosaic(mosaic, **fig_kwargs)
 
@@ -104,7 +104,7 @@ fig, axes = plt.subplot_mosaic(mosaic, **fig_kwargs)
 
 
 def fun(x, y):
-    return 1000 * ((x - 0.5) ** 2 + jnp.sin(y**2))
+    return 1.0 * ((x - 0.5) ** 2 + jnp.sin(y**2))
 
 
 noise_std = 1e-1
@@ -121,7 +121,8 @@ data = data_generate(key_data, mesh_in, mesh_out, noise_std)
 vmin = jnp.amin(data.targets_meshgrid)
 vmax = jnp.amax(data.targets_meshgrid)
 ax_kwargs = {"vmin": vmin, "vmax": vmax, "cmap": "plasma"}
-clr = data_plot(axes["truth"], truth, title="Truth", **ax_kwargs)
+data_plot(axes["truth"], truth, title="Truth", **ax_kwargs)
+clr = data_plot(axes["data"], data, title="Data", **ax_kwargs)
 fig.colorbar(clr)
 
 
@@ -142,19 +143,25 @@ nll = loss(params)
 
 # Plot conditioning result (before optimization)
 nll_init = loss(params)
-title_init = f"Posterior (before; nmll={round(nll_init, 2):2F})"
+title_init = f"Init. (nmll={jnp.round((nll_init), 1):.1f} $\\Downarrow$)"
 data_plot(axes["post-before"], evals, title=title_init, **ax_kwargs)
 
 # Optimize parameters
-optim = jaxopt.LBFGS(loss, verbose=True)
+optim = jaxopt.LBFGS(loss, verbose=False)
 result = optim.run(params)
 params_opt = result.params
+
+# Print before/after
+print("\nInitial guess:\n\t", params.unravelled)
+print("\nOptimised guess:\n\t", params_opt.unravelled)
+print("\nAuxiliary info:\n\t", result)
+
 
 # Condition
 evals = condition_mean(params_opt, kernel_fun=kernel, spatial_data=data)
 
 # Plot conditioning result
 nll_opt = loss(params_opt)
-title_opt = f"Posterior (after; nmll={round(nll_opt, 2):2F})"
+title_opt = f"Optim. (nmll={jnp.round((nll_opt), 1):.1f} $\\Downarrow$)"
 data_plot(axes["post-after"], evals, title=title_opt, **ax_kwargs)
 plt.show()
