@@ -84,3 +84,17 @@ def tree_random_like(key, tree, *, generate_func=jax.random.normal):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)
     flat_like = generate_func(key, shape=flat.shape, dtype=flat.dtype)
     return unflatten(flat_like)
+
+
+def goldstein_price(X, Y, /):
+    # Motivated by:
+    # https://docs.jaxgaussianprocesses.com/api/decision_making/test_functions/continuous_functions/
+    # See: https://www.sfu.ca/~ssurjano/goldpr.html
+    # Code from: https://gist.github.com/MiguelAngelHFlores/777062e58419e1458a1c1800d00b03d5
+    return (
+        1 + (X + Y + 1) ** 2 * (19 - 14 * X + 3 * X**2 - 14 * Y + 6 * X * Y + 3 * Y**2)
+    ) * (
+        30
+        + (2 * X - 3 * Y) ** 2
+        * (18 - 32 * X + 12 * X**2 + 48 * Y - 36 * X * Y + 27 * Y**2)
+    )

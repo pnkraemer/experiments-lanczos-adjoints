@@ -1,144 +1,160 @@
-# todo: make multi-dimensional
-# todo: make matrix-free
-# todo: use a proper adjoint
+# todo: make sure this module implements correct maths.
+#  verify that the loss function is correct. The results are suspiciously bad.
+# todo: reactivate the matfree components once the baseline is running...
 
+
+import dataclasses
+import functools
+from typing import Callable
 
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
+import jaxopt
 import matplotlib.pyplot as plt
-import optax
-from matfree import hutchinson
-from matfree_extensions import arnoldi, gp
+from matfree_extensions import gp
 
 
-def solve(xs_, p_flat):
-    parameters = unflatten_p(p_flat)
-    p_obs = parameters["observation"]
-    p_kernel = parameters["kernel"]
-    kernel_calibrated = kernel(**p_kernel)
-    cond = gp.process_condition(xs, ys, kernel=kernel_calibrated, noise=p_obs["noise"])
-    mean_cond, cov_cond = cond
-    return mean_cond(xs_)
+@dataclasses.dataclass
+class SpatialData:
+    inputs_meshgrid: jax.Array
+    targets_meshgrid: jax.Array
+
+    @property
+    def inputs_flat(self):
+        d, *_ = jnp.shape(self.inputs_meshgrid)
+        return jnp.reshape(self.inputs_meshgrid, (d, -1)).T
+
+    @property
+    def targets_flat(self):
+        d, *_ = jnp.shape(self.inputs_meshgrid)
+        return jnp.reshape(self.targets_meshgrid, (-1,))
 
 
-# Parameters
-params_obs = {"noise": 1e-5}
-params_kernel = {"scale_in": 1e1, "scale_out": 1e0}
-params_true = {"observation": params_obs, "kernel": params_kernel}
-kernel = gp.kernel_quadratic_rational(gram_matrix=True)
+def data_generate(key, inputs_meshgrid, targets_meshgrid, standard_deviation, /):
+    noise = jax.random.normal(key, shape=targets_meshgrid.shape)
+    noise_scaled = standard_deviation * noise
+    return SpatialData(inputs_meshgrid, targets_meshgrid + noise_scaled)
 
 
-# Training data
+def data_plot(axis, d: SpatialData, /, *, title="", **axis_kwargs):
+    axis.set_title(title)
+    return axis.contourf(*d.inputs_meshgrid, d.targets_meshgrid, **axis_kwargs)
+
+
+@dataclasses.dataclass
+class Params:
+    ravelled: jax.Array
+    unravel: Callable
+
+    @property
+    def unravelled(self):
+        return self.unravel(self.ravelled)
+
+
+def _flatten(p):
+    return (p.ravelled,), (p.unravel,)
+
+
+def _unflatten(a, c):
+    return Params(*c, *a)
+
+
+jax.tree_util.register_pytree_node(Params, _flatten, _unflatten)
+
+
+def parameters_init(key, p, /):
+    flat, unflatten = jax.flatten_util.ravel_pytree(p)
+    flat_like = jax.random.normal(key, shape=flat.shape)
+    return Params(flat_like, unflatten)
+
+
+def condition_mean(parameters, /, *, kernel_fun, spatial_data):
+    kernel_fun_p = kernel_fun(**parameters.unravelled)
+    K = kernel_fun_p(spatial_data.inputs_flat, spatial_data.inputs_flat.T)
+    eye = jnp.eye(len(K))
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, data.targets_flat)
+    mean = jnp.reshape(K @ coeffs, data.targets_meshgrid.shape)
+    return SpatialData(data.inputs_meshgrid, mean)
+
+
+def negative_log_likelihood(parameters, /, *, kernel_fun, spatial_data):
+    kernel_fun_p = kernel_fun(**parameters.unravelled)
+    K = kernel_fun_p(spatial_data.inputs_flat, spatial_data.inputs_flat.T)
+    eye = jnp.eye(len(K))
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, data.targets_flat)
+
+    mahalanobis = data.targets_flat @ coeffs
+    _sign, entropy = jnp.linalg.slogdet(K + noise_std**2 * eye)
+    return mahalanobis + entropy
+
+
+# Random states
+key_ = jax.random.PRNGKey(1)
+key_data, key_sol, key_slq, key_init = jax.random.split(key_, num=4)
+
+
+# Figures
+mosaic = [["post-before", "post-after", "truth"]]
+fig_kwargs = {"dpi": 150, "sharex": True, "sharey": True, "figsize": (8, 2)}
+fig, axes = plt.subplot_mosaic(mosaic, **fig_kwargs)
+
+
+# Create data
+
+
+def fun(x, y):
+    return 1000 * ((x - 0.5) ** 2 + jnp.sin(y**2))
+
+
+noise_std = 1e-1
 xs_1d = jnp.linspace(0, 1, num=10, endpoint=True)
-xs = jnp.stack(jnp.meshgrid(xs_1d, xs_1d)).reshape((2, -1)).T
+mesh_list = jnp.meshgrid(xs_1d, xs_1d)
+mesh_in = jnp.stack(mesh_list)
+mesh_out = fun(*mesh_in)
+
+# todo: data_generate() should be add_noise()
+truth = SpatialData(mesh_in, mesh_out)
+data = data_generate(key_data, mesh_in, mesh_out, noise_std)
+
+# Plot data
+vmin = jnp.amin(data.targets_meshgrid)
+vmax = jnp.amax(data.targets_meshgrid)
+ax_kwargs = {"vmin": vmin, "vmax": vmax, "cmap": "plasma"}
+clr = data_plot(axes["truth"], truth, title="Truth", **ax_kwargs)
+fig.colorbar(clr)
 
 
-key_ = jax.random.PRNGKey(2)
-key_data, key_slq = jax.random.split(key_, num=2)
-ys = gp.process_sample(
-    key_data, **params_obs, inputs=xs, kernel=kernel(**params_kernel)
+# Create a GP
+kernel, params_like = gp.kernel_quadratic_exponential()
+params = parameters_init(key_init, params_like)
+
+# Condition
+evals = condition_mean(params, kernel_fun=kernel, spatial_data=data)
+
+
+# Evaluate marginal log-likelihood
+loss_p = functools.partial(
+    negative_log_likelihood, kernel_fun=kernel, spatial_data=data
 )
+loss = jax.jit(loss_p)
+nll = loss(params)
 
+# Plot conditioning result (before optimization)
+nll_init = loss(params)
+title_init = f"Posterior (before; nmll={round(nll_init, 2):2F})"
+data_plot(axes["post-before"], evals, title=title_init, **ax_kwargs)
 
-# Parametrize and condition
-params_init1 = {"noise": 1.0}
-params_init2 = {"scale_in": 1e1, "scale_out": 1e-1}
-params = {"observation": params_init1, "kernel": params_init2}
-params_flat, unflatten_p = jax.flatten_util.ravel_pytree(params)
+# Optimize parameters
+optim = jaxopt.LBFGS(loss, verbose=True)
+result = optim.run(params)
+params_opt = result.params
 
+# Condition
+evals = condition_mean(params_opt, kernel_fun=kernel, spatial_data=data)
 
-krylov_depth = 2
-
-
-def slq_integrand(v, p):
-    alg = arnoldi.arnoldi(
-        lambda s, x: s @ x, krylov_depth, reortho="full", custom_vjp=True
-    )
-    Q, H, _, c = alg(v, p)
-    eigvals, eigvecs = jnp.linalg.eigh((H + H.T) / 2)
-
-    return c * eigvecs[0, :] @ jnp.diag(jnp.log(eigvals)) @ eigvecs[0, :].T
-
-
-@jax.jit
-@jax.value_and_grad
-def loss_value_and_grad(p_flat):
-    params_ = unflatten_p(p_flat)
-    kernel_p = kernel(**params_["kernel"])
-    obs_p = params_["observation"]
-
-    def solve_fun(M, v):
-        result, _info = jax.scipy.sparse.linalg.cg(lambda s: M @ s, v)
-        return result
-
-    def slogdet_fun(M):
-        x_like = jnp.ones((len(M),))
-        # integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s: M @ s)
-        sampler = hutchinson.sampler_rademacher(x_like, num=10)
-        estimate = hutchinson.hutchinson(slq_integrand, sampler)
-        logdet = estimate(key_slq, M)
-        return jnp.sign(logdet), jnp.abs(logdet)
-
-    score, _coeff = gp.log_likelihood(
-        xs, ys, kernel=kernel_p, solve_fun=solve_fun, slogdet_fun=slogdet_fun, **obs_p
-    )
-    return score
-
-
-# Initial guess:
-xs_new_1d = jnp.linspace(0, 1, num=11, endpoint=True)
-xs_new = jnp.stack(jnp.meshgrid(xs_new_1d, xs_new_1d)).reshape((2, -1)).T
-ys_new_init = solve(xs_new, params_flat)
-
-# Train
-learning_rate = 1e-3
-optimizer = optax.sgd(learning_rate)
-opt_state = optimizer.init(params_flat)
-
-num_steps = 3
-for i in range(num_steps):
-    score, grad = loss_value_and_grad(params_flat)
-
-    updates, opt_state = optimizer.update(grad, opt_state)
-    params_flat = optax.apply_updates(params_flat, updates)
-
-    print("index =", i)
-    print("\tscore =", score)
-    print("\tparams =", unflatten_p(params_flat))
-    print()
-
-
-# Read the final solution
-ys_new_final = solve(xs_new, params_flat)
-
-
-def fl(s, i):
-    return s.reshape((i, i))
-
-
-# Plot
-fig, axes = plt.subplots(
-    ncols=3, figsize=(9, 2), dpi=150, constrained_layout=True, sharex=True, sharey=True
-)
-
-fig.suptitle(f"N={len(xs)}, Krylov-depth={krylov_depth}")
-
-axes[0].set_title("Initial estimate")
-axes[0].contourf(
-    fl(xs_new[:, 0], len(xs_new_1d)),
-    fl(xs_new[:, 1], len(xs_new_1d)),
-    fl(ys_new_init, len(xs_new_1d)),
-)
-
-axes[1].set_title("Final estimate")
-axes[1].contourf(
-    fl(xs_new[:, 0], len(xs_new_1d)),
-    fl(xs_new[:, 1], len(xs_new_1d)),
-    fl(ys_new_final, len(xs_new_1d)),
-)
-
-axes[2].set_title("Truth")
-axes[2].contourf(fl(xs[:, 0], len(xs_1d)), fl(xs[:, 1], len(xs_1d)), fl(ys, len(xs_1d)))
-
+# Plot conditioning result
+nll_opt = loss(params_opt)
+title_opt = f"Posterior (after; nmll={round(nll_opt, 2):2F})"
+data_plot(axes["post-after"], evals, title=title_opt, **ax_kwargs)
 plt.show()

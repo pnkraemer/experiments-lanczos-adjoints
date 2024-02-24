@@ -2,43 +2,52 @@ import jax
 import jax.numpy as jnp
 
 
-def kernel_quadratic_exponential(*, gram_matrix: bool):
-    """Construct a square exponential kernel."""
-    assert gram_matrix
-
-    def parametrize(*, scale_in, scale_out):
+def kernel_matern_32():
+    def parametrize(*, scale_sqrt_in, scale_sqrt_out):
         def k(x, y):
+            epsilon = jnp.finfo(x).eps
             diff = x - y
-            log_k = scale_in**2 * jnp.dot(diff, diff)
-            return scale_out**2 * jnp.exp(log_k)
+            scaled = scale_sqrt_in**2 * jnp.dot(diff, diff)
+            sqrt = jnp.sqrt(scaled + epsilon)
+            return scale_sqrt_out**2 * (1 + sqrt) * jnp.exp(-sqrt)
 
         return _vmap_gram(k)
 
-        # k = _vmap_gram(k)
-        # def matvec(v, x, y):
-        #     return k(x, y) @ v
-        #
-        #
-        raise ValueError
-
-    return parametrize
+    empty = jnp.empty(())
+    params_like = {"scale_sqrt_in": empty, "scale_sqrt_out": empty}
+    return parametrize, params_like
 
 
-def kernel_quadratic_rational(*, gram_matrix: bool):
-    """Construct a rational quadratic kernel."""
+def kernel_quadratic_exponential():
+    """Construct a square exponential kernel."""
 
-    def parametrize(*, scale_in, scale_out):
+    def parametrize(*, scale_sqrt_in, scale_sqrt_out):
         def k(x, y):
             diff = x - y
-            tmp = scale_in**2 * jnp.dot(diff, diff)
-            return scale_out**2 / (1 + tmp)
+            log_k = scale_sqrt_in**2 * jnp.dot(diff, diff)
+            return scale_sqrt_out**2 * jnp.exp(-log_k)
 
-        if gram_matrix:
-            k = _vmap_gram(k)
-            return k
-        raise ValueError
+        return _vmap_gram(k)
 
-    return parametrize
+    empty = jnp.empty(())
+    params_like = {"scale_sqrt_in": empty, "scale_sqrt_out": empty}
+    return parametrize, params_like
+
+
+def kernel_quadratic_rational():
+    """Construct a rational quadratic kernel."""
+
+    def parametrize(*, scale_sqrt_in, scale_sqrt_out):
+        def k(x, y):
+            diff = x - y
+            tmp = scale_sqrt_in**2 * jnp.dot(diff, diff)
+            return scale_sqrt_out**2 / (1 + tmp)
+
+        return _vmap_gram(k)
+
+    empty = jnp.empty(())
+    params_like = {"scale_sqrt_in": empty, "scale_sqrt_out": empty}
+    return parametrize, params_like
 
 
 def _vmap_gram(fun):
@@ -46,7 +55,7 @@ def _vmap_gram(fun):
     return jax.vmap(tmp, in_axes=(None, 1), out_axes=1)
 
 
-def process_sample(key, *, noise, inputs, kernel, shape=()):
+def process_sample(key, *, noise_std, inputs, kernel, shape=()):
     """Sample a Gaussian process."""
     assert inputs.ndim == 2
     key_sample, key_noise = jax.random.split(key, num=2)
@@ -55,7 +64,7 @@ def process_sample(key, *, noise, inputs, kernel, shape=()):
     U, s, Vt = jnp.linalg.svd(K)
 
     def transform(a, b):
-        return U @ jnp.diag(jnp.sqrt(s)) @ Vt @ a + noise * b
+        return U @ jnp.diag(jnp.sqrt(s)) @ Vt @ a + noise_std * b
 
     if shape == ():
         xi = jax.random.normal(key_sample, shape=(len(K),))
@@ -67,12 +76,12 @@ def process_sample(key, *, noise, inputs, kernel, shape=()):
     return jax.vmap(transform)(xi, eta)
 
 
-def process_condition(inputs, targets, *, noise, kernel):
+def process_condition(inputs, targets, *, noise_std, kernel):
     """Condition a Gaussian process."""
     assert inputs.ndim == 2
 
     K = kernel(inputs, inputs.T)
-    K += noise * jnp.eye(len(K))
+    K += noise_std**2 * jnp.eye(len(K))
     coeff = jnp.linalg.solve(K, targets)
 
     def mean(x):
@@ -90,17 +99,17 @@ def process_condition(inputs, targets, *, noise, kernel):
 
 
 # todo: use an actual logpdf function here.
-def log_likelihood(inputs, targets, *, kernel, noise, solve_fun, slogdet_fun):
+def log_likelihood(inputs, targets, *, kernel, noise_std, solve_fun, slogdet_fun):
     """Evaluate the log-likelihood of observations."""
     assert inputs.ndim == 2
     assert targets.ndim == 1
 
     K = kernel(inputs, inputs.T)
-    shift = noise * jnp.eye(len(K))
+    shift = noise_std**2 * jnp.eye(len(K))
 
     coeffs = solve_fun(K + shift, targets)
     residual_white = jnp.dot(targets, coeffs)
 
-    _sign, logdet = slogdet_fun(K)
+    _sign, logdet = slogdet_fun(K + shift)
 
-    return -(residual_white + logdet), (coeffs, jnp.linalg.cond(K))
+    return -1 / 2 * (residual_white + logdet), (coeffs, jnp.linalg.cond(K + shift))
