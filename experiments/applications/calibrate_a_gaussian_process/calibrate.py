@@ -62,7 +62,7 @@ key_data, key_init = jax.random.split(key_, num=2)
 # Load and subsample the dataset
 (inputs, targets) = exp_util.uci_air_quality()
 inputs = inputs[..., None]  # (N, d) shape
-num_pts = len(inputs) // 20
+num_pts = 20
 inputs, targets = data_subsample(
     inputs[:num_pts], targets[:num_pts], key=key_data, num=num_pts
 )
@@ -120,7 +120,7 @@ loss_p = functools.partial(nmll, kernel_fun=kernel, data=data)
 loss = jax.jit(loss_p)
 
 # Optimise
-optim = jaxopt.BFGS(loss, verbose=True, maxiter=100)
+optim = jaxopt.BFGS(loss, verbose=True, maxiter=1000)
 result = optim.run((params, noise_std))
 params_opt, noise_opt = result.params
 
@@ -140,6 +140,7 @@ print(
 
 # Plot results
 print()
+
 means = gp.condition_mean(params_opt, noise_opt, **gp_kwargs)
 stds = gp.condition_std(params_opt, noise_opt, **gp_kwargs)
 plot_gp(axes["after"], means, stds, data)
