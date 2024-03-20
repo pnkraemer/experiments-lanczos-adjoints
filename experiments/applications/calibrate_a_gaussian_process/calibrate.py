@@ -5,6 +5,8 @@
 # todo: reduce the evaluation down to a single quantity (NMLL/RMSE on a test set?)
 # todo: load and plot the input labels
 # todo: train with Adam? minibatch?
+# todo: pivoted cholesky preconditioner
+# todo: decide where to go from here...
 
 import functools
 import json
