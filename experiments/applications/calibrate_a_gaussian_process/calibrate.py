@@ -59,7 +59,7 @@ key_data, key_init = jax.random.split(key_, num=2)
 # Load and subsample the dataset
 (inputs, targets) = exp_util.uci_air_quality()
 inputs = inputs[..., None]  # (N, d) shape
-num_pts = len(inputs) // 2
+num_pts = len(inputs) // 20
 inputs, targets = data_subsample(
     inputs[:num_pts], targets[:num_pts], key=key_data, num=num_pts
 )
@@ -71,7 +71,26 @@ targets = targets - bias
 
 
 # Set up the model
-kernel, params_like = gp.kernel_matern_12()
+kernel_matern_12, params_like_matern_12 = gp.kernel_matern_12()
+kernel_matern_32, params_like_matern_32 = gp.kernel_matern_32()
+kernel_periodic, params_like_periodic = gp.kernel_periodic()
+params_like = {
+    "matern_12": params_like_matern_12,
+    "matern_32": params_like_matern_32,
+    "periodic": params_like_periodic,
+}
+
+
+def kernel(*, matern_12, matern_32, periodic):
+    def k(x, y):
+        k_12 = kernel_matern_12(**matern_12)(x, y)
+        k_32 = kernel_matern_32(**matern_32)(x, y)
+        k_p = kernel_periodic(**periodic)(x, y)
+        return k_12 + k_32 * k_p
+
+    return k
+
+
 params = gp.parameters_init(key_init, params_like)
 data = gp.TimeSeriesData(inputs, targets)
 
@@ -98,7 +117,7 @@ loss_p = functools.partial(nmll, kernel_fun=kernel, data=data)
 loss = jax.jit(loss_p)
 
 # Optimise
-optim = jaxopt.BFGS(loss, verbose=True, maxiter=3)
+optim = jaxopt.BFGS(loss, verbose=True, maxiter=100)
 result = optim.run((params, noise_std))
 params_opt, noise_opt = result.params
 
@@ -107,6 +126,7 @@ print("\nInitial guess:\n\t", noise_std, "\n\t", params.unravelled)
 print("\nOptimised guess:\n\t", noise_opt, "\n\t", params_opt.unravelled)
 
 # Plot results
+# todo: plot on a different grid!
 means = gp.condition_mean(params_opt, noise_opt, **gp_kwargs)
 stds = gp.condition_std(params_opt, noise_opt, **gp_kwargs)
 plot_gp(axes["after"], means, stds, data)
