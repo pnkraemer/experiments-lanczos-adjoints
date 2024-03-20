@@ -1,4 +1,5 @@
 """Test the tri-diagonalisation."""
+
 import jax.flatten_util
 import jax.numpy as jnp
 import pytest_cases

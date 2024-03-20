@@ -1,4 +1,5 @@
 """Test the tri-diagonalisation."""
+
 import functools
 
 import jax.flatten_util

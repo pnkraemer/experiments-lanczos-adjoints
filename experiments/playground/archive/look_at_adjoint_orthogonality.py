@@ -1,6 +1,5 @@
 """Investigate whether there is any orthogonality left if dx!=0."""
 
-
 import jax.flatten_util
 import jax.numpy as jnp
 import matplotlib.pyplot as plt

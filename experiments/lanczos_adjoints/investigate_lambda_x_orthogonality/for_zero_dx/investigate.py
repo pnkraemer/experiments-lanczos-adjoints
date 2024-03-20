@@ -1,4 +1,5 @@
 """Verify that for zero dx, reorthogonalisation works as promised."""
+
 import os
 
 import jax.flatten_util
