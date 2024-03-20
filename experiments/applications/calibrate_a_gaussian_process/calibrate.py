@@ -1,15 +1,13 @@
 # todo: use the full time-series
 # todo: use all output features
-# todo: dense evaluation of the posterior (for plotting)
-# todo: start with waaay worse parameters (so plots make sense)
 # todo: make matrix-free
 # todo: train-test split
 # todo: reduce this down to a single quantity (NMLL/RMSE on test set?)
 # todo: load and plot the input labels
-# todo: do we need a better (periodic) kernel?
-# todo: training is too tedious/brittle.
-#  Solution? Replicate a paper experiment! Win-win!
+# todo: plot samples instead of means
+
 import functools
+import json
 
 import jax
 import jax.flatten_util
@@ -22,6 +20,11 @@ from tueplots import axes, figsizes, fontsizes
 plt.rcParams.update(figsizes.icml2022_full(nrows=2, ncols=4))
 plt.rcParams.update(fontsizes.icml2022())
 plt.rcParams.update(axes.lines())
+
+
+def print_dict(dct, *, indent):
+    dct = jax.tree_util.tree_map(float, dct)
+    return json.dumps(dct, sort_keys=True, indent=indent)
 
 
 def data_subsample(X, y, /, *, key, num):
@@ -96,9 +99,9 @@ data = gp.TimeSeriesData(inputs, targets)
 
 
 # Plot the initial guess
-noise_std = 1e-1
-xlim = jnp.amin(inputs), jnp.amax(inputs)
-inputs_plot_1d = jnp.linspace(*xlim, num=500, endpoint=True)
+noise_std = 1e-1 * jnp.ones(())
+xlim = jnp.amin(inputs), jnp.amin(inputs) + 1.25 * (jnp.amax(inputs) - jnp.amin(inputs))
+inputs_plot_1d = jnp.linspace(*xlim, num=200, endpoint=True)
 inputs_plot = inputs_plot_1d[:, None]
 
 gp_kwargs = {"kernel_fun": kernel, "data": data, "inputs_eval": inputs_plot}
@@ -122,11 +125,21 @@ result = optim.run((params, noise_std))
 params_opt, noise_opt = result.params
 
 # Print results
-print("\nInitial guess:\n\t", noise_std, "\n\t", params.unravelled)
-print("\nOptimised guess:\n\t", noise_opt, "\n\t", params_opt.unravelled)
+print(
+    "\nInitial guess:\n\tnoise =",
+    noise_std,
+    "\n\tp =",
+    print_dict(params.unravelled, indent=12),
+)
+print(
+    "\nOptimised guess:\n\tnoise =",
+    noise_opt,
+    "\n\tp =",
+    print_dict(params_opt.unravelled, indent=12),
+)
 
 # Plot results
-# todo: plot on a different grid!
+print()
 means = gp.condition_mean(params_opt, noise_opt, **gp_kwargs)
 stds = gp.condition_std(params_opt, noise_opt, **gp_kwargs)
 plot_gp(axes["after"], means, stds, data)

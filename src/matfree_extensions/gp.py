@@ -9,7 +9,7 @@ def kernel_periodic():
     def parametrize(*, scale_sqrt_in, scale_sqrt_out, period):
         def k(x, y):
             diff = x - y
-            scaled = period * jnp.pi * jnp.sqrt(jnp.dot(diff, diff))
+            scaled = period**2 * jnp.pi * jnp.sqrt(jnp.dot(diff, diff))
 
             inner_squared = scale_sqrt_in**2 * jnp.sin(scaled) ** 2
             return scale_sqrt_out**2 * jnp.exp(-inner_squared)
@@ -130,7 +130,6 @@ def parameters_init(key, p, /):
     return Params(flat_like, unflatten)
 
 
-# todo: data -> data
 def condition_mean(parameters, noise_std, /, *, kernel_fun, data, inputs_eval):
     kernel_fun_p = kernel_fun(**parameters.unravelled)
 
