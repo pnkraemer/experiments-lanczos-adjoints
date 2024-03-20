@@ -130,6 +130,24 @@ def parameters_init(key, p, /):
     return Params(flat_like, unflatten)
 
 
+def condition(parameters, noise_std, /, *, kernel_fun, data, inputs_eval):
+    kernel_fun_p = kernel_fun(**parameters.unravelled)
+
+    K = kernel_fun_p(data.inputs, data.inputs.T)
+    eye = jnp.eye(len(K))
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, data.targets)
+
+    K_eval = kernel_fun_p(inputs_eval, data.inputs.T)
+    means = K_eval @ coeffs
+
+    K_xy = kernel_fun_p(inputs_eval, data.inputs.T)
+    K_xx = kernel_fun_p(inputs_eval, inputs_eval.T)
+    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, K_xy.T)
+
+    covs = K_xx - K_xy @ coeffs
+    return means, covs
+
+
 def condition_mean(parameters, noise_std, /, *, kernel_fun, data, inputs_eval):
     kernel_fun_p = kernel_fun(**parameters.unravelled)
 

@@ -34,7 +34,13 @@ def data_subsample(X, y, /, *, key, num):
     return X[ints], y[ints]
 
 
-def plot_gp(ax, ms: gp.TimeSeriesData, ss: gp.TimeSeriesData, ds: gp.TimeSeriesData):
+def plot_gp(
+    ax,
+    ms: gp.TimeSeriesData,
+    ss: gp.TimeSeriesData,
+    ds: gp.TimeSeriesData,
+    samples=None,
+):
     style_data = {
         "markerfacecolor": "orange",
         "markeredgecolor": "black",
@@ -45,6 +51,10 @@ def plot_gp(ax, ms: gp.TimeSeriesData, ss: gp.TimeSeriesData, ds: gp.TimeSeriesD
 
     style_mean = {"color": "black"}
     ax.plot(ms.inputs.squeeze(), ms.targets.squeeze(), **style_mean)
+
+    style_samples = {"color": "black", "linestyle": "dotted", "linewidth": 0.5}
+    if samples is not None:
+        ax.plot(samples.inputs.squeeze(), samples.targets.squeeze(), **style_samples)
 
     style_std = {"color": "black", "alpha": 0.3}
     plus = ms.targets + 3 * ss.targets
@@ -105,8 +115,10 @@ inputs_plot_1d = jnp.linspace(*xlim, num=200, endpoint=True)
 inputs_plot = inputs_plot_1d[:, None]
 
 gp_kwargs = {"kernel_fun": kernel, "data": data, "inputs_eval": inputs_plot}
-means = gp.condition_mean(params, noise_std, **gp_kwargs)
-stds = gp.condition_std(params, noise_std, **gp_kwargs)
+means_raw, covs = gp.condition(params, noise_std, **gp_kwargs)
+stds_raw = jnp.sqrt(jnp.diag(covs))
+means = gp.TimeSeriesData(inputs_plot, means_raw)
+stds = gp.TimeSeriesData(inputs_plot, stds_raw)
 
 # Start plotting
 mosaic = [["before"], ["after"]]
@@ -141,9 +153,21 @@ print(
 # Plot results
 print()
 
-means = gp.condition_mean(params_opt, noise_opt, **gp_kwargs)
-stds = gp.condition_std(params_opt, noise_opt, **gp_kwargs)
-plot_gp(axes["after"], means, stds, data)
+
+means_raw, covs = gp.condition(params_opt, noise_opt, **gp_kwargs)
+stds_raw = jnp.sqrt(jnp.diag(covs))
+means = gp.TimeSeriesData(inputs_plot, means_raw)
+stds = gp.TimeSeriesData(inputs_plot, stds_raw)
+
+samples_base = jax.random.normal(key_, shape=(5, *means_raw.shape)).T
+samples_raw = (
+    means_raw[:, None]
+    + jnp.linalg.cholesky(covs + jnp.eye(len(covs)) * 1e-5) @ samples_base
+)
+samples = gp.TimeSeriesData(inputs_plot, samples_raw)
+print(samples)
+
+plot_gp(axes["after"], means, stds, data, samples=samples)
 axes["after"].set_ylabel("Optimized")
 
 # Show results
