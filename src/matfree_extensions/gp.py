@@ -5,6 +5,22 @@ import jax
 import jax.numpy as jnp
 
 
+def kernel_periodic():
+    def parametrize(*, scale_sqrt_in, scale_sqrt_out, period):
+        def k(x, y):
+            diff = x - y
+            scaled = period * jnp.pi * jnp.sqrt(jnp.dot(diff, diff))
+
+            inner_squared = scale_sqrt_in**2 * jnp.sin(scaled) ** 2
+            return scale_sqrt_out**2 * jnp.exp(-inner_squared)
+
+        return _vmap_gram(k)
+
+    empty = jnp.empty(())
+    params_like = {"scale_sqrt_in": empty, "scale_sqrt_out": empty, "period": empty}
+    return parametrize, params_like
+
+
 def kernel_matern_32():
     def parametrize(*, scale_sqrt_in, scale_sqrt_out):
         def k(x, y):
