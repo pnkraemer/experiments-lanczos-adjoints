@@ -51,6 +51,15 @@ def data_subsample(X, y, /, *, key, num):
     return X[ints], y[ints]
 
 
+def data_train_test_split(X, y, /, *, key):
+    ints = jnp.arange(0, len(X))
+    ints_shuffled = jax.random.permutation(key, ints)
+
+    idx = len(X) // 5  # 20 percent test data
+    train, test = ints_shuffled[:idx], ints_shuffled[idx:]
+    return (X[train], y[train]), (X[test], y[test])
+
+
 def gaussian_process_model():
     # Set up the kernel components
     kernel_matern_12, params_like_matern_12 = gp.kernel_matern_12()
@@ -80,13 +89,13 @@ def gaussian_process_model():
     return param, p_like
 
 
-def negative_log_likelihood(parameters_and_noise, /, *, kernel_fun, X, y):
+def neg_log_likelihood(parameters_and_noise, /, *, kfun, X, y):
     parameters, noise_std = (
         parameters_and_noise["kernel"],
         parameters_and_noise["noise"],
     )
-    kernel_fun_p = kernel_fun(**parameters)
-    K = kernel_fun_p(X, X.T)
+    kfun_p = kfun(**parameters)
+    K = kfun_p(X, X.T)
     eye = jnp.eye(len(K))
     coeffs = jnp.linalg.solve(K + noise_std**2 * eye, y)
 
@@ -97,37 +106,43 @@ def negative_log_likelihood(parameters_and_noise, /, *, kernel_fun, X, y):
 
 if __name__ == "__main__":
     seed = 3
-    num_pts = 100
+    num_pts = 10
+    num_epochs = 10
 
     # Initialise the random number generator
     key_ = jax.random.PRNGKey(seed)
     key_data, key_init = jax.random.split(key_, num=2)
 
-    # Load and subsample the dataset
-    (X, y) = exp_util.uci_air_quality()
-    X = X[..., None]  # (N, d) shape
-    X, y = data_subsample(X[:num_pts], y[:num_pts], key=key_data, num=num_pts)
+    # Load the data
+    (X_full, y_full) = exp_util.uci_air_quality()
+    X_full, y_full = X_full[:num_pts], y_full[:num_pts]
 
     # Pre-process the data
-    y = jnp.log(y)
-    bias = jnp.mean(y)
-    scale = jnp.std(y)
-    y = (y - bias) / scale
+    y_full = jnp.log(y_full)
+    bias = jnp.mean(y_full)
+    scale = jnp.std(y_full)
+    y_full = (y_full - bias) / scale
+
+    # Split the data into training and testing
+    train, test = data_train_test_split(X_full[..., None], y_full, key=key_data)
+    (X_train, y_train), (X_test, y_test) = train, test
 
     # Set up the model
     kernel, params_like = gaussian_process_model()
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    loss_train = functools.partial(negative_log_likelihood, kernel_fun=kernel, X=X, y=y)
+    loss = functools.partial(neg_log_likelihood, kfun=kernel, X=X_train, y=y_train)
+    test_nll = functools.partial(neg_log_likelihood, kfun=kernel, X=X_test, y=y_test)
 
     # Optimize
-    optim = jaxopt.LBFGS(loss_train)
+    optim = jaxopt.LBFGS(loss)
     params, state = params_init, optim.init_state(params_init)
-    progressbar = tqdm.tqdm(range(100))
+    progressbar = tqdm.tqdm(range(num_epochs))
+    progressbar.set_description(f"Loss: {loss(params):.3F}")
     for _ in progressbar:
         params, state = optim.update(params, state)
-        progressbar.set_description(f"Loss: {loss_train(params):.3F}")
+        progressbar.set_description(f"Loss: {loss(params):.3F}")
     params_opt = params
 
     # Create a directory for the results
@@ -138,6 +153,8 @@ if __name__ == "__main__":
     parameters_save(params_init, directory, "params_init")
     parameters_save(params_opt, directory, "params_opt")
 
-    # Print the parameters
+    # Print the results
+    print("\nNLL on test set (initial):", test_nll(params_init))
     print_dict(params_init, indent=4)
+    print("\nNLL on test set (optimized):", test_nll(params_opt))
     print_dict(params_opt, indent=4)
