@@ -1,4 +1,9 @@
-"""Calibrate an output-independent Gaussian process model on a UCI dataset."""
+"""Calibrate an output-independent Gaussian process model on a UCI dataset.
+
+Currently, use either of the following datasets:
+* uci_concrete_compressive_strength (small)
+* uci_combined_cycle_power_plant (medium)
+"""
 
 # todo: make matrix-free
 # todo: pivoted cholesky preconditioner
