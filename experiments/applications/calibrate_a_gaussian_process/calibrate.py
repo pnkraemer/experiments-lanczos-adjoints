@@ -19,6 +19,7 @@ import jax.flatten_util
 import jax.numpy as jnp
 import jaxopt
 import matplotlib.pyplot as plt
+import tqdm
 from matfree_extensions import exp_util, gp
 from tueplots import axes, figsizes, fontsizes
 
@@ -96,7 +97,7 @@ def negative_log_likelihood(parameters_and_noise, /, *, kernel_fun, X, y):
 
 if __name__ == "__main__":
     seed = 3
-    num_pts = 10
+    num_pts = 100
 
     # Initialise the random number generator
     key_ = jax.random.PRNGKey(seed)
@@ -117,11 +118,16 @@ if __name__ == "__main__":
     kernel, params_like = gaussian_process_model()
     params_init = parameters_init(key_init, params_like)
 
-    # Set up the loss function and optimize
+    # Set up the loss function
     loss = functools.partial(negative_log_likelihood, kernel_fun=kernel, X=X, y=y)
-    optim = jaxopt.BFGS(loss, verbose=True, maxiter=100)
-    result = optim.run(params_init)
-    params_opt = result.params
+
+    # Optimize
+    optim = jaxopt.LBFGS(loss)
+    params, state = params_init, optim.init_state(params_init)
+    for _ in tqdm.tqdm(range(100)):
+        params, state = optim.update(params, state)
+
+    params_opt = params
 
     # Create a directory for the results
     directory = exp_util.matching_directory(__file__, "results/")
