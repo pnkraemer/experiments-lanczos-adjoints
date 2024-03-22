@@ -101,39 +101,17 @@ def goldstein_price(X, Y, /):
     )
 
 
-def uci_air_quality(*, use_cache_if_possible: bool):
-    import ucimlrepo
-
-    if os.path.exists("./data/uci_processed/air_quality/") and use_cache_if_possible:
-        inputs = jnp.load("data/uci_processed/air_quality/inputs.npy")
-        targets = jnp.load("data/uci_processed/air_quality/targets.npy")
-        return inputs, targets
-
-    dataset = ucimlrepo.fetch_ucirepo(id=360)
-
-    # Data (as pandas dataframes)
-    X = dataset.data.features
-
-    # Inputs/targets
-    inputs = jnp.arange(0, len(X["Date"]))
-    # targets = jnp.asarray(X["CO(GT)"])
-    targets = jnp.asarray(X.iloc[:, 2:])
-
-    msg = "Handle missing values before proceeding."
-    raise RuntimeError(msg)
-    # Ignore missing values:
-    idx = (targets != -200).nonzero()[0]
-    inputs, targets = inputs[idx], targets[idx]
-
-    # Promote shapes
-    inputs = inputs[..., None]
-    targets = targets[..., None]
-
-    # Save
-    os.makedirs("data/uci_processed/air_quality/", exist_ok=True)
-    jnp.save("data/uci_processed/air_quality/inputs.npy", inputs)
-    jnp.save("data/uci_processed/air_quality/targets.npy", targets)
-    return (inputs, targets)
+# Rationale for choosing the data sets below (from UCI):
+#
+# * Multivariate data
+# * Regression
+# * Less than 10 features
+# * More than 1000 instances
+# * Numerical features
+# * Available for python import
+#
+# This gives three sets: concrete_compressive_strength,
+#  combined cycle power plant, and household electric
 
 
 def uci_concrete_compressive_strength(*, use_cache_if_possible: bool = True):
