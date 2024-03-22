@@ -8,7 +8,6 @@
 # todo: decide where to go from here...
 
 import argparse
-import functools
 import json
 import os
 import pickle
@@ -78,8 +77,8 @@ def gaussian_process_model() -> tuple[Callable, dict]:
         "matern_32": params_like_matern_32,
         "periodic": params_like_periodic,
     }
-    params_like_noise = 1.0
-    p_like = {"noise": params_like_noise, "kernel": params_like_kernel}
+    params_like_likelihood = 1.0
+    p_like = {"p_noise_std": params_like_likelihood, "p_kernel": params_like_kernel}
 
     # Initialize the parametrized kernel function
 
@@ -95,19 +94,22 @@ def gaussian_process_model() -> tuple[Callable, dict]:
     return param, p_like
 
 
-def neg_log_likelihood(p: dict, /, kfun: Callable, X, y):
-    """Evaluate the negative log-likelihood of a set of observations."""
-    parameters, noise_std = (p["kernel"], p["noise"])
+def negative_log_likelihood(kernel_func: Callable, X, y):
+    """Construct a negative-log-likelihood function."""
 
-    kfun_p = kfun(**parameters)
-    K = kfun_p(X, X.T)
+    def evaluate(*, p_kernel, p_noise_std):
+        """Evaluate the negative log-likelihood of a set of observations."""
+        kfun_p = kernel_func(**p_kernel)
+        K = kfun_p(X, X.T)
 
-    eye = jnp.eye(len(K))
-    coeffs = jnp.linalg.solve(K + noise_std**2 * eye, y)
+        eye = jnp.eye(len(K))
+        coeffs = jnp.linalg.solve(K + p_noise_std**2 * eye, y)
 
-    mahalanobis = y @ coeffs
-    _sign, entropy = jnp.linalg.slogdet(K + noise_std**2 * eye)
-    return mahalanobis + entropy
+        mahalanobis = y @ coeffs
+        _sign, entropy = jnp.linalg.slogdet(K + p_noise_std**2 * eye)
+        return mahalanobis + entropy
+
+    return evaluate
 
 
 if __name__ == "__main__":
@@ -149,18 +151,18 @@ if __name__ == "__main__":
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    loss = functools.partial(neg_log_likelihood, kfun=kernel, X=X_train, y=y_train)
-    test_nll = functools.partial(neg_log_likelihood, kfun=kernel, X=X_test, y=y_test)
+    loss = negative_log_likelihood(kernel_func=kernel, X=X_train, y=y_train)
+    test_nll = negative_log_likelihood(kernel_func=kernel, X=X_test, y=y_test)
 
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
-    optim = jaxopt.LBFGS(loss)
+    optim = jaxopt.LBFGS(lambda p: loss(**p))
     params, state = params_init, optim.init_state(params_init)
     progressbar = tqdm.tqdm(range(num_epochs))
-    progressbar.set_description(f"Loss: {loss(params):.3F}")
+    progressbar.set_description(f"Loss: {loss(**params):.3F}")
     for _ in progressbar:
         try:
             params, state = optim.update(params, state)
-            progressbar.set_description(f"Loss: {loss(params):.3F}")
+            progressbar.set_description(f"Loss: {loss(**params):.3F}")
         except KeyboardInterrupt:
             break
 
@@ -175,7 +177,7 @@ if __name__ == "__main__":
     parameters_save(params_opt, directory_local, name="params_opt")
 
     # Print the results
-    print("\nNLL on test set (initial):", test_nll(params_init))
+    print("\nNLL on test set (initial):", test_nll(**params_init))
     print_dict(params_init, indent=4)
-    print("\nNLL on test set (optimized):", test_nll(params_opt))
+    print("\nNLL on test set (optimized):", test_nll(**params_opt))
     print_dict(params_opt, indent=4)
