@@ -3,8 +3,6 @@
 # todo: use the full time-series!
 # todo: use all output features!
 # todo: make matrix-free
-# todo: train-test split
-# todo: reduce the evaluation down to a single quantity (NMLL/RMSE on a test set?)
 # todo: load and plot the input labels
 # todo: pivoted cholesky preconditioner
 # todo: decide where to go from here...
@@ -108,14 +106,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--seed", type=int, default=1)
     parser.add_argument(
-        "-n", "--num_pts", type=int, default=100, help="Use -1 for the full dataset"
+        "-n", "--num_points", type=int, default=100, help="Use -1 for the full dataset"
     )
     parser.add_argument("-k", "--num_epochs", type=int, default=10)
     args = parser.parse_args()
     print(args, "\n")
 
     seed = args.seed
-    num_pts = args.num_pts
+    num_points = args.num_points
     num_epochs = args.num_epochs
 
     # Initialise the random number generator
@@ -124,7 +122,7 @@ if __name__ == "__main__":
 
     # Load the data
     (X_full, y_full) = exp_util.uci_air_quality()
-    X_full, y_full = X_full[:num_pts], y_full[:num_pts]
+    X_full, y_full = X_full[:num_points], y_full[:num_points]
 
     # Pre-process the data
     y_full = jnp.log(y_full)
