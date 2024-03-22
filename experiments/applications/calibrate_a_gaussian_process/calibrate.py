@@ -8,7 +8,6 @@
 # todo: decide where to go from here...
 
 import argparse
-import json
 import os
 import pickle
 from typing import Callable
@@ -40,12 +39,6 @@ def parameters_save(dct: dict, directory: str, /, *, name: str) -> None:
         pickle.dump(dct, f)
 
 
-def print_dict(dct, *, indent):
-    """Pretty-print a dictionary."""
-    dct = jax.tree_util.tree_map(float, dct)
-    print(json.dumps(dct, sort_keys=True, indent=indent))
-
-
 def data_train_test_split_80_20(X, y, /, *, key):
     """Split a data set into a training and a testing part."""
     ints = jnp.arange(0, len(X))
@@ -56,36 +49,13 @@ def data_train_test_split_80_20(X, y, /, *, key):
     return (X[train], y[train]), (X[test], y[test])
 
 
-def gaussian_process_model() -> tuple[Callable, dict]:
+def gaussian_process_model(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """Set up the Gaussian process model."""
-    # Set up the kernel components
-    kernel_matern_12, params_like_matern_12 = gp.kernel_matern_12()
-    kernel_matern_32, params_like_matern_32 = gp.kernel_matern_32()
-    kernel_periodic, params_like_periodic = gp.kernel_periodic()
-
-    # Initialize the parameters
-    params_like_kernel = {
-        "matern_12": params_like_matern_12,
-        "matern_32": params_like_matern_32,
-        "periodic": params_like_periodic,
-    }
-    params_like_likelihood = 1.0
+    parametrise, params_like_kernel = gp.kernel_matern_12(
+        shape_in=shape_in, shape_out=shape_out
+    )
+    params_like_likelihood = jnp.empty(shape_out)
     p_like = {"p_noise_std": params_like_likelihood, "p_kernel": params_like_kernel}
-
-    # Initialize the parametrized kernel function
-
-    def parametrise(*, matern_12, matern_32, periodic):
-        """Parametrise the kernel function."""
-
-        def k(a: jax.Array, b: jax.Array, /) -> jax.Array:
-            """Evaluate the parametrised kernel function."""
-            k_12 = kernel_matern_12(**matern_12)(a, b)
-            k_32 = kernel_matern_32(**matern_32)(a, b)
-            k_p = kernel_periodic(**periodic)(a, b)
-            return k_12 + k_32 * k_p
-
-        return k
-
     return parametrise, p_like
 
 
@@ -97,18 +67,20 @@ def negative_log_likelihood(kernel_func: Callable, X, y):
         kfun_p = kernel_func(**p_kernel)
         K = kfun_p(X, X.T)
 
-        eye = jnp.eye(len(K))
-        coeffs = jnp.linalg.solve(K + p_noise_std**2 * eye, y)
+        eye = jnp.eye(len(X))[None, ...]
+        K_noisy = K + p_noise_std**2 * eye
+        coeffs = jax.vmap(jnp.linalg.solve)(K_noisy, y.T)
 
-        mahalanobis = y @ coeffs
-        _sign, entropy = jnp.linalg.slogdet(K + p_noise_std**2 * eye)
-        return mahalanobis + entropy
+        mahalanobis = jax.vmap(jnp.dot)(y.T, coeffs)
+        _sign, entropy = jax.vmap(jnp.linalg.slogdet)(K_noisy)
+        return jnp.sum(mahalanobis + entropy, axis=0)
 
     return evaluate
 
 
 if __name__ == "__main__":
     # Parse the arguments
+    # todo: add run_name argument to affect the saving directory name
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--seed", type=int, default=1)
     parser.add_argument(
@@ -128,7 +100,7 @@ if __name__ == "__main__":
     key_data, key_init = jax.random.split(key_, num=2)
 
     # Load the data
-    (X_full, y_full) = exp_util.uci_air_quality()
+    (X_full, y_full) = exp_util.uci_air_quality(use_cache_if_possible=False)
     X_full, y_full = X_full[:num_points], y_full[:num_points]
 
     # Pre-process the data
@@ -138,11 +110,11 @@ if __name__ == "__main__":
     y_full = (y_full - bias) / scale
 
     # Split the data into training and testing
-    train, test = data_train_test_split_80_20(X_full[..., None], y_full, key=key_data)
+    train, test = data_train_test_split_80_20(X_full, y_full, key=key_data)
     (X_train, y_train), (X_test, y_test) = train, test
 
     # Set up the model
-    kernel, params_like = gaussian_process_model()
+    kernel, params_like = gaussian_process_model(shape_in=(1,), shape_out=(1,))
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
@@ -171,6 +143,6 @@ if __name__ == "__main__":
 
     # Print the results
     print("\nNLL on test set (initial):", test_nll(**params_init))
-    print_dict(params_init, indent=4)
+    print(params_init)
     print("\nNLL on test set (optimized):", test_nll(**params_opt))
-    print_dict(params_opt, indent=4)
+    print(params_opt)
