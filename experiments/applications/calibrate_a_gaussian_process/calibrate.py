@@ -119,14 +119,15 @@ if __name__ == "__main__":
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    loss = functools.partial(negative_log_likelihood, kernel_fun=kernel, X=X, y=y)
+    loss_train = functools.partial(negative_log_likelihood, kernel_fun=kernel, X=X, y=y)
 
     # Optimize
-    optim = jaxopt.LBFGS(loss)
+    optim = jaxopt.LBFGS(loss_train)
     params, state = params_init, optim.init_state(params_init)
-    for _ in tqdm.tqdm(range(100)):
+    progressbar = tqdm.tqdm(range(100))
+    for _ in progressbar:
         params, state = optim.update(params, state)
-
+        progressbar.set_description(f"Loss: {loss_train(params):.3F}")
     params_opt = params
 
     # Create a directory for the results
