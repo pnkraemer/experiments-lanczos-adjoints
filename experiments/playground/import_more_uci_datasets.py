@@ -3,7 +3,7 @@
 import matplotlib.pyplot as plt
 from matfree_extensions import exp_util
 
-X, y = exp_util.uci_concrete_compressive_strength(use_cache_if_possible=False)
+X, y = exp_util.uci_combined_cycle_power_plant(use_cache_if_possible=True)
 
 
 print(X.shape)

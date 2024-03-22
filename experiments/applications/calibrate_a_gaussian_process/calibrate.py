@@ -98,7 +98,7 @@ if __name__ == "__main__":
     key_data, key_init = jax.random.split(key_, num=2)
 
     # Load the data
-    (X_full, y_full) = exp_util.uci_concrete_compressive_strength()
+    (X_full, y_full) = exp_util.uci_combined_cycle_power_plant()
     X_full, y_full = X_full[:num_points], y_full[:num_points]
 
     # Pre-process the data
@@ -111,7 +111,9 @@ if __name__ == "__main__":
     (X_train, y_train), (X_test, y_test) = train, test
 
     # Set up the model
-    kernel, params_like = gaussian_process_model(shape_in=(8,), shape_out=(1,))
+    shape_in = jnp.shape(X_train[0])
+    shape_out = jnp.shape(y_train[0])
+    kernel, params_like = gaussian_process_model(shape_in=shape_in, shape_out=shape_out)
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function

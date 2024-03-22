@@ -134,3 +134,26 @@ def uci_concrete_compressive_strength(*, use_cache_if_possible: bool = True):
     jnp.save(f"{path}/inputs.npy", X)
     jnp.save(f"{path}/targets.npy", y)
     return X, y
+
+
+def uci_combined_cycle_power_plant(*, use_cache_if_possible: bool = True):
+    from ucimlrepo import fetch_ucirepo
+
+    path = "./data/uci_processed/combined_cycle_power_plant"
+    if os.path.exists(path) and use_cache_if_possible:
+        inputs = jnp.load(f"{path}/inputs.npy")
+        targets = jnp.load(f"{path}/targets.npy")
+        return inputs, targets
+
+    # fetch dataset
+    combined_cycle_power_plant = fetch_ucirepo(id=294)
+
+    # data (as pandas dataframes)
+    X = jnp.asarray(combined_cycle_power_plant.data.features.values)
+    y = jnp.asarray(combined_cycle_power_plant.data.targets.values)
+
+    os.makedirs(path, exist_ok=True)
+    jnp.save(f"{path}/inputs.npy", X)
+    jnp.save(f"{path}/targets.npy", y)
+
+    return X, y
