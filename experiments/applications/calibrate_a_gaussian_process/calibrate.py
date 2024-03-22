@@ -46,14 +46,6 @@ def print_dict(dct, *, indent):
     print(json.dumps(dct, sort_keys=True, indent=indent))
 
 
-def data_subsample(X, y, /, *, key: jax.random.PRNGKey, num: int):
-    """Subsample a data set."""
-    ints = jnp.arange(0, len(X))
-    ints = jax.random.choice(key, ints, replace=False, shape=(num,))
-    ints = jnp.sort(ints)
-    return X[ints], y[ints]
-
-
 def data_train_test_split_80_20(X, y, /, *, key):
     """Split a data set into a training and a testing part."""
     ints = jnp.arange(0, len(X))
@@ -82,8 +74,11 @@ def gaussian_process_model() -> tuple[Callable, dict]:
 
     # Initialize the parametrized kernel function
 
-    def param(*, matern_12, matern_32, periodic):
-        def k(a, b, /):
+    def parametrise(*, matern_12, matern_32, periodic):
+        """Parametrise the kernel function."""
+
+        def k(a: jax.Array, b: jax.Array, /) -> jax.Array:
+            """Evaluate the parametrised kernel function."""
             k_12 = kernel_matern_12(**matern_12)(a, b)
             k_32 = kernel_matern_32(**matern_32)(a, b)
             k_p = kernel_periodic(**periodic)(a, b)
@@ -91,7 +86,7 @@ def gaussian_process_model() -> tuple[Callable, dict]:
 
         return k
 
-    return param, p_like
+    return parametrise, p_like
 
 
 def negative_log_likelihood(kernel_func: Callable, X, y):
@@ -156,17 +151,15 @@ if __name__ == "__main__":
 
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
     optim = jaxopt.LBFGS(lambda p: loss(**p))
-    params, state = params_init, optim.init_state(params_init)
+    params_opt, state = params_init, optim.init_state(params_init)
     progressbar = tqdm.tqdm(range(num_epochs))
-    progressbar.set_description(f"Loss: {loss(**params):.3F}")
+    progressbar.set_description(f"Loss: {loss(**params_opt):.3F}")
     for _ in progressbar:
         try:
-            params, state = optim.update(params, state)
-            progressbar.set_description(f"Loss: {loss(**params):.3F}")
+            params_opt, state = optim.update(params_opt, state)
+            progressbar.set_description(f"Loss: {loss(**params_opt):.3F}")
         except KeyboardInterrupt:
             break
-
-    params_opt = params
 
     # Create a directory for the results
     directory_local = exp_util.matching_directory(__file__, "results/")
