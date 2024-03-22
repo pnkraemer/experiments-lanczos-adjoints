@@ -9,6 +9,7 @@
 # todo: pivoted cholesky preconditioner
 # todo: decide where to go from here...
 
+import argparse
 import functools
 import json
 import os
@@ -89,13 +90,12 @@ def gaussian_process_model():
     return param, p_like
 
 
-def neg_log_likelihood(parameters_and_noise, /, *, kfun, X, y):
-    parameters, noise_std = (
-        parameters_and_noise["kernel"],
-        parameters_and_noise["noise"],
-    )
+def neg_log_likelihood(p, /, *, kfun, X, y):
+    parameters, noise_std = (p["kernel"], p["noise"])
+
     kfun_p = kfun(**parameters)
     K = kfun_p(X, X.T)
+
     eye = jnp.eye(len(K))
     coeffs = jnp.linalg.solve(K + noise_std**2 * eye, y)
 
@@ -105,9 +105,18 @@ def neg_log_likelihood(parameters_and_noise, /, *, kfun, X, y):
 
 
 if __name__ == "__main__":
-    seed = 3
-    num_pts = 10
-    num_epochs = 10
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-s", "--seed", type=int, default=1)
+    parser.add_argument(
+        "-n", "--num_pts", type=int, default=100, help="Use -1 for the full dataset"
+    )
+    parser.add_argument("-k", "--num_epochs", type=int, default=10)
+    args = parser.parse_args()
+    print(args, "\n")
+
+    seed = args.seed
+    num_pts = args.num_pts
+    num_epochs = args.num_epochs
 
     # Initialise the random number generator
     key_ = jax.random.PRNGKey(seed)
