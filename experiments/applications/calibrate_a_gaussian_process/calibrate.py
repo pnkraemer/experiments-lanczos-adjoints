@@ -1,9 +1,8 @@
 """Calibrate an output-independent Gaussian process model on a UCI dataset."""
 
 # todo: make matrix-free
-# todo: load and plot the input labels
 # todo: pivoted cholesky preconditioner
-# todo: decide where to go from here...
+# todo: decide where to go from here
 
 import argparse
 import os
