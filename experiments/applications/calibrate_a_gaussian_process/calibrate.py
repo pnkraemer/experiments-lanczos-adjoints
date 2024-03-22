@@ -1,7 +1,5 @@
-"""Calibrate a Gaussian process model on the air_quality dataset."""
+"""Calibrate an output-independent Gaussian process model on a UCI dataset."""
 
-# todo: use the full time-series!
-# todo: use all output features!
 # todo: make matrix-free
 # todo: load and plot the input labels
 # todo: pivoted cholesky preconditioner
@@ -80,7 +78,7 @@ def negative_log_likelihood(kernel_func: Callable, X, y):
 
 if __name__ == "__main__":
     # Parse the arguments
-    # todo: add run_name argument to affect the saving directory name
+    # todo: add name_of_run argument to affect the saving directory name
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--seed", type=int, default=1)
     parser.add_argument(
@@ -100,11 +98,10 @@ if __name__ == "__main__":
     key_data, key_init = jax.random.split(key_, num=2)
 
     # Load the data
-    (X_full, y_full) = exp_util.uci_air_quality(use_cache_if_possible=False)
+    (X_full, y_full) = exp_util.uci_concrete_compressive_strength()
     X_full, y_full = X_full[:num_points], y_full[:num_points]
 
     # Pre-process the data
-    y_full = jnp.log(y_full)
     bias = jnp.mean(y_full)
     scale = jnp.std(y_full)
     y_full = (y_full - bias) / scale
@@ -114,7 +111,7 @@ if __name__ == "__main__":
     (X_train, y_train), (X_test, y_test) = train, test
 
     # Set up the model
-    kernel, params_like = gaussian_process_model(shape_in=(1,), shape_out=(1,))
+    kernel, params_like = gaussian_process_model(shape_in=(8,), shape_out=(1,))
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function

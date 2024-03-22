@@ -116,8 +116,11 @@ def uci_air_quality(*, use_cache_if_possible: bool):
 
     # Inputs/targets
     inputs = jnp.arange(0, len(X["Date"]))
-    targets = jnp.asarray(X["CO(GT)"])
+    # targets = jnp.asarray(X["CO(GT)"])
+    targets = jnp.asarray(X.iloc[:, 2:])
 
+    msg = "Handle missing values before proceeding."
+    raise RuntimeError(msg)
     # Ignore missing values:
     idx = (targets != -200).nonzero()[0]
     inputs, targets = inputs[idx], targets[idx]
@@ -131,3 +134,25 @@ def uci_air_quality(*, use_cache_if_possible: bool):
     jnp.save("data/uci_processed/air_quality/inputs.npy", inputs)
     jnp.save("data/uci_processed/air_quality/targets.npy", targets)
     return (inputs, targets)
+
+
+def uci_concrete_compressive_strength(*, use_cache_if_possible: bool = True):
+    from ucimlrepo import fetch_ucirepo
+
+    path = "./data/uci_processed/concrete_compressive_strength"
+    if os.path.exists(path) and use_cache_if_possible:
+        inputs = jnp.load(f"{path}/inputs.npy")
+        targets = jnp.load(f"{path}/targets.npy")
+        return inputs, targets
+
+    # fetch dataset
+    concrete_compressive_strength = fetch_ucirepo(id=165)
+
+    # data (as pandas dataframes)
+    X = jnp.asarray(concrete_compressive_strength.data.features.values)
+    y = jnp.asarray(concrete_compressive_strength.data.targets.values)
+
+    os.makedirs(path, exist_ok=True)
+    jnp.save(f"{path}/inputs.npy", X)
+    jnp.save(f"{path}/targets.npy", y)
+    return X, y
