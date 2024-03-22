@@ -5,8 +5,6 @@ import os
 import jax.experimental.sparse
 import jax.numpy as jnp
 import scipy.io
-import ssgetpy
-import ucimlrepo
 
 
 def suite_sparse_download(
@@ -20,6 +18,8 @@ def suite_sparse_download(
     matrixformat="MM",
 ):
     """Download from https://sparse.tamu.edu/."""
+    import ssgetpy
+
     searched = ssgetpy.search(
         limit=limit,
         isspd=isspd,
@@ -102,6 +102,8 @@ def goldstein_price(X, Y, /):
 
 
 def uci_air_quality():
+    import ucimlrepo
+
     if os.path.exists("./data/uci_processed/air_quality/"):
         inputs = jnp.load("data/uci_processed/air_quality/inputs.npy")
         targets = jnp.load("data/uci_processed/air_quality/targets.npy")

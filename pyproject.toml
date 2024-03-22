@@ -4,22 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "matfree_extensions"
-authors = [
-  { name="Nicholas Krämer", email="pekra@dtu.dk" },
-]
 version = "0.0.1"
-description = "Extensions for the Matfree package"
-readme = "README.md"
-requires-python = ">=3.9"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+
+dependencies = [
+    "matfree",
 ]
 
-[tool.setuptools.packages.find]
-# All the following settings are optional:
-where = ["src"]  # ["."] by default
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-cases",
+]
+uci = [
+    "ucimlrepo",
+    "pandas",
+]
+suite_sparse = [
+    "ssgetpy",
+]
+experiments = [
+    "jaxopt",
+    "matplotlib",
+    "tueplots",
+    "optax",
+]
+
 
 [tool.ruff]
 include = ["**.py", "**/pyproject.toml", "**.ipynb"]
