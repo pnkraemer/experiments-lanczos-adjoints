@@ -148,8 +148,12 @@ if __name__ == "__main__":
     progressbar = tqdm.tqdm(range(num_epochs))
     progressbar.set_description(f"Loss: {loss(params):.3F}")
     for _ in progressbar:
-        params, state = optim.update(params, state)
-        progressbar.set_description(f"Loss: {loss(params):.3F}")
+        try:
+            params, state = optim.update(params, state)
+            progressbar.set_description(f"Loss: {loss(params):.3F}")
+        except KeyboardInterrupt:
+            break
+
     params_opt = params
 
     # Create a directory for the results
