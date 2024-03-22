@@ -112,6 +112,7 @@ def goldstein_price(X, Y, /):
 #
 # This gives three sets: concrete_compressive_strength,
 #  combined cycle power plant, and household electric
+# todo: household electric dataset
 
 
 def uci_concrete_compressive_strength(*, use_cache_if_possible: bool = True):
@@ -151,37 +152,6 @@ def uci_combined_cycle_power_plant(*, use_cache_if_possible: bool = True):
     # data (as pandas dataframes)
     X = jnp.asarray(combined_cycle_power_plant.data.features.values)
     y = jnp.asarray(combined_cycle_power_plant.data.targets.values)
-
-    os.makedirs(path, exist_ok=True)
-    jnp.save(f"{path}/inputs.npy", X)
-    jnp.save(f"{path}/targets.npy", y)
-
-    return X, y
-
-
-def uci_household_electric(*, use_cache_if_possible: bool = True):
-    from ucimlrepo import fetch_ucirepo
-
-    path = "./data/uci_processed/household_electric"
-    if os.path.exists(path) and use_cache_if_possible:
-        inputs = jnp.load(f"{path}/inputs.npy")
-        targets = jnp.load(f"{path}/targets.npy")
-        return inputs, targets
-
-    # fetch dataset
-    individual_household_electric_power_consumption = fetch_ucirepo(id=235)
-
-    # data (as pandas dataframes)
-    X = jnp.asarray(
-        individual_household_electric_power_consumption.data.features.values
-    )
-    y = jnp.asarray(individual_household_electric_power_consumption.data.targets.values)
-
-    # metadata
-    print(individual_household_electric_power_consumption.metadata)
-
-    # variable information
-    print(individual_household_electric_power_consumption.variables)
 
     os.makedirs(path, exist_ok=True)
     jnp.save(f"{path}/inputs.npy", X)
