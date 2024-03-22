@@ -12,6 +12,7 @@ import functools
 import json
 import os
 import pickle
+from typing import Callable
 
 import jax
 import jax.flatten_util
@@ -27,30 +28,35 @@ plt.rcParams.update(fontsizes.icml2022())
 plt.rcParams.update(axes.lines())
 
 
-def parameters_init(key, param_dict: dict, /):
+def parameters_init(key: jax.random.PRNGKey, param_dict: dict, /) -> dict:
+    """Initialise parameters randomly."""
     flat, unflatten = jax.flatten_util.ravel_pytree(param_dict)
     flat_like = jax.random.normal(key, shape=flat.shape)
     return unflatten(flat_like)
 
 
-def parameters_save(param_dict: dict, direct, name):
-    with open(f"{direct}/{name}.pkl", "wb") as f:
-        pickle.dump(param_dict, f)
+def parameters_save(dct: dict, directory: str, /, *, name: str) -> None:
+    """Save a parameter dictionary to a file."""
+    with open(f"{directory}/{name}.pkl", "wb") as f:
+        pickle.dump(dct, f)
 
 
 def print_dict(dct, *, indent):
+    """Pretty-print a dictionary."""
     dct = jax.tree_util.tree_map(float, dct)
     print(json.dumps(dct, sort_keys=True, indent=indent))
 
 
-def data_subsample(X, y, /, *, key, num):
+def data_subsample(X, y, /, *, key: jax.random.PRNGKey, num: int):
+    """Subsample a data set."""
     ints = jnp.arange(0, len(X))
     ints = jax.random.choice(key, ints, replace=False, shape=(num,))
     ints = jnp.sort(ints)
     return X[ints], y[ints]
 
 
-def data_train_test_split(X, y, /, *, key):
+def data_train_test_split_80_20(X, y, /, *, key):
+    """Split a data set into a training and a testing part."""
     ints = jnp.arange(0, len(X))
     ints_shuffled = jax.random.permutation(key, ints)
 
@@ -59,7 +65,8 @@ def data_train_test_split(X, y, /, *, key):
     return (X[train], y[train]), (X[test], y[test])
 
 
-def gaussian_process_model():
+def gaussian_process_model() -> tuple[Callable, dict]:
+    """Set up the Gaussian process model."""
     # Set up the kernel components
     kernel_matern_12, params_like_matern_12 = gp.kernel_matern_12()
     kernel_matern_32, params_like_matern_32 = gp.kernel_matern_32()
@@ -88,7 +95,8 @@ def gaussian_process_model():
     return param, p_like
 
 
-def neg_log_likelihood(p, /, *, kfun, X, y):
+def neg_log_likelihood(p: dict, /, kfun: Callable, X, y):
+    """Evaluate the negative log-likelihood of a set of observations."""
     parameters, noise_std = (p["kernel"], p["noise"])
 
     kfun_p = kfun(**parameters)
@@ -103,6 +111,7 @@ def neg_log_likelihood(p, /, *, kfun, X, y):
 
 
 if __name__ == "__main__":
+    # Parse the arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--seed", type=int, default=1)
     parser.add_argument(
@@ -110,8 +119,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("-k", "--num_epochs", type=int, default=10)
     args = parser.parse_args()
-    print(args, "\n")
 
+    # Assign them to variables
+    print(args, "\n")
     seed = args.seed
     num_points = args.num_points
     num_epochs = args.num_epochs
@@ -131,7 +141,7 @@ if __name__ == "__main__":
     y_full = (y_full - bias) / scale
 
     # Split the data into training and testing
-    train, test = data_train_test_split(X_full[..., None], y_full, key=key_data)
+    train, test = data_train_test_split_80_20(X_full[..., None], y_full, key=key_data)
     (X_train, y_train), (X_test, y_test) = train, test
 
     # Set up the model
@@ -142,7 +152,7 @@ if __name__ == "__main__":
     loss = functools.partial(neg_log_likelihood, kfun=kernel, X=X_train, y=y_train)
     test_nll = functools.partial(neg_log_likelihood, kfun=kernel, X=X_test, y=y_test)
 
-    # Optimize
+    # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
     optim = jaxopt.LBFGS(loss)
     params, state = params_init, optim.init_state(params_init)
     progressbar = tqdm.tqdm(range(num_epochs))
@@ -157,12 +167,12 @@ if __name__ == "__main__":
     params_opt = params
 
     # Create a directory for the results
-    directory = exp_util.matching_directory(__file__, "results/")
-    os.makedirs(directory, exist_ok=True)
+    directory_local = exp_util.matching_directory(__file__, "results/")
+    os.makedirs(directory_local, exist_ok=True)
 
     # Save the parameters
-    parameters_save(params_init, directory, "params_init")
-    parameters_save(params_opt, directory, "params_opt")
+    parameters_save(params_init, directory_local, name="params_init")
+    parameters_save(params_opt, directory_local, name="params_opt")
 
     # Print the results
     print("\nNLL on test set (initial):", test_nll(params_init))
