@@ -66,7 +66,7 @@ def plt_spy_coo(ax, A, /, markersize=3, cmap="jet", invert_axes=True):
 
 
 def matching_directory(file, where, /, replace="experiments/"):
-    if where not in ["data/", "figures/"]:
+    if where not in ["data/", "figures/", "results/"]:
         raise ValueError
     if replace not in ["experiments/"]:
         raise ValueError
