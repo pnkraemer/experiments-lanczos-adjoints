@@ -94,9 +94,13 @@ def solver_select(
             fun = lanczos.integrand_spd(jnp.log, krylov_depth, matvec, custom_vjp=True)
 
             x_like = jnp.ones((len(A),), dtype=float)
-            sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
+            sampler = hutchinson.sampler_rademacher(x_like, num=1)
             estimator = hutchinson.hutchinson(fun, sampler)
-            return estimator(k, A)
+            # return estimator(k, A)
+
+            keys = jax.random.split(k, num=slq_num_samples)
+            outputs = jax.lax.map(lambda kk: estimator(kk, A), keys)
+            return jnp.mean(outputs, axis=0)
 
         logdet = functools.partial(logdet_, k=key)
         return Solver(solve, logdet)
@@ -181,17 +185,19 @@ if __name__ == "__main__":
         slq_krylov_depth=args.slq_krylov_depth,
         slq_num_samples=args.slq_num_samples,
     )
-    loss = model_log_likelihood(X_train, y_train, kernel=kernel, solver=solver)
-    test_loss = model_log_likelihood(X_test, y_test, kernel=kernel, solver=solver)
+    likelihood = model_log_likelihood(X_train, y_train, kernel=kernel, solver=solver)
+    likelihood_test = model_log_likelihood(X_test, y_test, kernel=kernel, solver=solver)
 
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
     optim = optax.adam(learning_rate=0.1)
     params_opt, state = params_init, optim.init(params_init)
+    loss_value_and_grad = jax.jit(jax.value_and_grad(lambda p: -likelihood(**p)))
+    value, _grad = loss_value_and_grad(params_opt)
     progressbar = tqdm.tqdm(range(args.num_epochs))
-    progressbar.set_description(f"Loss: {-loss(**params_opt):.3F}")
+    progressbar.set_description(f"Loss: {value:.3F}")
     for _ in progressbar:
         try:
-            value, grads = jax.value_and_grad(lambda p: -loss(**p))(params_opt)
+            value, grads = loss_value_and_grad(params_opt)
             updates, state = optim.update(grads, state)
             params_opt = optax.apply_updates(params_opt, updates)
 
@@ -211,7 +217,7 @@ if __name__ == "__main__":
     parameters_save(params_opt, directory_local, name=f"{name_of_run}params_opt")
 
     # Print the results
-    print("\nNLL on test set (initial):", -test_loss(**params_init))
+    print("\nNLL on test set (initial):", -likelihood_test(**params_init))
     print(params_init)
-    print("\nNLL on test set (optimized):", -test_loss(**params_opt))
+    print("\nNLL on test set (optimized):", -likelihood_test(**params_opt))
     print(params_opt)
