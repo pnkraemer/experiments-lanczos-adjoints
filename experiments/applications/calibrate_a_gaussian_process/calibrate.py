@@ -18,14 +18,8 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jaxopt
-import matplotlib.pyplot as plt
 import tqdm
 from matfree_extensions import exp_util, gp
-from tueplots import axes, figsizes, fontsizes
-
-plt.rcParams.update(figsizes.icml2022_full(nrows=2, ncols=4))
-plt.rcParams.update(fontsizes.icml2022())
-plt.rcParams.update(axes.lines())
 
 
 def parameters_init(key: jax.random.PRNGKey, param_dict: dict, /) -> dict:
@@ -51,7 +45,7 @@ def data_train_test_split_80_20(X, y, /, *, key):
     return (X[train], y[train]), (X[test], y[test])
 
 
-def gaussian_process_model(*, shape_in, shape_out) -> tuple[Callable, dict]:
+def model_gaussian_process(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """Set up the Gaussian process model."""
     parametrise, params_like_kernel = gp.kernel_matern_12(
         shape_in=shape_in, shape_out=shape_out
@@ -61,7 +55,7 @@ def gaussian_process_model(*, shape_in, shape_out) -> tuple[Callable, dict]:
     return parametrise, p_like
 
 
-def negative_log_likelihood(kernel_func: Callable, X, y):
+def model_negative_log_likelihood(kernel_func: Callable, X, y) -> Callable:
     """Construct a negative-log-likelihood function."""
 
     def evaluate(*, p_kernel, p_noise_std):
@@ -115,12 +109,12 @@ if __name__ == "__main__":
     # Set up the model
     shape_in = jnp.shape(X_train[0])
     shape_out = jnp.shape(y_train[0])
-    kernel, params_like = gaussian_process_model(shape_in=shape_in, shape_out=shape_out)
+    kernel, params_like = model_gaussian_process(shape_in=shape_in, shape_out=shape_out)
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    loss = negative_log_likelihood(kernel_func=kernel, X=X_train, y=y_train)
-    test_nll = negative_log_likelihood(kernel_func=kernel, X=X_test, y=y_test)
+    loss = model_negative_log_likelihood(kernel_func=kernel, X=X_train, y=y_train)
+    test_nll = model_negative_log_likelihood(kernel_func=kernel, X=X_test, y=y_test)
 
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
     optim = jaxopt.LBFGS(lambda p: loss(**p))
