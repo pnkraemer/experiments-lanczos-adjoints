@@ -79,11 +79,11 @@ def uci_dataset(which: UCI_DATASET_ARGS, /, *, use_cache_if_possible: bool = Tru
         return inputs, targets
 
     # fetch dataset
-    concrete_compressive_strength = fetch_ucirepo(id=165)
+    dataset = fetch_ucirepo(id=165)
 
     # data (as pandas dataframes)
-    X = jnp.asarray(concrete_compressive_strength.data.features.values)
-    y = jnp.asarray(concrete_compressive_strength.data.targets.values)
+    X = jnp.asarray(dataset.data.features.values)
+    y = jnp.asarray(dataset.data.targets.values)
 
     os.makedirs(path, exist_ok=True)
     jnp.save(f"{path}/inputs.npy", X)

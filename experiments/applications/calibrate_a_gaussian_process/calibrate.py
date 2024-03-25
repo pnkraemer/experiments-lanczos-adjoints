@@ -18,7 +18,7 @@ from typing import Callable, Literal
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-import jaxopt
+import optax
 import tqdm
 from matfree import hutchinson
 from matfree_extensions import exp_util, gp, lanczos
@@ -61,8 +61,16 @@ def solver_select(
     slq_num_samples: int,
 ) -> Solver:
     """Select a linear solver."""
+    # Pre-process string:
+    #  I always forget whether to use "Lanczos + CG" or "Lanczos+CG",
+    #  so we ignore whitespaces.
+    #  I also always forget whether I capitalised abbreviations,
+    #  so we ignore capitalisation.
+    which_processed = which.replace(" ", "")  # remove whitespace
+    which_processed = which_processed.lower()  # lower-case
 
-    if which == "LU":
+    # Select which solver to build
+    if which_processed == "lu":
 
         def solve(A, b):
             return jnp.linalg.solve(A, b)
@@ -72,7 +80,7 @@ def solver_select(
 
         return Solver(solve, logdet)
 
-    if which == "CG+Lanczos (reuse)":
+    if which_processed == "cg+lanczos(reuse)":
 
         def solve(A, b):
             result, _info = jax.scipy.sparse.linalg.cg(lambda v: A @ v, b)
@@ -136,7 +144,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_points", type=int, default=-1)
     parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--dataset", type=str, default="concrete_compressive_strength")
-    parser.add_argument("--solver", type=str, default="LU")
+    parser.add_argument("--solver", type=str, default="CG+Lanczos (reuse)")
     parser.add_argument("--slq_krylov_depth", type=int, default=10)
     parser.add_argument("--slq_num_samples", type=int, default=100)
     args = parser.parse_args()
@@ -158,6 +166,7 @@ if __name__ == "__main__":
     # Split the data into training and testing
     train, test = data_train_test_split_80_20(X_full, y_full, key=key_data)
     (X_train, y_train), (X_test, y_test) = train, test
+    print(X_full.shape)
 
     # Set up the model
     shape_in = jnp.shape(X_train[0])
@@ -176,14 +185,17 @@ if __name__ == "__main__":
     test_loss = model_log_likelihood(X_test, y_test, kernel=kernel, solver=solver)
 
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
-    optim = jaxopt.LBFGS(lambda p: -loss(**p))
-    params_opt, state = params_init, optim.init_state(params_init)
+    optim = optax.adam(learning_rate=0.1)
+    params_opt, state = params_init, optim.init(params_init)
     progressbar = tqdm.tqdm(range(args.num_epochs))
-    progressbar.set_description(f"Loss: {loss(**params_opt):.3F}")
+    progressbar.set_description(f"Loss: {-loss(**params_opt):.3F}")
     for _ in progressbar:
         try:
-            params_opt, state = optim.update(params_opt, state)
-            progressbar.set_description(f"Loss: {loss(**params_opt):.3F}")
+            value, grads = jax.value_and_grad(lambda p: -loss(**p))(params_opt)
+            updates, state = optim.update(grads, state)
+            params_opt = optax.apply_updates(params_opt, updates)
+
+            progressbar.set_description(f"Loss: {value:.3F}")
         except KeyboardInterrupt:
             break
 
