@@ -5,7 +5,6 @@ import functools
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
-from matfree import lanczos
 
 
 def integrand_spd(matfun, order, matvec, /, custom_vjp: bool):
@@ -31,8 +30,8 @@ def integrand_spd(matfun, order, matvec, /, custom_vjp: bool):
             flat, unflatten = jax.flatten_util.ravel_pytree(av)
             return flat
 
-        algorithm = lanczos.alg_tridiag_full_reortho(matvec_flat, order)
-        basis, (diag, off_diag) = algorithm(v0_flat, *parameters)
+        algorithm = tridiag(matvec_flat, order, custom_vjp=False, reortho=True)
+        (basis, (diag, off_diag)), _remainder = algorithm(v0_flat, *parameters)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
         #  use it here. Until then: an eigen-decomposition of size (order + 1)

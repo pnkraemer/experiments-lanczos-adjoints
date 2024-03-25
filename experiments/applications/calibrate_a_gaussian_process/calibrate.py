@@ -62,7 +62,6 @@ def solver_select(
     # todo: add cg+lanczos(adjoint)
     # todo: add a preconditioner?
     # todo: batch the matrix-multiplication
-    # todo: get a proper plot
 
     # Pre-process string:
     #  I always forget whether to use "Lanczos + CG" or "Lanczos+CG",
