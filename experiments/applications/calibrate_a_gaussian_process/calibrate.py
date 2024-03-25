@@ -5,9 +5,6 @@ Currently, use either of the following datasets:
 * uci_combined_cycle_power_plant (medium)
 """
 
-# todo: make matrix-free
-# todo: pivoted cholesky preconditioner
-# todo: decide where to go from here
 import argparse
 import dataclasses
 import functools
@@ -54,13 +51,19 @@ class Solver:
 
 
 def solver_select(
-    which: Literal["LU"],
+    which: Literal["lu", "cg+lanczos(reuse)", "cg+lanczos(autodiff)"],
     /,
     key: jax.random.PRNGKey,
     slq_krylov_depth: int,
     slq_num_samples: int,
 ) -> Solver:
-    """Select a linear solver."""
+    """Select a linear solver and a log-determinant algorithm."""
+    # todo: add cg+cg
+    # todo: add cg+lanczos(adjoint)
+    # todo: add a preconditioner?
+    # todo: batch the matrix-multiplication
+    # todo: get a proper plot
+
     # Pre-process string:
     #  I always forget whether to use "Lanczos + CG" or "Lanczos+CG",
     #  so we ignore whitespaces.
@@ -90,14 +93,39 @@ def solver_select(
             def matvec(v, p):
                 return p @ v
 
+            # Set up SLQ
             krylov_depth = slq_krylov_depth
             fun = lanczos.integrand_spd(jnp.log, krylov_depth, matvec, custom_vjp=True)
-
             x_like = jnp.ones((len(A),), dtype=float)
             sampler = hutchinson.sampler_rademacher(x_like, num=1)
             estimator = hutchinson.hutchinson(fun, sampler)
-            # return estimator(k, A)
 
+            # Compute SLQ estimate sequentially (to save memory)
+            keys = jax.random.split(k, num=slq_num_samples)
+            outputs = jax.lax.map(lambda kk: estimator(kk, A), keys)
+            return jnp.mean(outputs, axis=0)
+
+        logdet = functools.partial(logdet_, k=key)
+        return Solver(solve, logdet)
+
+    if which_processed == "cg+lanczos(autodiff)":
+
+        def solve(A, b):
+            result, _info = jax.scipy.sparse.linalg.cg(lambda v: A @ v, b)
+            return result
+
+        def logdet_(A, k):
+            def matvec(v, p):
+                return p @ v
+
+            # Set up SLQ
+            krylov_depth = slq_krylov_depth
+            fun = lanczos.integrand_spd(jnp.log, krylov_depth, matvec, custom_vjp=False)
+            x_like = jnp.ones((len(A),), dtype=float)
+            sampler = hutchinson.sampler_rademacher(x_like, num=1)
+            estimator = hutchinson.hutchinson(fun, sampler)
+
+            # Compute SLQ estimate sequentially (to save memory)
             keys = jax.random.split(k, num=slq_num_samples)
             outputs = jax.lax.map(lambda kk: estimator(kk, A), keys)
             return jnp.mean(outputs, axis=0)
@@ -170,7 +198,6 @@ if __name__ == "__main__":
     # Split the data into training and testing
     train, test = data_train_test_split_80_20(X_full, y_full, key=key_data)
     (X_train, y_train), (X_test, y_test) = train, test
-    print(X_full.shape)
 
     # Set up the model
     shape_in = jnp.shape(X_train[0])
