@@ -6,6 +6,14 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
+# todo: sooo many possibilities for gradients.
+#  * Make this integrand function log-determinant specific
+#  * Make "custom_vjp" a string, not a bool
+#    1. plain autodiff   (mode: "none")
+#    2. adjoint on lanczos, rest is autodiff  (mode: "lanczos-adjoint")
+#    3. custom vjp on quadform via reusing lanczos coefficients  (mode: "slq-reuse")
+#    4. custom vjp on quadform via a cg call (works for logdets)  (mode: "slq-cg")
+
 
 def integrand_spd(matfun, order, matvec, /, custom_vjp: bool):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
