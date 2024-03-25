@@ -16,13 +16,14 @@ import jax.numpy as jnp
 #    4. custom vjp on quadform via a cg call (works for logdets)  (mode: "slq-cg")
 #  Test this, and then come back to the GP.
 # todo: add reorthogonalisation as an argument
-def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: str):
+def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
     the Lanczos decomposition from the forward pass), but does not admit
     higher derivatives.
     """
+    assert custom_vjp in ["none", "reuse"]
 
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
@@ -82,7 +83,7 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: str):
         # todo: compute gradient wrt v?
         return 0.0, *vjp(vjp_incoming)
 
-    if custom_vjp:
+    if custom_vjp == "reuse":
         quadform = jax.custom_vjp(quadform)
         quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
 
@@ -90,6 +91,8 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: str):
 
 
 def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho: str):
+    assert reortho in ["full", "none"]
+
     def estimate(vec, *params):
         *values, _ = forward(matvec, krylov_depth, vec, *params, reortho=reortho)
         return values
@@ -126,6 +129,8 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho: str):
         return grads
 
     if custom_vjp:
+        if reortho != "none":
+            warnings.warn()
         estimate = jax.custom_vjp(estimate)
         estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
 
@@ -179,7 +184,6 @@ def _fwd_init(matvec, vec, *params):
 
 
 def _fwd_step(matvec, params, i, val, *, reortho: str):
-    assert reortho in ["full", "none"]
     (v1, offdiag, v0), (vectors, diags, offdiags) = val
     ((v1, offdiag), diag), v0 = _fwd_step_apply(matvec, v1, offdiag, v0, *params), v1
 
