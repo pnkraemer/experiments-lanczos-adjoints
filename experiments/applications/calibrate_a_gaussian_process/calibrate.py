@@ -8,12 +8,11 @@ Currently, use either of the following datasets:
 # todo: make matrix-free
 # todo: pivoted cholesky preconditioner
 # todo: decide where to go from here
-
 import argparse
 import dataclasses
 import os
 import pickle
-from typing import Callable
+from typing import Callable, Literal
 
 import jax
 import jax.flatten_util
@@ -52,8 +51,8 @@ class Solver:
     logdet: Callable[[jax.Array], jax.Array]
 
 
-def solver_select(which: str, /) -> Solver:
-    if which == "dense":
+def solver_select(which: Literal["LU"], /) -> Solver:
+    if which == "LU":
 
         def solve(A, b):
             return jnp.linalg.solve(A, b)
