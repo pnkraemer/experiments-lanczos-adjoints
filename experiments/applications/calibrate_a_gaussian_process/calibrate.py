@@ -43,7 +43,7 @@ def data_train_test_split_80_20(X, y, /, *, key):
     ints_shuffled = jax.random.permutation(key, ints)
 
     idx = len(X) // 5  # 20 percent test data
-    train, test = ints_shuffled[:idx], ints_shuffled[idx:]
+    test, train = ints_shuffled[:idx], ints_shuffled[idx:]
     return (X[train], y[train]), (X[test], y[test])
 
 
@@ -79,9 +79,11 @@ def solver_select(
             return result
 
         def logdet_(A, k):
-            # todo: make krylov_depth and num_samples into arguments
+            def matvec(v, p):
+                return p @ v
+
             krylov_depth = slq_krylov_depth
-            fun = lanczos.integrand_spd(jnp.log, krylov_depth, lambda v, p: p @ v)
+            fun = lanczos.integrand_spd(jnp.log, krylov_depth, matvec, custom_vjp=True)
 
             x_like = jnp.ones((len(A),), dtype=float)
             sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
@@ -134,7 +136,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_points", type=int, default=-1)
     parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--dataset", type=str, default="concrete_compressive_strength")
-    parser.add_argument("--solver", type=str, default="dense")
+    parser.add_argument("--solver", type=str, default="LU")
     parser.add_argument("--slq_krylov_depth", type=int, default=10)
     parser.add_argument("--slq_num_samples", type=int, default=100)
     args = parser.parse_args()

@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from matfree import lanczos
 
 
-def integrand_spd(matfun, order, matvec, /):
+def integrand_spd(matfun, order, matvec, /, custom_vjp: bool):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
@@ -16,7 +16,6 @@ def integrand_spd(matfun, order, matvec, /):
     higher derivatives.
     """
 
-    @jax.custom_vjp
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
 
@@ -75,7 +74,9 @@ def integrand_spd(matfun, order, matvec, /):
         # todo: compute gradient wrt v?
         return 0.0, *vjp(vjp_incoming)
 
-    quadform.defvjp(quadform_fwd, quadform_bwd)
+    if custom_vjp:
+        quadform = jax.custom_vjp(quadform)
+        quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
 
     return quadform
 
