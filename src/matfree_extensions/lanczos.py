@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from matfree import lanczos
 
 
-def integrand_spd_custom_vjp(matfun, order, matvec, /):
+def integrand_spd(matfun, order, matvec, /):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing

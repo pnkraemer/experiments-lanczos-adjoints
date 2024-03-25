@@ -10,6 +10,7 @@ Currently, use either of the following datasets:
 # todo: decide where to go from here
 import argparse
 import dataclasses
+import functools
 import os
 import pickle
 from typing import Callable, Literal
@@ -19,7 +20,8 @@ import jax.flatten_util
 import jax.numpy as jnp
 import jaxopt
 import tqdm
-from matfree_extensions import exp_util, gp
+from matfree import hutchinson
+from matfree_extensions import exp_util, gp, lanczos
 
 
 def parameters_init(key: jax.random.PRNGKey, param_dict: dict, /) -> dict:
@@ -51,7 +53,15 @@ class Solver:
     logdet: Callable[[jax.Array], jax.Array]
 
 
-def solver_select(which: Literal["LU"], /) -> Solver:
+def solver_select(
+    which: Literal["LU"],
+    /,
+    key: jax.random.PRNGKey,
+    slq_krylov_depth: int,
+    slq_num_samples: int,
+) -> Solver:
+    """Select a linear solver."""
+
     if which == "LU":
 
         def solve(A, b):
@@ -60,6 +70,25 @@ def solver_select(which: Literal["LU"], /) -> Solver:
         def logdet(A):
             return jnp.linalg.slogdet(A)[1]
 
+        return Solver(solve, logdet)
+
+    if which == "CG+Lanczos (reuse)":
+
+        def solve(A, b):
+            result, _info = jax.scipy.sparse.linalg.cg(lambda v: A @ v, b)
+            return result
+
+        def logdet_(A, k):
+            # todo: make krylov_depth and num_samples into arguments
+            krylov_depth = slq_krylov_depth
+            fun = lanczos.integrand_spd(jnp.log, krylov_depth, lambda v, p: p @ v)
+
+            x_like = jnp.ones((len(A),), dtype=float)
+            sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
+            estimator = hutchinson.hutchinson(fun, sampler)
+            return estimator(k, A)
+
+        logdet = functools.partial(logdet_, k=key)
         return Solver(solve, logdet)
 
     raise ValueError
@@ -106,12 +135,14 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--dataset", type=str, default="concrete_compressive_strength")
     parser.add_argument("--solver", type=str, default="dense")
+    parser.add_argument("--slq_krylov_depth", type=int, default=10)
+    parser.add_argument("--slq_num_samples", type=int, default=100)
     args = parser.parse_args()
     print(args, "\n")
 
     # Initialise the random number generator
     key_ = jax.random.PRNGKey(args.seed)
-    key_data, key_init = jax.random.split(key_, num=2)
+    key_data, key_init, key_solve = jax.random.split(key_, num=3)
 
     # Load the data
     (X_full, y_full) = exp_util.uci_dataset(args.dataset)
@@ -133,7 +164,12 @@ if __name__ == "__main__":
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    solver = solver_select(args.solver)
+    solver = solver_select(
+        args.solver,
+        key=key_solve,
+        slq_krylov_depth=args.slq_krylov_depth,
+        slq_num_samples=args.slq_num_samples,
+    )
     loss = model_log_likelihood(X_train, y_train, kernel=kernel, solver=solver)
     test_loss = model_log_likelihood(X_test, y_test, kernel=kernel, solver=solver)
 
