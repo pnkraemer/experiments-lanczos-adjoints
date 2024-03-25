@@ -52,14 +52,18 @@ class Solver:
     logdet: Callable[[jax.Array], jax.Array]
 
 
-def solver_dense() -> Solver:
-    def solve(A, b):
-        return jnp.linalg.solve(A, b)
+def solver_select(which: str, /) -> Solver:
+    if which == "dense":
 
-    def logdet(A):
-        return jnp.linalg.slogdet(A)[1]
+        def solve(A, b):
+            return jnp.linalg.solve(A, b)
 
-    return Solver(solve, logdet)
+        def logdet(A):
+            return jnp.linalg.slogdet(A)[1]
+
+        return Solver(solve, logdet)
+
+    raise ValueError
 
 
 def model_log_likelihood(X, y, kernel: Callable, solver: Solver) -> Callable:
@@ -97,15 +101,12 @@ def model_gaussian_process(*, shape_in, shape_out) -> tuple[Callable, dict]:
 if __name__ == "__main__":
     # Parse the arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--name_of_run", type=str, default="")
-    parser.add_argument("-s", "--seed", type=int, default=1)
-    parser.add_argument(
-        "-n", "--num_points", type=int, default=-1, help="Use -1 for the full dataset"
-    )
-    parser.add_argument("-k", "--num_epochs", type=int, default=10)
-    parser.add_argument(
-        "-d", "--dataset", type=str, default="concrete_compressive_strength"
-    )
+    parser.add_argument("--name_of_run", type=str, default="")
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--num_points", type=int, default=-1)
+    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--dataset", type=str, default="concrete_compressive_strength")
+    parser.add_argument("--solver", type=str, default="dense")
     args = parser.parse_args()
     print(args, "\n")
 
@@ -133,7 +134,7 @@ if __name__ == "__main__":
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    solver = solver_dense()
+    solver = solver_select(args.solver)
     loss = model_log_likelihood(X_train, y_train, kernel=kernel, solver=solver)
     test_loss = model_log_likelihood(X_test, y_test, kernel=kernel, solver=solver)
 
