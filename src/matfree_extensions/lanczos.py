@@ -6,6 +6,7 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
+
 # todo: sooo many possibilities for gradients.
 #  * Make this integrand function log-determinant specific
 #  * Make "custom_vjp" a string, not a bool
@@ -13,9 +14,9 @@ import jax.numpy as jnp
 #    2. adjoint on lanczos, rest is autodiff  (mode: "lanczos-adjoint")
 #    3. custom vjp on quadform via reusing lanczos coefficients  (mode: "slq-reuse")
 #    4. custom vjp on quadform via a cg call (works for logdets)  (mode: "slq-cg")
-
-
-def integrand_spd(matfun, order, matvec, /, custom_vjp: bool):
+#  Test this, and then come back to the GP.
+# todo: add reorthogonalisation as an argument
+def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: bool = True):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
@@ -38,7 +39,7 @@ def integrand_spd(matfun, order, matvec, /, custom_vjp: bool):
             flat, unflatten = jax.flatten_util.ravel_pytree(av)
             return flat
 
-        algorithm = tridiag(matvec_flat, order, custom_vjp=False, reortho=True)
+        algorithm = tridiag(matvec_flat, order, custom_vjp=False, reortho=reortho)
         (basis, (diag, off_diag)), _remainder = algorithm(v0_flat, *parameters)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
