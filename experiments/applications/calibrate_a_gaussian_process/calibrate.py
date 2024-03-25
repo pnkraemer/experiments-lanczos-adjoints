@@ -84,25 +84,31 @@ if __name__ == "__main__":
     # Parse the arguments
     # todo: add name_of_run argument to affect the saving directory name
     parser = argparse.ArgumentParser()
+    parser.add_argument("-m", "--name_of_run", type=str, default="")
     parser.add_argument("-s", "--seed", type=int, default=1)
     parser.add_argument(
-        "-n", "--num_points", type=int, default=100, help="Use -1 for the full dataset"
+        "-n", "--num_points", type=int, default=-1, help="Use -1 for the full dataset"
     )
     parser.add_argument("-k", "--num_epochs", type=int, default=10)
+    parser.add_argument(
+        "-d", "--dataset", type=str, default="concrete_compressive_strength"
+    )
     args = parser.parse_args()
 
     # Assign them to variables
     print(args, "\n")
+    name_of_run = args.name_of_run
     seed = args.seed
     num_points = args.num_points
     num_epochs = args.num_epochs
+    dataset_name = args.dataset
 
     # Initialise the random number generator
     key_ = jax.random.PRNGKey(seed)
     key_data, key_init = jax.random.split(key_, num=2)
 
     # Load the data
-    (X_full, y_full) = exp_util.uci_combined_cycle_power_plant()
+    (X_full, y_full) = exp_util.uci_dataset(dataset_name)
     X_full, y_full = X_full[:num_points], y_full[:num_points]
 
     # Pre-process the data
@@ -141,8 +147,10 @@ if __name__ == "__main__":
     os.makedirs(directory_local, exist_ok=True)
 
     # Save the parameters
-    parameters_save(params_init, directory_local, name="params_init")
-    parameters_save(params_opt, directory_local, name="params_opt")
+    if name_of_run != "":
+        name_of_run += "_"
+    parameters_save(params_init, directory_local, name=f"{name_of_run}params_init")
+    parameters_save(params_opt, directory_local, name=f"{name_of_run}params_opt")
 
     # Print the results
     print("\nNLL on test set (initial):", test_nll(**params_init))

@@ -1,6 +1,7 @@
 """Test utilities."""
 
 import os
+from typing import Literal, get_args
 
 import jax.experimental.sparse
 import jax.numpy as jnp
@@ -38,6 +39,56 @@ def suite_sparse_load(which, /, path="./data/matrices/"):
     data = jnp.asarray(matrix.data)
     indices = jnp.stack([row, col]).T
     return jax.experimental.sparse.BCOO([data, indices], shape=matrix.shape)
+
+
+# Rationale for choosing the data sets below (from UCI):
+#
+# * Multivariate data
+# * Regression
+# * Less than 10 features
+# * More than 1000 instances
+# * Numerical features
+# * Available for python import
+#
+# This gives three sets:
+#   concrete_compressive_strength,
+#   combined cycle power plant,
+#   and household electric
+# todo: household electric dataset
+UCI_DATASET_ARGS = Literal[
+    "concrete_compressive_strength", "combined_cycle_power_plant"
+]
+UCI_DATASETS = get_args(UCI_DATASET_ARGS)
+
+
+def uci_dataset(which: UCI_DATASET_ARGS, /, *, use_cache_if_possible: bool = True):
+    """Load one of the UCI datasets."""
+
+    from ucimlrepo import fetch_ucirepo
+
+    if which not in UCI_DATASETS:
+        msg = "The dataset is unknown."
+        msg += f"\n\tExpected: One of {UCI_DATASETS}."
+        msg += f"\n\tReceived: '{which}'."
+        raise ValueError(msg)
+
+    path = f"./data/uci_processed/{which}"
+    if os.path.exists(path) and use_cache_if_possible:
+        inputs = jnp.load(f"{path}/inputs.npy")
+        targets = jnp.load(f"{path}/targets.npy")
+        return inputs, targets
+
+    # fetch dataset
+    concrete_compressive_strength = fetch_ucirepo(id=165)
+
+    # data (as pandas dataframes)
+    X = jnp.asarray(concrete_compressive_strength.data.features.values)
+    y = jnp.asarray(concrete_compressive_strength.data.targets.values)
+
+    os.makedirs(path, exist_ok=True)
+    jnp.save(f"{path}/inputs.npy", X)
+    jnp.save(f"{path}/targets.npy", y)
+    return X, y
 
 
 def plt_spy_coo(ax, A, /, markersize=3, cmap="jet", invert_axes=True):
@@ -99,62 +150,3 @@ def goldstein_price(X, Y, /):
         + (2 * X - 3 * Y) ** 2
         * (18 - 32 * X + 12 * X**2 + 48 * Y - 36 * X * Y + 27 * Y**2)
     )
-
-
-# Rationale for choosing the data sets below (from UCI):
-#
-# * Multivariate data
-# * Regression
-# * Less than 10 features
-# * More than 1000 instances
-# * Numerical features
-# * Available for python import
-#
-# This gives three sets: concrete_compressive_strength,
-#  combined cycle power plant, and household electric
-# todo: household electric dataset
-
-
-def uci_concrete_compressive_strength(*, use_cache_if_possible: bool = True):
-    from ucimlrepo import fetch_ucirepo
-
-    path = "./data/uci_processed/concrete_compressive_strength"
-    if os.path.exists(path) and use_cache_if_possible:
-        inputs = jnp.load(f"{path}/inputs.npy")
-        targets = jnp.load(f"{path}/targets.npy")
-        return inputs, targets
-
-    # fetch dataset
-    concrete_compressive_strength = fetch_ucirepo(id=165)
-
-    # data (as pandas dataframes)
-    X = jnp.asarray(concrete_compressive_strength.data.features.values)
-    y = jnp.asarray(concrete_compressive_strength.data.targets.values)
-
-    os.makedirs(path, exist_ok=True)
-    jnp.save(f"{path}/inputs.npy", X)
-    jnp.save(f"{path}/targets.npy", y)
-    return X, y
-
-
-def uci_combined_cycle_power_plant(*, use_cache_if_possible: bool = True):
-    from ucimlrepo import fetch_ucirepo
-
-    path = "./data/uci_processed/combined_cycle_power_plant"
-    if os.path.exists(path) and use_cache_if_possible:
-        inputs = jnp.load(f"{path}/inputs.npy")
-        targets = jnp.load(f"{path}/targets.npy")
-        return inputs, targets
-
-    # fetch dataset
-    combined_cycle_power_plant = fetch_ucirepo(id=294)
-
-    # data (as pandas dataframes)
-    X = jnp.asarray(combined_cycle_power_plant.data.features.values)
-    y = jnp.asarray(combined_cycle_power_plant.data.targets.values)
-
-    os.makedirs(path, exist_ok=True)
-    jnp.save(f"{path}/inputs.npy", X)
-    jnp.save(f"{path}/targets.npy", y)
-
-    return X, y
