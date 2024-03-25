@@ -82,7 +82,6 @@ def negative_log_likelihood(kernel_func: Callable, X, y):
 
 if __name__ == "__main__":
     # Parse the arguments
-    # todo: add name_of_run argument to affect the saving directory name
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--name_of_run", type=str, default="")
     parser.add_argument("-s", "--seed", type=int, default=1)
@@ -94,22 +93,15 @@ if __name__ == "__main__":
         "-d", "--dataset", type=str, default="concrete_compressive_strength"
     )
     args = parser.parse_args()
-
-    # Assign them to variables
     print(args, "\n")
-    name_of_run = args.name_of_run
-    seed = args.seed
-    num_points = args.num_points
-    num_epochs = args.num_epochs
-    dataset_name = args.dataset
 
     # Initialise the random number generator
-    key_ = jax.random.PRNGKey(seed)
+    key_ = jax.random.PRNGKey(args.seed)
     key_data, key_init = jax.random.split(key_, num=2)
 
     # Load the data
-    (X_full, y_full) = exp_util.uci_dataset(dataset_name)
-    X_full, y_full = X_full[:num_points], y_full[:num_points]
+    (X_full, y_full) = exp_util.uci_dataset(args.dataset)
+    X_full, y_full = X_full[: args.num_points], y_full[: args.num_points]
 
     # Pre-process the data
     bias = jnp.mean(y_full)
@@ -133,7 +125,7 @@ if __name__ == "__main__":
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
     optim = jaxopt.LBFGS(lambda p: loss(**p))
     params_opt, state = params_init, optim.init_state(params_init)
-    progressbar = tqdm.tqdm(range(num_epochs))
+    progressbar = tqdm.tqdm(range(args.num_epochs))
     progressbar.set_description(f"Loss: {loss(**params_opt):.3F}")
     for _ in progressbar:
         try:
@@ -147,6 +139,7 @@ if __name__ == "__main__":
     os.makedirs(directory_local, exist_ok=True)
 
     # Save the parameters
+    name_of_run = args.name_of_run
     if name_of_run != "":
         name_of_run += "_"
     parameters_save(params_init, directory_local, name=f"{name_of_run}params_init")
