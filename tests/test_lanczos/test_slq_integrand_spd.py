@@ -7,9 +7,9 @@ from matfree import hutchinson, lanczos, test_util
 from matfree_extensions import lanczos as lanczos_extensions
 
 
-@pytest_cases.parametrize("reortho", [True, False])
+@pytest_cases.parametrize("reortho", ["full", "none"])
 @pytest_cases.parametrize("custom_vjp", [True, False])
-def test_that_the_custom_vjp_matches_autodiff(reortho: bool, custom_vjp: str, n=10):
+def test_that_the_custom_vjp_matches_autodiff(reortho: str, custom_vjp: str, n=10):
     eigvals = jnp.arange(0.0, 1.0 + n, step=1.0) + 1.0
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
 

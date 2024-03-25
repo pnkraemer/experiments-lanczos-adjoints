@@ -16,7 +16,7 @@ import jax.numpy as jnp
 #    4. custom vjp on quadform via a cg call (works for logdets)  (mode: "slq-cg")
 #  Test this, and then come back to the GP.
 # todo: add reorthogonalisation as an argument
-def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: bool = True):
+def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: str):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
@@ -89,7 +89,7 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: bool, reortho: bool =
     return quadform
 
 
-def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho=True):
+def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho: str):
     def estimate(vec, *params):
         *values, _ = forward(matvec, krylov_depth, vec, *params, reortho=reortho)
         return values
@@ -178,12 +178,13 @@ def _fwd_init(matvec, vec, *params):
     return (x, b), a
 
 
-def _fwd_step(matvec, params, i, val, *, reortho: bool):
+def _fwd_step(matvec, params, i, val, *, reortho: str):
+    assert reortho in ["full", "none"]
     (v1, offdiag, v0), (vectors, diags, offdiags) = val
     ((v1, offdiag), diag), v0 = _fwd_step_apply(matvec, v1, offdiag, v0, *params), v1
 
     # Reorthogonalisation
-    if reortho:
+    if reortho == "full":
         v1 = v1 - vectors.T @ (vectors @ v1)
         v1 /= jnp.linalg.norm(v1)
 
