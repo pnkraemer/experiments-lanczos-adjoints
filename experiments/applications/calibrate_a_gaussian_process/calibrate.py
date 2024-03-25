@@ -10,6 +10,7 @@ Currently, use either of the following datasets:
 # todo: decide where to go from here
 
 import argparse
+import dataclasses
 import os
 import pickle
 from typing import Callable
@@ -45,33 +46,52 @@ def data_train_test_split_80_20(X, y, /, *, key):
     return (X[train], y[train]), (X[test], y[test])
 
 
-def model_gaussian_process(*, shape_in, shape_out) -> tuple[Callable, dict]:
-    """Set up the Gaussian process model."""
-    parametrise, params_like_kernel = gp.kernel_matern_12(
-        shape_in=shape_in, shape_out=shape_out
-    )
-    params_like_likelihood = jnp.empty(shape_out)
-    p_like = {"p_noise_std": params_like_likelihood, "p_kernel": params_like_kernel}
-    return parametrise, p_like
+@dataclasses.dataclass
+class Solver:
+    solve: Callable[[jax.Array, jax.Array], jax.Array]
+    logdet: Callable[[jax.Array], jax.Array]
 
 
-def model_negative_log_likelihood(kernel_func: Callable, X, y) -> Callable:
+def solver_dense() -> Solver:
+    def solve(A, b):
+        return jnp.linalg.solve(A, b)
+
+    def logdet(A):
+        return jnp.linalg.slogdet(A)[1]
+
+    return Solver(solve, logdet)
+
+
+def model_log_likelihood(X, y, kernel: Callable, solver: Solver) -> Callable:
     """Construct a negative-log-likelihood function."""
 
     def evaluate(*, p_kernel, p_noise_std):
         """Evaluate the negative log-likelihood of a set of observations."""
-        kfun_p = kernel_func(**p_kernel)
+        # Assemble the kernel matrix
+        kfun_p = kernel(**p_kernel)
         K = kfun_p(X, X.T)
 
+        # Solve the linear system
         eye = jnp.eye(len(X))[None, ...]
         K_noisy = K + p_noise_std**2 * eye
-        coeffs = jax.vmap(jnp.linalg.solve)(K_noisy, y.T)
+        coeffs = jax.vmap(solver.solve)(K_noisy, y.T)
 
+        # Compute the log-determinant
         mahalanobis = jax.vmap(jnp.dot)(y.T, coeffs)
-        _sign, entropy = jax.vmap(jnp.linalg.slogdet)(K_noisy)
-        return jnp.sum(mahalanobis + entropy, axis=0)
+        entropy = jax.vmap(solver.logdet)(K_noisy)
+
+        # Combine the terms
+        return -jnp.sum(mahalanobis + entropy, axis=0)
 
     return evaluate
+
+
+def model_gaussian_process(*, shape_in, shape_out) -> tuple[Callable, dict]:
+    """Set up the Gaussian process model."""
+    kfun, p_like_kernel = gp.kernel_matern_12(shape_in=shape_in, shape_out=shape_out)
+    p_like_likelihood = jnp.empty(shape_out)
+    p_like = {"p_noise_std": p_like_likelihood, "p_kernel": p_like_kernel}
+    return kfun, p_like
 
 
 if __name__ == "__main__":
@@ -113,11 +133,12 @@ if __name__ == "__main__":
     params_init = parameters_init(key_init, params_like)
 
     # Set up the loss function
-    loss = model_negative_log_likelihood(kernel_func=kernel, X=X_train, y=y_train)
-    test_nll = model_negative_log_likelihood(kernel_func=kernel, X=X_test, y=y_test)
+    solver = solver_dense()
+    loss = model_log_likelihood(X_train, y_train, kernel=kernel, solver=solver)
+    test_loss = model_log_likelihood(X_test, y_test, kernel=kernel, solver=solver)
 
     # Optimize (loop until num_epochs is reached or KeyboardInterrupt happens)
-    optim = jaxopt.LBFGS(lambda p: loss(**p))
+    optim = jaxopt.LBFGS(lambda p: -loss(**p))
     params_opt, state = params_init, optim.init_state(params_init)
     progressbar = tqdm.tqdm(range(args.num_epochs))
     progressbar.set_description(f"Loss: {loss(**params_opt):.3F}")
@@ -140,7 +161,7 @@ if __name__ == "__main__":
     parameters_save(params_opt, directory_local, name=f"{name_of_run}params_opt")
 
     # Print the results
-    print("\nNLL on test set (initial):", test_nll(**params_init))
+    print("\nNLL on test set (initial):", -test_loss(**params_init))
     print(params_init)
-    print("\nNLL on test set (optimized):", test_nll(**params_opt))
+    print("\nNLL on test set (optimized):", -test_loss(**params_opt))
     print(params_opt)
