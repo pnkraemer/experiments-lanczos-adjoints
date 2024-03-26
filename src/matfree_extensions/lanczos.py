@@ -6,6 +6,8 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
+from matfree_extensions import arnoldi
+
 # Here are a bunch of changes that need to happen
 # in order to make the GP experiments a little nicer.
 # todo: find a cleaner solution for the custom_vjp / reortho flags.
@@ -94,6 +96,24 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "
         quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
 
     return quadform
+
+
+def tridiag_reortho_full(matvec, krylov_depth, /, *, custom_vjp):
+    # Implement via Arnoldi to use the reorthogonalised adjoints.
+    # Todo: implement a dedicated function.
+    alg = arnoldi.arnoldi(matvec, krylov_depth, custom_vjp=custom_vjp, reortho="full")
+
+    def estimate(vec, *params):
+        Q, H, v, _norm = alg(vec, *params)
+
+        T = 0.5 * (H + H.T)
+        diags = jnp.diag(T, k=0)
+        offdiags = jnp.diag(T, k=1)
+        decomposition = (Q.T, (diags, offdiags))
+        remainder = (v / jnp.linalg.norm(v), jnp.linalg.norm(v))
+        return decomposition, remainder
+
+    return estimate
 
 
 def tridiag(matvec, krylov_depth, /, *, custom_vjp):
