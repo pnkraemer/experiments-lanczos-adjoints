@@ -94,7 +94,9 @@ def solver_select(
 
             # Set up SLQ
             krylov_depth = slq_krylov_depth
-            fun = lanczos.integrand_spd(jnp.log, krylov_depth, matvec, custom_vjp=True)
+            fun = lanczos.integrand_spd(
+                jnp.log, krylov_depth, matvec, custom_vjp="slq-reuse"
+            )
             x_like = jnp.ones((len(A),), dtype=float)
             sampler = hutchinson.sampler_rademacher(x_like, num=1)
             estimator = hutchinson.hutchinson(fun, sampler)
@@ -119,7 +121,9 @@ def solver_select(
 
             # Set up SLQ
             krylov_depth = slq_krylov_depth
-            fun = lanczos.integrand_spd(jnp.log, krylov_depth, matvec, custom_vjp=False)
+            fun = lanczos.integrand_spd(
+                jnp.log, krylov_depth, matvec, custom_vjp="none"
+            )
             x_like = jnp.ones((len(A),), dtype=float)
             sampler = hutchinson.sampler_rademacher(x_like, num=1)
             estimator = hutchinson.hutchinson(fun, sampler)

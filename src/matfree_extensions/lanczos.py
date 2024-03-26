@@ -6,24 +6,29 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
+# Here are a bunch of changes that need to happen in order to make the GP experiments a little nicer.
+# todo: find a cleaner solution for the custom_vjp / reortho flags.
+#  because the current state involves waaaay too many flags.
 
 # todo: sooo many possibilities for gradients.
 #  * Make this integrand function log-determinant specific
 #  * Make "custom_vjp" a string, not a bool
 #    1. plain autodiff   (mode: "none")
-#    2. adjoint on lanczos, rest is autodiff  (mode: "lanczos-adjoint")
+#    2. adjoint on lanczos, rest is autodiff  (mode: "decomp-adjoint")
 #    3. custom vjp on quadform via reusing lanczos coefficients  (mode: "slq-reuse")
-#    4. custom vjp on quadform via a cg call (works for logdets)  (mode: "slq-cg")
+#    4. custom vjp on quadform via a cg call (works only for logdets)  (mode: "slq-cg")
 #  Test this, and then come back to the GP.
-# todo: add reorthogonalisation as an argument
-def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str):
+
+
+def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "full"):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
     the Lanczos decomposition from the forward pass), but does not admit
     higher derivatives.
     """
-    assert custom_vjp in ["none", "reuse"]
+    assert custom_vjp in ["none", "slq-reuse"]
+    assert reortho in ["full", "none"]
 
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
@@ -83,7 +88,7 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str):
         # todo: compute gradient wrt v?
         return 0.0, *vjp(vjp_incoming)
 
-    if custom_vjp == "reuse":
+    if custom_vjp == "slq-reuse":
         quadform = jax.custom_vjp(quadform)
         quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
 
