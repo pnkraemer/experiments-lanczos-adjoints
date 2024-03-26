@@ -6,7 +6,8 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
-# Here are a bunch of changes that need to happen in order to make the GP experiments a little nicer.
+# Here are a bunch of changes that need to happen
+# in order to make the GP experiments a little nicer.
 # todo: find a cleaner solution for the custom_vjp / reortho flags.
 #  because the current state involves waaaay too many flags.
 
@@ -45,7 +46,7 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "
             flat, unflatten = jax.flatten_util.ravel_pytree(av)
             return flat
 
-        algorithm = tridiag(matvec_flat, order, custom_vjp=False, reortho=reortho)
+        algorithm = tridiag(matvec_flat, order, custom_vjp=False)
         (basis, (diag, off_diag)), _remainder = algorithm(v0_flat, *parameters)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
@@ -95,11 +96,9 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "
     return quadform
 
 
-def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho: str):
-    assert reortho in ["full", "none"]
-
+def tridiag(matvec, krylov_depth, /, *, custom_vjp):
     def estimate(vec, *params):
-        *values, _ = forward(matvec, krylov_depth, vec, *params, reortho=reortho)
+        *values, _ = forward(matvec, krylov_depth, vec, *params)
         return values
 
     def estimate_fwd(vec, *params):
@@ -134,15 +133,13 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp, reortho: str):
         return grads
 
     if custom_vjp:
-        if reortho != "none":
-            warnings.warn()
         estimate = jax.custom_vjp(estimate)
         estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
 
     return estimate
 
 
-def forward(matvec, krylov_depth, vec, *params, reortho):
+def forward(matvec, krylov_depth, vec, *params):
     # Pre-allocate
     vectors = jnp.zeros((krylov_depth + 1, len(vec)))
     offdiags = jnp.zeros((krylov_depth,))
@@ -163,7 +160,7 @@ def forward(matvec, krylov_depth, vec, *params, reortho):
 
     # Run Lanczos-loop
     init = (v1, offdiag, v0), (vectors, diags, offdiags)
-    step_fun = functools.partial(_fwd_step, matvec, params, reortho=reortho)
+    step_fun = functools.partial(_fwd_step, matvec, params)
     _, (vectors, diags, offdiags) = jax.lax.fori_loop(
         lower=1, upper=krylov_depth, body_fun=step_fun, init_val=init
     )
@@ -188,14 +185,9 @@ def _fwd_init(matvec, vec, *params):
     return (x, b), a
 
 
-def _fwd_step(matvec, params, i, val, *, reortho: str):
+def _fwd_step(matvec, params, i, val):
     (v1, offdiag, v0), (vectors, diags, offdiags) = val
     ((v1, offdiag), diag), v0 = _fwd_step_apply(matvec, v1, offdiag, v0, *params), v1
-
-    # Reorthogonalisation
-    if reortho == "full":
-        v1 = v1 - vectors.T @ (vectors @ v1)
-        v1 /= jnp.linalg.norm(v1)
 
     # Store results
     vectors = vectors.at[i + 1].set(v1)

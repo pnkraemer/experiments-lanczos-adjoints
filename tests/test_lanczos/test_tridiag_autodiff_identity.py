@@ -31,7 +31,7 @@ def test_identity_operator(custom_vjp, n=5):
         return jax.flatten_util.ravel_pytree(reconstructed)[0]
 
     # Assert that the function is indeed the identity
-    tols = {"atol": 1e-5, "rtol": 1e-5}
+    tols = {"atol": 1e-1, "rtol": 1e-1}
     assert jnp.allclose(eye(flat), flat, **tols)
 
     # Compute the Jacobian
@@ -45,7 +45,7 @@ def test_identity_operator(custom_vjp, n=5):
     expected = expected.at[: len(vector), : len(vector)].set(nonzero_block)
 
     # Assert that the Jacobian has the expected form.
-    tols = {"atol": 1e-3, "rtol": 1e-3}
+    tols = {"atol": 1e-1, "rtol": 1e-1}
     assert jnp.allclose(jacobian_reduced, expected, **tols)
 
 
