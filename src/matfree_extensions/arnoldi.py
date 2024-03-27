@@ -143,7 +143,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # Prepare fancy reorthogonalisation
     Pi_sigma = dQ.T @ Q - H @ dH.T
     Pi_sigma_mask = jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 1)
-    H_padded = jnp.eye(len(Sigma))
+    H_padded = jnp.eye(len(Sigma), dtype=H.dtype)
     H_padded = H_padded.at[1:-1, 1:-1].set(H[1:-1, :-2])
 
     # Loop over those values
@@ -176,7 +176,8 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         return output, ()
 
     # Scan
-    init = (lambda_k, Lambda, Gamma, Sigma, P, dp, jnp.zeros((krylov_depth,)))
+    sigma_init = jnp.zeros((krylov_depth,), dtype=lambda_k.dtype)
+    init = (lambda_k, Lambda, Gamma, Sigma, P, dp, sigma_init)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
     (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma) = result
 
