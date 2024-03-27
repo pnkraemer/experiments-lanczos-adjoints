@@ -15,6 +15,9 @@ def test_vjp(n=10, krylov_order=4):
     matrix = test_util.symmetric_matrix_from_eigenvalues(eigvals)
     params = _sym(matrix)
 
+    def matvec(s, p):
+        return (p + p.T) @ s
+
     # Set up an initial vector
     vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
 
@@ -23,9 +26,7 @@ def test_vjp(n=10, krylov_order=4):
 
     # Construct a vector-to-vector decomposition function
     def decompose(f, *, custom_vjp):
-        algorithm = lanczos.tridiag(
-            lambda s, p: (p + p.T) @ s, krylov_order, custom_vjp=custom_vjp
-        )
+        algorithm = lanczos.tridiag(matvec, krylov_order, custom_vjp=custom_vjp)
         output = algorithm(*unflatten(f))
         return jax.flatten_util.ravel_pytree(output)[0]
 
