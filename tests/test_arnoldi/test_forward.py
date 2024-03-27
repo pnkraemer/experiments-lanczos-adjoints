@@ -9,7 +9,7 @@ from matfree_extensions import arnoldi, exp_util
 @pytest_cases.parametrize("nrows", [10])
 @pytest_cases.parametrize("krylov_depth", [1, 5, 10])
 @pytest_cases.parametrize("reortho", ["none", "full"])
-def test_decomposition(nrows, krylov_depth, reortho):
+def test_decomposition_is_satisfied(nrows, krylov_depth, reortho):
     # Create a well-conditioned test-matrix
     A = jax.random.normal(jax.random.PRNGKey(1), shape=(nrows, nrows))
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
@@ -39,7 +39,7 @@ def test_decomposition(nrows, krylov_depth, reortho):
 @pytest_cases.parametrize("nrows", [10])
 @pytest_cases.parametrize("krylov_depth", [1, 5, 10])
 @pytest_cases.parametrize("reortho", ["full"])
-def test_reorthogonalisation(nrows, krylov_depth, reortho):
+def test_reorthogonalisation_improves_the_estimate(nrows, krylov_depth, reortho):
     # Create an ill-conditioned test-matrix (that requires reortho=True)
     A = exp_util.hilbert(nrows)
     v = jax.random.normal(jax.random.PRNGKey(2), shape=(nrows,))
@@ -66,18 +66,18 @@ def test_reorthogonalisation(nrows, krylov_depth, reortho):
     assert jnp.allclose(Q @ e0, c * v, **tols)
 
 
-def test_forward_raises_error_for_wrong_depth_too_small():
+def test_raises_error_for_wrong_depth_too_small():
     with pytest.raises(ValueError, match="depth"):
         _ = arnoldi.forward(lambda v: v, 0, jnp.ones((2,)), reortho="none")
 
 
-def test_forward_raises_value_error_for_wrong_depth_too_high():
+def test_raises_error_for_wrong_depth_too_high():
     with pytest.raises(ValueError, match="depth"):
         _ = arnoldi.forward(lambda v: v, 3, jnp.ones((2,)), reortho="none")
 
 
-@pytest_cases.parametrize("reortho", [True, "full_with_sparsity", "None"])
-def test_forward_raises_type_error_for_wrong_reorthogonalisation_flag(reortho):
+@pytest_cases.parametrize("reortho_wrong", [True, "full_with_sparsity", "None"])
+def test_raises_error_for_wrong_reorthogonalisation_flag(reortho_wrong):
     one = jnp.ones((1,))
     with pytest.raises(TypeError, match="Unexpected input"):
-        arnoldi.forward(lambda s: s, 1, one, reortho=reortho)
+        arnoldi.forward(lambda s: s, 1, one, reortho=reortho_wrong)
