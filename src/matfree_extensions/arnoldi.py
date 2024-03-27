@@ -50,8 +50,8 @@ def forward(matvec, krylov_depth, v, *params, reortho: str):
 
     # Initialise the variables
     (n,), k = jnp.shape(v), krylov_depth
-    Q = jnp.zeros((n, k))
-    H = jnp.zeros((k, k))
+    Q = jnp.zeros((n, k), dtype=v.dtype)
+    H = jnp.zeros((k, k), dtype=v.dtype)
     initlength = jnp.linalg.norm(v)
     init = (Q, H, v, initlength)
 
@@ -73,12 +73,12 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: str):
     v = matvec(v, *params)
 
     # Orthonormalise
-    h = Q.T @ v
+    h = Q.T.conj() @ v
     v = v - Q @ h
 
     # Re-orthonormalise
     if reortho != "none":
-        v = v - Q @ (Q.T @ v)
+        v = v - Q @ (Q.T.conj() @ v)
 
     # Read the length
     length = jnp.linalg.norm(v)
