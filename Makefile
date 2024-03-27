@@ -2,8 +2,7 @@ format-and-lint:
 	pre-commit run --all-files
 
 test:
-	pytest -x -v
-	python -m doctest README.md
+	pytest -x -v -Werror
 
 
 clean-preview:
