@@ -51,7 +51,9 @@ class Solver:
 
 
 def solver_select(
-    which: Literal["lu", "cg+lanczos(reuse)", "cg+lanczos(autodiff)"],
+    which: Literal[
+        "lu", "cg+lanczos(reuse)", "cg+lanczos(autodiff)", "cg+lanczos(adjoint)"
+    ],
     /,
     key: jax.random.PRNGKey,
     slq_krylov_depth: int,

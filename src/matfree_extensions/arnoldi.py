@@ -52,7 +52,7 @@ def forward(matvec, krylov_depth, v, *params, reortho: str):
     (n,), k = jnp.shape(v), krylov_depth
     Q = jnp.zeros((n, k), dtype=v.dtype)
     H = jnp.zeros((k, k), dtype=v.dtype)
-    initlength = jnp.linalg.norm(v)
+    initlength = jnp.sqrt(jnp.dot(v.conj(), v))
     init = (Q, H, v, initlength)
 
     # Fix the step function
@@ -81,7 +81,7 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: str):
         v = v - Q @ (Q.T.conj() @ v)
 
     # Read the length
-    length = jnp.linalg.norm(v)
+    length = jnp.sqrt(jnp.dot(v.conj(), v))
 
     # Save
     h = h.at[idx + 1].set(length)
@@ -112,7 +112,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
 
         # The output of the transpose is a tuple of length 1
         (a,) = vecmat(x)
-        return a
+        return a.conj()
 
     # Prepare a bunch of auxiliary matrices
 
@@ -124,7 +124,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     lower_mask = lower(jnp.ones((krylov_depth, krylov_depth)))
 
     # Initialise
-    eta = dH @ e_K - Q.T @ dr
+    eta = dH @ e_K - Q.T.conj() @ dr
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
@@ -133,7 +133,9 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
-    Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
+    Pi_gamma = (
+        -dc * c.conj() * jnp.outer(e_1, e_1) + H.conj() @ dH.T - (dQ.T.conj() @ Q)
+    )
 
     # Prepare reorthogonalisation:
     P = Q.T
@@ -165,7 +167,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         "h_padded": H_padded,
         "p": ps,
         "p_mask": ps_mask,
-        "q": Q.T,
+        "q": Q.T.conj(),
     }
 
     # Fix the step function
@@ -253,7 +255,7 @@ def _adjoint_step(
     dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, *vjp(q)) if params != () else ()
 
     # Solve or (Gamma + Gamma.T) e_K
-    tmp = lower_mask * (Pi_gamma - l_At @ Q)
+    tmp = lower_mask * (Pi_gamma - l_At @ Q.conj())
     Gamma = Gamma.at[idx, :].set(tmp)
 
     # Solve for the next Sigma
@@ -270,5 +272,4 @@ def _adjoint_step(
     asd = beta_plus @ Lambda.T
     lambda_k = xi - (alpha * lambda_k - l_At) - asd
     lambda_k /= beta_minus
-
     return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma
