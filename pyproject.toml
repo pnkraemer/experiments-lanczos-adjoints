@@ -17,6 +17,11 @@ dev = [
     "pytest",
     "pytest-cases",
 ]
+dev_torch = [
+    # Ensure that PyTorch is installed:
+    # https://pytorch.org/
+    "gpytorch"
+]
 uci = [
     "ucimlrepo",
     "pandas",

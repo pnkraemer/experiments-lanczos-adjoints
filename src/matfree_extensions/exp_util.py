@@ -4,6 +4,7 @@ import os
 from typing import Literal, get_args
 
 import jax.experimental.sparse
+import jax.flatten_util
 import jax.numpy as jnp
 import scipy.io
 

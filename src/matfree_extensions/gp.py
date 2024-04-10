@@ -68,24 +68,44 @@ def kernel_matern_12(*, shape_in, shape_out):
     return parametrize, params_like
 
 
-def kernel_quadratic_exponential(*, shape_in, shape_out):
-    """Construct a square exponential kernel."""
+def kernel_scaled_rbf(*, shape_in, shape_out):
+    """Construct a (scaled) radial basis function kernel.
 
-    def parametrize(*, scale_sqrt_in, scale_sqrt_out):
+    The parametrisation equals that of GPyTorch's
+    `ScaleKernel(RBFKernel(constraint=Positive), constraint=Positive)`
+    """
+
+    def parametrize(*, raw_lengthscale, raw_outputscale):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
 
-            diff = x - y
-            log_k = scale_sqrt_in**2 * jnp.dot(diff, diff)
-            return scale_sqrt_out**2 * jnp.exp(-log_k)
+            lengthscale = _softplus(raw_lengthscale)
+            outputscale = _softplus(raw_outputscale)
+
+            diff = (x - y) / lengthscale
+            log_k = jnp.dot(diff, diff)
+            return outputscale * jnp.exp(-log_k / 2)
 
         return _vmap_gram(k)
 
     params_like = {
-        "scale_sqrt_in": jnp.empty(()),
-        "scale_sqrt_out": jnp.empty(shape_out),
+        "raw_lengthscale": jnp.empty(()),
+        "raw_outputscale": jnp.empty(shape_out),
     }
     return parametrize, params_like
+
+
+def _softplus(x, beta=1.0, threshold=20.0):
+    # shamelessly stolen from:
+    # https://github.com/google/jax/issues/18443
+
+    # mirroring the pytorch implementation https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
+    return jax.lax.select(
+        x * beta < threshold,
+        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
+        x,
+    )
 
 
 def kernel_quadratic_rational(*, shape_in, shape_out):
@@ -121,5 +141,5 @@ def _assert_shapes(x, y, shape_in):
 
 
 def _vmap_gram(fun):
-    tmp = jax.vmap(fun, in_axes=(None, 1), out_axes=-1)
+    tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
