@@ -18,17 +18,17 @@ pip install .
 
 To install the development-related dependencies, run
 ```commandline
-pip install .[dev]
+pip install ".[dev]"
 ```
 
 To install the experiment-related dependencies, run
 ```commandline
-pip install .[experiments, suite_sparse, uci]
+pip install ".[experiments, suite_sparse, uci]"
 ```
 
 To install everything and in editable mode, run
 ```commandline
-pip install -e .[dev,experiments,suite_sparse,uci]
+pip install -e ".[dev,experiments,suite_sparse,uci]"
 ```
 
 
@@ -37,6 +37,18 @@ make sure that PyTorch is installed.
 
 Then, run
 ```commandline
-pip install .[dev_torch]
+pip install ".[dev_torch]"
 ```
 which is separate from `dev` because it depends on pytorch, not on JAX.
+
+
+## Running dev-related code
+
+Run tests via
+```
+pytest
+```
+or use the pre-defined script
+```commandline
+make test
+```

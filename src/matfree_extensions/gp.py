@@ -28,14 +28,15 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
     return likelihood, p
 
 
-# todo: extract the call to scipy.stats into a separate function
-#  that then takes a solver/derivative routine.
 def mll_exact(prior: Callable, likelihood: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
     def mll(x, y, params_prior: dict, params_likelihood: dict):
         mean, cov = prior(x, **params_prior)
         mean_, cov_ = likelihood(mean, cov, **params_likelihood)
+
+        # todo: extract the call to scipy.stats into a separate function
+        #  that then takes a solver/derivative routine.
         logpdf = jax.scipy.stats.multivariate_normal.logpdf(y, mean=mean_, cov=cov_)
 
         # Normalise by the number of data points because GPyTorch does
