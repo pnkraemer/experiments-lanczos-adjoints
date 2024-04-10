@@ -115,6 +115,9 @@ def test_reorthogonalisation_improves_the_adjoint_accuracy(
     assert jnp.allclose(dv, dv_ref, **tols)
     assert jnp.allclose(dp, dp_ref, **tols)
 
+    # Undo double precision
+    jax.config.update("jax_enable_x64", False)
+
 
 def _lower(m):
     m_tril = jnp.tril(m)

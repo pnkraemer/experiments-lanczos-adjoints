@@ -1,12 +1,59 @@
 """Gaussian process models."""
 
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 
-# todo: implement likelihoods in GPyTorch's parametrisations
+
+def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
+    """Construct a Gaussian process model."""
+
+    def prior(x, **kernel_params):
+        mean = mean_fun(x)
+        cov = kernel_fun(**kernel_params)(x, x)
+        return mean, cov
+
+    return prior
 
 
-def kernel_scaled_matern_32(*, shape_in, shape_out):
+def likelihood_gaussian() -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
+
+    def likelihood(mean, cov, *, raw_noise):
+        # Apply a soft-plus because GPyTorch does
+        return mean, cov + jnp.eye(len(cov)) * _softplus(raw_noise)
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
+
+
+# todo: extract the call to scipy.stats into a separate function
+#  that then takes a solver/derivative routine.
+def mll_exact(prior: Callable, likelihood: Callable) -> Callable:
+    """Construct a marginal log-likelihood function."""
+
+    def mll(x, y, params_prior: dict, params_likelihood: dict):
+        mean, cov = prior(x, **params_prior)
+        mean_, cov_ = likelihood(mean, cov, **params_likelihood)
+        logpdf = jax.scipy.stats.multivariate_normal.logpdf(y, mean=mean_, cov=cov_)
+
+        # Normalise by the number of data points because GPyTorch does
+        return logpdf / len(x)
+
+    return mll
+
+
+def mean_zero() -> Callable:
+    """Construct a zero mean-function."""
+
+    def mean(x):
+        return jnp.zeros((len(x),), dtype=jnp.dtype(x))
+
+    return mean
+
+
+def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """Construct a (scaled) Matern(nu=3/2) kernel.
 
     The parametrisation equals that of GPyTorch's
@@ -16,6 +63,8 @@ def kernel_scaled_matern_32(*, shape_in, shape_out):
     def parametrize(*, raw_lengthscale, raw_outputscale):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
+
+            # Apply a soft-plus because GPyTorch does
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
@@ -36,7 +85,7 @@ def kernel_scaled_matern_32(*, shape_in, shape_out):
     return parametrize, params_like
 
 
-def kernel_scaled_matern_12(*, shape_in, shape_out):
+def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """Construct a (scaled) Matern(nu=1/2) kernel.
 
     The parametrisation equals that of GPyTorch's
@@ -46,9 +95,12 @@ def kernel_scaled_matern_12(*, shape_in, shape_out):
     def parametrize(*, raw_lengthscale, raw_outputscale):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
+
+            # Apply a soft-plus because GPyTorch does
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
+            # Compute the norm of the differences
             diff = (x - y) / lengthscale
             scaled = jnp.dot(diff, diff)
 
@@ -66,7 +118,7 @@ def kernel_scaled_matern_12(*, shape_in, shape_out):
     return parametrize, params_like
 
 
-def kernel_scaled_rbf(*, shape_in, shape_out):
+def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """Construct a (scaled) radial basis function kernel.
 
     The parametrisation equals that of GPyTorch's
@@ -77,11 +129,15 @@ def kernel_scaled_rbf(*, shape_in, shape_out):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
 
+            # Apply a soft-plus because GPyTorch does
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
+            # Compute the norm of the differences
             diff = (x - y) / lengthscale
             log_k = jnp.dot(diff, diff)
+
+            # Return the kernel function
             return outputscale * jnp.exp(-log_k / 2)
 
         return _vmap_gram(k)
