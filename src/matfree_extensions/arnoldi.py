@@ -1,9 +1,6 @@
 import jax
 import jax.numpy as jnp
 
-# todo: make a three_term_recurrence function
-#  to be able to run lanczos backwards in some simulations
-
 
 def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
     def estimate(v, *params):

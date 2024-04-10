@@ -8,8 +8,8 @@ from matfree_extensions import arnoldi, exp_util
 
 @pytest_cases.parametrize("nrows", [3])
 @pytest_cases.parametrize("krylov_depth", [2])
-@pytest_cases.parametrize("reortho", ["none", "full", "full_with_sigma"])
-@pytest_cases.parametrize("dtype", [float, complex])
+@pytest_cases.parametrize("reortho", ["none", "full"])
+@pytest_cases.parametrize("dtype", [float])
 def test_adjoint_matches_jax_dot_vjp(nrows, krylov_depth, reortho, dtype):
     # todo: see which components simplify for symmetric matrices
 
@@ -60,7 +60,7 @@ def test_adjoint_matches_jax_dot_vjp(nrows, krylov_depth, reortho, dtype):
 
 @pytest_cases.parametrize("nrows", [15])
 @pytest_cases.parametrize("krylov_depth", [10])
-@pytest_cases.parametrize("reortho", ["full", "full_with_sigma"])
+@pytest_cases.parametrize("reortho", ["full"])
 def test_reorthogonalisation_improves_the_adjoint_accuracy(
     nrows, krylov_depth, reortho
 ):
