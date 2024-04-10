@@ -52,3 +52,15 @@ or use the pre-defined script
 ```commandline
 make test
 ```
+
+
+## Running code and saving results/figures
+
+Ideally, place experiment scripts into a dedicated subdirectory of experiments/...
+
+E.g., GP related code into experiments/applications/gaussian_process.
+
+Save figures and results in (maybe matching) directories in results/ or figures/.
+
+This could be easier with `matfree_extensions.exp_util.create_matching_directory()`; see the existing scripts for how to use it.
+(requires running all scripts from the root, i.e. from where pyproject.toml is.)
