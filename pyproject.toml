@@ -17,7 +17,7 @@ dev = [
     "pytest",
     "pytest-cases",
 ]
-dev_torch = [
+devtorch = [
     # Ensure that PyTorch is installed:
     # https://pytorch.org/
     "gpytorch"
@@ -26,7 +26,7 @@ uci = [
     "ucimlrepo",
     "pandas",
 ]
-suite_sparse = [
+suitesparse = [
     "ssgetpy",
 ]
 experiments = [
