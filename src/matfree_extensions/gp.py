@@ -3,6 +3,8 @@
 import jax
 import jax.numpy as jnp
 
+# todo: implement likelihoods in GPyTorch's parametrisations
+
 
 def kernel_scaled_matern_32(*, shape_in, shape_out):
     """Construct a (scaled) Matern(nu=3/2) kernel.
