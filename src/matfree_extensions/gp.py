@@ -82,9 +82,7 @@ def logpdf_cholesky():
     return logpdf
 
 
-def logpdf_lanczos(
-    krylov_depth, /, *, slq_batch_num: int, slq_sample_num: int, slq_sample_type: str
-):
+def logpdf_lanczos(krylov_depth: int, /, slq_sampler: Callable, *, slq_batch_num: int):
     """Construct a logpdf function that relies on a Cholesky decomposition.
 
     If this logpdf is plugged into mll_exact(), the returned mll function
@@ -96,11 +94,6 @@ def logpdf_lanczos(
     Then, increase the number of batches while keeping the batch size maximal.
     """
 
-    match_sample_fun = {
-        "rademacher": hutchinson.sampler_rademacher,
-        "normal": hutchinson.sampler_normal,
-    }
-
     def solve(A, b):
         result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
         return result
@@ -108,12 +101,8 @@ def logpdf_lanczos(
     def logdet(A, key):
         # todo: use differentiable lanczos
 
-        x_like = jnp.ones((len(A),), dtype=A.dtype)
-        sampler = match_sample_fun[slq_sample_type](x_like, num=slq_sample_num)
-
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
-
-        estimate = hutchinson.hutchinson(integrand, sampler)
+        estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
         keys = jax.random.split(key, num=slq_batch_num)
         values = jax.lax.map(lambda k: estimate(k, A), keys)
