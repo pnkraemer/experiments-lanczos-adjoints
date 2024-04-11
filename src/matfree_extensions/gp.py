@@ -99,7 +99,6 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
         return result
 
     def logdet(A, key):
-        # todo: use differentiable lanczos
         # todo: make the covariance a linear operator instead of a dense matrix
         # todo: figure out how to do really clever matvecs with covariances
 

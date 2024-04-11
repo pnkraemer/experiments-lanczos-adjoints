@@ -79,6 +79,5 @@ def test_raises_error_for_wrong_depth_too_high():
 
 @pytest_cases.parametrize("reortho_wrong", [True, "full_with_sparsity", "None"])
 def test_raises_error_for_wrong_reorthogonalisation_flag(reortho_wrong):
-    algorithm = arnoldi.hessenberg(lambda s: s, 1, reortho=reortho_wrong)
     with pytest.raises(TypeError, match="Unexpected input"):
-        _ = algorithm(jnp.ones((2,)))
+        _ = arnoldi.hessenberg(lambda s: s, 1, reortho=reortho_wrong)
