@@ -5,6 +5,9 @@ from typing import Callable
 import jax
 import jax.numpy as jnp
 
+# todo: use matfree_extensions' Lanczos
+from matfree import hutchinson, lanczos
+
 
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
@@ -72,7 +75,47 @@ def logpdf_cholesky():
 
         # Combine the terms
         n, _n = jnp.shape(cov)
+        print(logdet)
+        print(mahalanobis)
+
         return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
+
+    return logpdf
+
+
+def logpdf_lanczos(krylov_depth, /, *, num_samples_per_batch):
+    """Construct a logpdf function that relies on a Cholesky decomposition."""
+
+    def solve(A, b):
+        result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
+        return result
+
+    def logdet(A):
+        # todo: use differentiable lanczos
+        # todo: expose the key as an argument
+        # todo: expose the choise between rademacher and normal samples
+        # todo: expose an option for batching the estimator
+
+        x_like = jnp.ones((len(A),), dtype=A.dtype)
+        sampler = hutchinson.sampler_rademacher(x_like, num=num_samples_per_batch)
+
+        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
+
+        estimate = hutchinson.hutchinson(integrand, sampler)
+        value = estimate(jax.random.PRNGKey(112321), A)
+        return value / 2
+
+    def logpdf(y, /, *, mean, cov):
+        # Log-determinant
+        logdet_ = logdet(cov)
+
+        # Mahalanobis norm
+        tmp = solve(cov, y - mean)
+        mahalanobis = jnp.dot(y - mean, tmp)
+
+        # Combine the terms
+        n, _n = jnp.shape(cov)
+        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
 
     return logpdf
 

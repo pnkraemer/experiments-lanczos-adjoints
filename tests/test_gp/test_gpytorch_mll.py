@@ -17,6 +17,13 @@ def case_logpdf_cholesky():
     return gp.logpdf_cholesky()
 
 
+@pytest_cases.case
+def case_logpdf_lanczos():
+    num = 100_000  # maaaany samples because we test for exactness
+    krylov_depth = 2  # because the number of data points is 3
+    return gp.logpdf_lanczos(krylov_depth, num_samples_per_batch=num)
+
+
 @pytest_cases.parametrize_with_cases("logpdf", cases=".")
 def test_mll_exact(logpdf):
     # Compute the reference model
