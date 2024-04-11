@@ -24,9 +24,10 @@ def case_logpdf_lanczos(samples):
     num = 100_000  # maaaany samples because we test for exactness
     krylov_depth = 2  # because the number of data points is 3
 
-    key = jax.random.PRNGKey(1)
-    logpdf = gp.logpdf_lanczos(krylov_depth, num_samples=num, sample_type=samples)
-    params = (key,)
+    logpdf = gp.logpdf_lanczos(
+        krylov_depth, slq_sample_num=num, slq_sample_type=samples
+    )
+    params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
 
