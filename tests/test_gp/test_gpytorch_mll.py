@@ -49,6 +49,21 @@ def case_logpdf_lanczos_normal():
     return logpdf, params
 
 
+@pytest_cases.case
+def case_logpdf_lanczos_rademacher_reuse():
+    # maaaany samples because we test for exactness
+    num_batches, num_samples = 2, 50_000
+
+    # Max order (the number of data points is 3)
+    krylov_depth = 2
+
+    x_like = jnp.ones((3,), dtype=float)
+    sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
+    logpdf = gp.logpdf_lanczos_reuse(krylov_depth, sampler, slq_batch_num=num_batches)
+    params = (jax.random.PRNGKey(1),)
+    return logpdf, params
+
+
 @pytest_cases.parametrize_with_cases("logpdf", cases=".")
 def test_mll_exact(logpdf):
     # Compute the reference model

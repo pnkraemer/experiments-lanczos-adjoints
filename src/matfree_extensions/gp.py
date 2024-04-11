@@ -83,7 +83,7 @@ def logpdf_cholesky() -> Callable:
 
 
 def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Callable:
-    """Construct a logpdf function that relies on a Cholesky decomposition.
+    """Construct a logpdf function that uses CG and Lanczos.
 
     If this logpdf is plugged into mll_exact(), the returned mll function
     evaluates as mll(x, y, key, params_prior=...)
@@ -103,6 +103,65 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
         # todo: figure out how to do really clever matvecs with covariances
 
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
+        estimate = hutchinson.hutchinson(integrand, slq_sampler)
+
+        keys = jax.random.split(key, num=slq_batch_num)
+        values = jax.lax.map(lambda k: estimate(k, A), keys)
+        return jnp.mean(values, axis=0) / 2
+
+    def logpdf(y, *params_logdet, mean, cov):
+        # Log-determinant
+        logdet_ = logdet(cov, *params_logdet)
+
+        # Mahalanobis norm
+        tmp = solve(cov, y - mean)
+        mahalanobis = jnp.dot(y - mean, tmp)
+
+        # Combine the terms
+        n, _n = jnp.shape(cov)
+        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
+
+    return logpdf
+
+
+def logpdf_lanczos_reuse(
+    krylov_depth, /, slq_sampler: Callable, slq_batch_num
+) -> Callable:
+    """Construct a logpdf function that uses CG and Lanczos for the forward pass.
+
+    This method returns an algorithm similar to logpdf_lanczos_reuse;
+    the only difference is that
+    the gradient is estimated differently;
+    while logpdf_lanczos() implements adjoints of Lanczos
+    to get efficient *exact* gradients,
+    logpdf_lanczos_reuse() recycles information from the forward
+    pass to get extremely cheap, *inexact* gradients.
+
+    This roughly relates to the following paper:
+
+    @inproceedings{dong2017scalable,
+        title={Scalable log determinants for {Gaussian} process kernel learning},
+        author={Dong, Kun and
+                Eriksson, David and
+                Nickisch, Hannes and
+                Bindel, David and
+                Wilson, Andrew G},
+        booktitle=NeurIPS,
+        year={2017}
+    }
+    """
+
+    def solve(A, b):
+        result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
+        return result
+
+    def logdet(A, key):
+        # todo: make the covariance a linear operator instead of a dense matrix
+        # todo: figure out how to do really clever matvecs with covariances
+
+        integrand = lanczos.integrand_spd_custom_vjp_reuse(
+            jnp.log, krylov_depth, lambda s, p: p @ s
+        )
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
         keys = jax.random.split(key, num=slq_batch_num)
