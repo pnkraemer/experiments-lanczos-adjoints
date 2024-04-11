@@ -8,6 +8,10 @@ from matfree import hutchinson
 
 from matfree_extensions import lanczos
 
+# todo: implement a logpdf with a custom vjp that reuses a CG call?!
+# todo: represent all covariance matrices via matrix-vector products
+# todo: implement keops-like symbolic matrix vector products
+
 
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
