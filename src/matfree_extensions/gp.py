@@ -50,6 +50,29 @@ def logpdf_scipy_stats():
     return logpdf
 
 
+def logpdf_cholesky():
+    def logpdf(y, /, *, mean, cov):
+        # Cholesky-decompose
+        cholesky = jnp.linalg.cholesky(cov)
+
+        # Log-determinant
+        logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
+
+        # Mahalanobis norm
+
+        def solve_triangular(A, b):
+            return jax.scipy.linalg.solve_triangular(A, b, lower=True, trans=False)
+
+        tmp = solve_triangular(cholesky, y - mean)
+        mahalanobis = jnp.dot(tmp, tmp)
+
+        # Combine the terms
+        n, _n = jnp.shape(cov)
+        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
+
+    return logpdf
+
+
 def mean_zero() -> Callable:
     """Construct a zero mean-function."""
 

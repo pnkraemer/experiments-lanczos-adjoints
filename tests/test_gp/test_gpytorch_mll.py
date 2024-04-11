@@ -12,6 +12,11 @@ def case_logpdf_scipy_stats():
     return gp.logpdf_scipy_stats()
 
 
+@pytest_cases.case
+def case_logpdf_cholesky():
+    return gp.logpdf_cholesky()
+
+
 @pytest_cases.parametrize_with_cases("logpdf", cases=".")
 def test_mll_exact(logpdf):
     # Compute the reference model
