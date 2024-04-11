@@ -82,8 +82,18 @@ def logpdf_cholesky():
     return logpdf
 
 
-def logpdf_lanczos(krylov_depth, /, *, num_samples_per_batch):
-    """Construct a logpdf function that relies on a Cholesky decomposition."""
+def logpdf_lanczos(krylov_depth, /, *, num_samples, sample_type: str):
+    """Construct a logpdf function that relies on a Cholesky decomposition.
+
+    If this logpdf is plugged into mll_exact(), the returned mll function
+    evaluates as mll(x, y, key, params_prior=...)
+    instead of mll(x, y, params_prior=...)
+    """
+
+    str_to_sampler = {
+        "rademacher": hutchinson.sampler_rademacher,
+        "normal": hutchinson.sampler_normal,
+    }
 
     def solve(A, b):
         result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
@@ -91,12 +101,11 @@ def logpdf_lanczos(krylov_depth, /, *, num_samples_per_batch):
 
     def logdet(A, key):
         # todo: use differentiable lanczos
-        # todo: expose the key as an argument
         # todo: expose the choise between rademacher and normal samples
         # todo: expose an option for batching the estimator
 
         x_like = jnp.ones((len(A),), dtype=A.dtype)
-        sampler = hutchinson.sampler_rademacher(x_like, num=num_samples_per_batch)
+        sampler = str_to_sampler[sample_type](x_like, num=num_samples)
 
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
 
