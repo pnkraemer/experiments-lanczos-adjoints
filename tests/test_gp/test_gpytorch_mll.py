@@ -2,11 +2,18 @@
 
 import gpytorch
 import jax.numpy as jnp
+import pytest_cases
 import torch
 from matfree_extensions import gp
 
 
-def test_mll_exact():
+@pytest_cases.case
+def case_logpdf_scipy_stats():
+    return gp.logpdf_scipy_stats()
+
+
+@pytest_cases.parametrize_with_cases("logpdf", cases=".")
+def test_mll_exact(logpdf):
     # Compute the reference model
     reference = _model_and_mll_via_gpytorch()
     (x, y), value_ref, ((lengthscale, outputscale), noise) = reference
@@ -15,7 +22,7 @@ def test_mll_exact():
     k, p_prior = gp.kernel_scaled_rbf(shape_in=(), shape_out=())
     prior = gp.model(gp.mean_zero(), k)
     likelihood, p_likelihood = gp.likelihood_gaussian()
-    loss = gp.mll_exact(prior, likelihood, logpdf=gp.logpdf_scipy_stats())
+    loss = gp.mll_exact(prior, likelihood, logpdf=logpdf)
 
     # Ensure that the parameters match
     p_prior["raw_lengthscale"] = lengthscale.squeeze()
