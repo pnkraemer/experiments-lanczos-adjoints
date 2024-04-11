@@ -43,8 +43,11 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
     return mll
 
 
-def logpdf_scipy_stats(y, /, *, mean, cov):
-    return jax.scipy.stats.multivariate_normal.logpdf(y, mean=mean, cov=cov)
+def logpdf_scipy_stats():
+    def logpdf(y, /, *, mean, cov):
+        return jax.scipy.stats.multivariate_normal.logpdf(y, mean=mean, cov=cov)
+
+    return logpdf
 
 
 def mean_zero() -> Callable:

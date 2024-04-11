@@ -15,7 +15,7 @@ def test_mll_exact():
     k, p_prior = gp.kernel_scaled_rbf(shape_in=(), shape_out=())
     prior = gp.model(gp.mean_zero(), k)
     likelihood, p_likelihood = gp.likelihood_gaussian()
-    loss = gp.mll_exact(prior, likelihood, logpdf=gp.logpdf_scipy_stats)
+    loss = gp.mll_exact(prior, likelihood, logpdf=gp.logpdf_scipy_stats())
 
     # Ensure that the parameters match
     p_prior["raw_lengthscale"] = lengthscale.squeeze()
