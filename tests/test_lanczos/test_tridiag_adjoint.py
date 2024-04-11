@@ -4,11 +4,13 @@ import functools
 
 import jax.flatten_util
 import jax.numpy as jnp
+import pytest_cases
 from matfree import test_util
 from matfree_extensions import lanczos
 
 
-def test_vjp(n=10, krylov_order=4):
+@pytest_cases.parametrize("reortho", ["full", "none"])
+def test_adjoint_vjp_matches_jax_vjp(reortho, n=10, krylov_order=4):
     """Test that the custom VJP yields the same output as autodiff."""
     # Set up a test-matrix
     eigvals = jax.random.uniform(jax.random.PRNGKey(2), shape=(n,)) + 1.0
@@ -26,7 +28,8 @@ def test_vjp(n=10, krylov_order=4):
 
     # Construct a vector-to-vector decomposition function
     def decompose(f, *, custom_vjp):
-        algorithm = lanczos.tridiag(matvec, krylov_order, custom_vjp=custom_vjp)
+        kwargs = {"reortho": reortho, "custom_vjp": custom_vjp}
+        algorithm = lanczos.tridiag(matvec, krylov_order, **kwargs)
         output = algorithm(*unflatten(f))
         return jax.flatten_util.ravel_pytree(output)[0]
 
