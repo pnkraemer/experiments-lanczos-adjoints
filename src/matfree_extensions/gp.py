@@ -44,6 +44,8 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
 
 
 def logpdf_scipy_stats():
+    """Construct a logpdf function that wraps jax.scipy.stats."""
+
     def logpdf(y, /, *, mean, cov):
         return jax.scipy.stats.multivariate_normal.logpdf(y, mean=mean, cov=cov)
 
@@ -51,6 +53,8 @@ def logpdf_scipy_stats():
 
 
 def logpdf_cholesky():
+    """Construct a logpdf function that relies on a Cholesky decomposition."""
+
     def logpdf(y, /, *, mean, cov):
         # Cholesky-decompose
         cholesky = jnp.linalg.cholesky(cov)
