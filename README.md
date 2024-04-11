@@ -53,6 +53,16 @@ or use the pre-defined script
 make test
 ```
 
+## Pre-commit hook
+
+after activating your virtual environment, run
+```commandline
+pre-commit install
+```
+you only do this once! not every time you activate the environment.
+
+
+The pre-commit hook is useful, because it implies that we do not accidentally (auto)format each others' code, which would lead to nasty merge conflicts.
 
 ## Running code and saving results/figures
 
