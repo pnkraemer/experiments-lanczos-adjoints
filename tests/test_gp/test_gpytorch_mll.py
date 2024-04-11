@@ -21,11 +21,17 @@ def case_logpdf_cholesky():
 @pytest_cases.case
 @pytest_cases.parametrize("samples", ["rademacher", "normal"])
 def case_logpdf_lanczos(samples):
-    num = 100_000  # maaaany samples because we test for exactness
-    krylov_depth = 2  # because the number of data points is 3
+    # maaaany samples because we test for exactness
+    num_batches, num_samples = 2, 50_000
+
+    # Max order (the number of data points is 3)
+    krylov_depth = 2
 
     logpdf = gp.logpdf_lanczos(
-        krylov_depth, slq_sample_num=num, slq_sample_type=samples
+        krylov_depth,
+        slq_batch_num=num_batches,
+        slq_sample_num=num_samples,
+        slq_sample_type=samples,
     )
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
