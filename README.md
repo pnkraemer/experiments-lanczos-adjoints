@@ -74,3 +74,8 @@ Save figures and results in (maybe matching) directories in results/ or figures/
 
 This could be easier with `matfree_extensions.exp_util.create_matching_directory()`; see the existing scripts for how to use it.
 (requires running all scripts from the root, i.e. from where pyproject.toml is.)
+
+
+## Using code
+
+Look at tests for how to use the library functions.

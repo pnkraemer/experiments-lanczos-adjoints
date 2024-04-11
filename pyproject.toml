@@ -34,6 +34,8 @@ experiments = [
     "matplotlib",
     "tueplots",
     "optax",
+    "flax",
+    "treemath",
 ]
 
 
