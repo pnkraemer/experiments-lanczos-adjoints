@@ -4,9 +4,9 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
+from matfree import hutchinson
 
-# todo: use matfree_extensions' Lanczos
-from matfree import hutchinson, lanczos
+from matfree_extensions import lanczos
 
 
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
@@ -100,6 +100,8 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
 
     def logdet(A, key):
         # todo: use differentiable lanczos
+        # todo: make the covariance a linear operator instead of a dense matrix
+        # todo: figure out how to do really clever matvecs with covariances
 
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def arnoldi(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool):
+def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
     def estimate(v, *params):
         return forward(matvec, krylov_depth, v, *params, reortho=reortho)
 
