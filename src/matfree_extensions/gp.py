@@ -48,7 +48,7 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
     return mll
 
 
-def logpdf_scipy_stats():
+def logpdf_scipy_stats() -> Callable:
     """Construct a logpdf function that wraps jax.scipy.stats."""
 
     def logpdf(y, /, *, mean, cov):
@@ -57,7 +57,7 @@ def logpdf_scipy_stats():
     return logpdf
 
 
-def logpdf_cholesky():
+def logpdf_cholesky() -> Callable:
     """Construct a logpdf function that relies on a Cholesky decomposition."""
 
     def logpdf(y, /, *, mean, cov):
@@ -82,7 +82,7 @@ def logpdf_cholesky():
     return logpdf
 
 
-def logpdf_lanczos(krylov_depth: int, /, slq_sampler: Callable, *, slq_batch_num: int):
+def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Callable:
     """Construct a logpdf function that relies on a Cholesky decomposition.
 
     If this logpdf is plugged into mll_exact(), the returned mll function
