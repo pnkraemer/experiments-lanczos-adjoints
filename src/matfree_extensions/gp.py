@@ -34,11 +34,13 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
 def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
-    def mll(x, y, params_prior: dict, params_likelihood: dict):
+    def mll(x, y, *params_logdet, params_prior: dict, params_likelihood: dict):
+        # Evaluate the marginal data likelihood
         mean, cov = prior(x, **params_prior)
         mean_, cov_ = likelihood(mean, cov, **params_likelihood)
 
-        value = logpdf(y, mean=mean_, cov=cov_)
+        # Evaluate the log-pdf
+        value = logpdf(y, *params_logdet, mean=mean_, cov=cov_)
 
         # Normalise by the number of data points because GPyTorch does
         return value / len(x)
@@ -75,9 +77,6 @@ def logpdf_cholesky():
 
         # Combine the terms
         n, _n = jnp.shape(cov)
-        print(logdet)
-        print(mahalanobis)
-
         return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
 
     return logpdf
@@ -90,7 +89,7 @@ def logpdf_lanczos(krylov_depth, /, *, num_samples_per_batch):
         result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
         return result
 
-    def logdet(A):
+    def logdet(A, key):
         # todo: use differentiable lanczos
         # todo: expose the key as an argument
         # todo: expose the choise between rademacher and normal samples
@@ -102,12 +101,12 @@ def logpdf_lanczos(krylov_depth, /, *, num_samples_per_batch):
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
 
         estimate = hutchinson.hutchinson(integrand, sampler)
-        value = estimate(jax.random.PRNGKey(112321), A)
+        value = estimate(key, A)
         return value / 2
 
-    def logpdf(y, /, *, mean, cov):
+    def logpdf(y, *params_logdet, mean, cov):
         # Log-determinant
-        logdet_ = logdet(cov)
+        logdet_ = logdet(cov, *params_logdet)
 
         # Mahalanobis norm
         tmp = solve(cov, y - mean)

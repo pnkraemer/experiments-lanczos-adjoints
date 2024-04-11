@@ -1,6 +1,7 @@
 """Tests for marginal-log-likelihood models."""
 
 import gpytorch
+import jax
 import jax.numpy as jnp
 import pytest_cases
 import torch
@@ -9,19 +10,21 @@ from matfree_extensions import gp
 
 @pytest_cases.case
 def case_logpdf_scipy_stats():
-    return gp.logpdf_scipy_stats()
+    return gp.logpdf_scipy_stats(), ()
 
 
 @pytest_cases.case
 def case_logpdf_cholesky():
-    return gp.logpdf_cholesky()
+    return gp.logpdf_cholesky(), ()
 
 
 @pytest_cases.case
 def case_logpdf_lanczos():
     num = 100_000  # maaaany samples because we test for exactness
     krylov_depth = 2  # because the number of data points is 3
-    return gp.logpdf_lanczos(krylov_depth, num_samples_per_batch=num)
+
+    key = jax.random.PRNGKey(1)
+    return gp.logpdf_lanczos(krylov_depth, num_samples_per_batch=num), (key,)
 
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".")
@@ -30,11 +33,14 @@ def test_mll_exact(logpdf):
     reference = _model_and_mll_via_gpytorch()
     (x, y), value_ref, ((lengthscale, outputscale), noise) = reference
 
+    # Log-pdf function
+    logpdf_fun, p_logpdf = logpdf
+
     # Set up a GP model
     k, p_prior = gp.kernel_scaled_rbf(shape_in=(), shape_out=())
     prior = gp.model(gp.mean_zero(), k)
     likelihood, p_likelihood = gp.likelihood_gaussian()
-    loss = gp.mll_exact(prior, likelihood, logpdf=logpdf)
+    loss = gp.mll_exact(prior, likelihood, logpdf=logpdf_fun)
 
     # Ensure that the parameters match
     p_prior["raw_lengthscale"] = lengthscale.squeeze()
@@ -42,7 +48,7 @@ def test_mll_exact(logpdf):
     p_likelihood["raw_noise"] = noise.squeeze()
 
     # Evaluate the MLL
-    value = loss(x, y, params_prior=p_prior, params_likelihood=p_likelihood)
+    value = loss(x, y, *p_logpdf, params_prior=p_prior, params_likelihood=p_likelihood)
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)
