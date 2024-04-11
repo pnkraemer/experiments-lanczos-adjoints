@@ -2,11 +2,13 @@
 
 import jax
 import jax.numpy as jnp
+import pytest_cases
 from matfree import hutchinson, lanczos, test_util
 from matfree_extensions import lanczos as lanczos_extensions
 
 
-def test_integrand_spd_value_and_grad_match_matfree_plus_autodiff(n=10):
+@pytest_cases.parametrize("use_adjoints", [True, False])
+def test_integrand_spd_value_and_grad_match_matfree_plus_autodiff(use_adjoints, n=10):
     eigvals = jnp.arange(0.0, 1.0 + n, step=1.0) + 1.0
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
     A = _sym(A)
@@ -25,7 +27,8 @@ def test_integrand_spd_value_and_grad_match_matfree_plus_autodiff(n=10):
     slq_value, slq_gradient = (jax.value_and_grad(estimate, argnums=1))(key, A)
 
     # Implementation
-    integrand = lanczos_extensions.integrand_spd(jnp.log, order + 1, matvec)
+    kwargs = {"use_adjoints_for_tridiag": use_adjoints}
+    integrand = lanczos_extensions.integrand_spd(jnp.log, order + 1, matvec, **kwargs)
     estimate = hutchinson.hutchinson(integrand, sampler)
     slq_value_and_grad = (jax.value_and_grad(estimate, argnums=1))(key, A)
 

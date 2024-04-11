@@ -1,6 +1,7 @@
 """Extensions for the Matfree package."""
 
 import functools
+from typing import Callable
 
 import jax
 import jax.flatten_util
@@ -9,7 +10,15 @@ import jax.numpy as jnp
 from matfree_extensions import arnoldi
 
 
-def integrand_spd(matfun, krylov_depth, matvec, /, *, reortho: str = "full"):
+def integrand_spd(
+    matfun: Callable,
+    krylov_depth: int,
+    matvec: Callable,
+    /,
+    *,
+    reortho: str = "full",
+    use_adjoints_for_tridiag: bool = True,
+) -> Callable:
     def quadform(v0, *parameters):
         v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
         scale = jnp.linalg.norm(v0_flat)
@@ -24,7 +33,12 @@ def integrand_spd(matfun, krylov_depth, matvec, /, *, reortho: str = "full"):
 
         # We use the efficient VJP for tri-diagonalisation, which implies that this
         # function will be efficiently differentiable
-        algorithm = tridiag(matvec_flat, krylov_depth, custom_vjp=True, reortho=reortho)
+        algorithm = tridiag(
+            matvec_flat,
+            krylov_depth,
+            custom_vjp=use_adjoints_for_tridiag,
+            reortho=reortho,
+        )
         (basis, (diag, off_diag)), _remainder = algorithm(v0_flat, *parameters)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
