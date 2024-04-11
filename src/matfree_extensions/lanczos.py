@@ -98,10 +98,20 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "
     return quadform
 
 
-def tridiag_reortho_full(matvec, krylov_depth, /, *, custom_vjp):
+def tridiag(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
+    if reortho == "full":
+        return _tridiag_reortho_full(matvec, krylov_depth, custom_vjp=custom_vjp)
+    if reortho == "none":
+        return _tridiag_reortho_none(matvec, krylov_depth, custom_vjp=custom_vjp)
+    raise ValueError
+
+
+def _tridiag_reortho_full(matvec, krylov_depth, /, *, custom_vjp):
     # Implement via Arnoldi to use the reorthogonalised adjoints.
     # Todo: implement a dedicated function.
-    alg = arnoldi.arnoldi(matvec, krylov_depth, custom_vjp=custom_vjp, reortho="full")
+    alg = arnoldi.hessenberg(
+        matvec, krylov_depth, custom_vjp=custom_vjp, reortho="full"
+    )
 
     def estimate(vec, *params):
         Q, H, v, _norm = alg(vec, *params)
@@ -116,9 +126,9 @@ def tridiag_reortho_full(matvec, krylov_depth, /, *, custom_vjp):
     return estimate
 
 
-def tridiag(matvec, krylov_depth, /, *, custom_vjp):
+def _tridiag_reortho_none(matvec, krylov_depth, /, *, custom_vjp):
     def estimate(vec, *params):
-        *values, _ = forward(matvec, krylov_depth, vec, *params)
+        *values, _ = _forward(matvec, krylov_depth, vec, *params)
         return values
 
     def estimate_fwd(vec, *params):
@@ -139,7 +149,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
         betas = jnp.concatenate((betas, beta_last[None]))
 
         # Compute the adjoints, discard the adjoint states, and return the gradients
-        grads, _lambdas_and_mus_and_nus = adjoint(
+        grads, _lambdas_and_mus_and_nus = _adjoint(
             matvec=matvec,
             params=params,
             initvec_norm=vector_norm,
@@ -159,7 +169,7 @@ def tridiag(matvec, krylov_depth, /, *, custom_vjp):
     return estimate
 
 
-def forward(matvec, krylov_depth, vec, *params):
+def _forward(matvec, krylov_depth, vec, *params):
     # Pre-allocate
     vectors = jnp.zeros((krylov_depth + 1, len(vec)))
     offdiags = jnp.zeros((krylov_depth,))
@@ -232,7 +242,7 @@ def _fwd_step_apply(matvec, vec, b, vec_previous, *params):
     return (x, b), a
 
 
-def adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
+def _adjoint(*, matvec, params, initvec_norm, alphas, betas, xs, dalphas, dbetas, dxs):
     def adjoint_step(xi_and_lambda, inputs):
         return _adjoint_step(*xi_and_lambda, matvec=matvec, params=params, **inputs)
 
