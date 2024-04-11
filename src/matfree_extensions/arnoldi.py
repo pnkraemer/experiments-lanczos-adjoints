@@ -3,8 +3,13 @@ import jax.numpy as jnp
 
 
 def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
+    reortho_expected = ["none", "full"]
+    if reortho not in reortho_expected:
+        msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
+        raise TypeError(msg)
+
     def estimate(v, *params):
-        return forward(matvec, krylov_depth, v, *params, reortho=reortho)
+        return _forward(matvec, krylov_depth, v, *params, reortho=reortho)
 
     def estimate_fwd(v, *params):
         outputs = estimate(v, *params)
@@ -14,7 +19,7 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
         (Q, H, r, c), params = cache
         dQ, dH, dr, dc = vjp_incoming
 
-        grads, _ = adjoint(
+        grads, _ = _adjoint(
             matvec,
             *params,
             Q=Q,
@@ -35,15 +40,10 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
     return estimate
 
 
-def forward(matvec, krylov_depth, v, *params, reortho: str):
+def _forward(matvec, krylov_depth, v, *params, reortho: str):
     if krylov_depth < 1 or krylov_depth > len(v):
         msg = f"Parameter depth {krylov_depth} is outside the expected range"
         raise ValueError(msg)
-
-    reortho_expected = ["none", "full"]
-    if not isinstance(reortho, str) or reortho not in reortho_expected:
-        msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
-        raise TypeError(msg)
 
     # Initialise the variables
     (n,), k = jnp.shape(v), krylov_depth
@@ -87,13 +87,8 @@ def _forward_step(Q, H, v, length, matvec, *params, idx, reortho: str):
     return Q, H, v, length
 
 
-def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
+def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # todo: implement simplifications for symmetric problems
-
-    reortho_expected = ["none", "full", "full_with_sigma"]
-    if not isinstance(reortho, str) or reortho not in reortho_expected:
-        msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
-        raise TypeError(msg)
 
     # Extract the matrix shapes from Q
     nrows, krylov_depth = jnp.shape(Q)
@@ -181,7 +176,7 @@ def adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma) = result
 
     # Finalise Sigma
-    if reortho == "full_with_sigma":
+    if reortho == "full_with_sigma":  # not happening anymore
         Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
     else:
         Sigma_t = Lambda.T @ Q - dH.T
@@ -236,7 +231,7 @@ def _adjoint_step(
 ):
     # Reorthogonalise
     if reortho != "none":
-        if reortho == "full_with_sigma":
+        if reortho == "full_with_sigma":  # not happening anymore
             p = p + sigma
         elif reortho == "full":
             P = p_mask[:, None] * P
