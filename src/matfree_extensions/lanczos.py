@@ -8,30 +8,51 @@ import jax.numpy as jnp
 
 from matfree_extensions import arnoldi
 
-# Here are a bunch of changes that need to happen
-# in order to make the GP experiments a little nicer.
-# todo: find a cleaner solution for the custom_vjp / reortho flags.
-#  because the current state involves waaaay too many flags.
 
-# todo: sooo many possibilities for gradients.
-#  * Make this integrand function log-determinant specific
-#  * Make "custom_vjp" a string, not a bool
-#    1. plain autodiff   (mode: "none")
-#    2. adjoint on lanczos, rest is autodiff  (mode: "decomp-adjoint")
-#    3. custom vjp on quadform via reusing lanczos coefficients  (mode: "slq-reuse")
-#    4. custom vjp on quadform via a cg call (works only for logdets)  (mode: "slq-cg")
-#  Test this, and then come back to the GP.
+def integrand_spd(matfun, krylov_depth, matvec, /, *, reortho: str = "full"):
+    def quadform(v0, *parameters):
+        v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
+        scale = jnp.linalg.norm(v0_flat)
+        v0_flat /= scale
+
+        @jax.tree_util.Partial
+        def matvec_flat(v_flat, *p):
+            v = v_unflatten(v_flat)
+            av = matvec(v, *p)
+            flat, unflatten = jax.flatten_util.ravel_pytree(av)
+            return flat
+
+        # We use the efficient VJP for tri-diagonalisation, which implies that this
+        # function will be efficiently differentiable
+        algorithm = tridiag(matvec_flat, krylov_depth, custom_vjp=True, reortho=reortho)
+        (basis, (diag, off_diag)), _remainder = algorithm(v0_flat, *parameters)
+
+        # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
+        #  use it here. Until then: an eigen-decomposition of size (order + 1)
+        #  does not hurt too much...
+        diag = jnp.diag(diag)
+        offdiag1 = jnp.diag(off_diag, -1)
+        offdiag2 = jnp.diag(off_diag, 1)
+        dense_matrix = diag + offdiag1 + offdiag2
+
+        eigvals, eigvecs = jnp.linalg.eigh(dense_matrix)
+
+        # Since Q orthogonal (orthonormal) to v0, Q v = Q[0],
+        # and therefore (Q v)^T f(D) (Qv) = Q[0] * f(diag) * Q[0]
+        # Evaluate the matrix-function
+        fx_eigvals = jax.vmap(matfun)(eigvals)
+        return scale**2 * jnp.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
+
+    return quadform
 
 
-def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "full"):
+def integrand_spd_custom_vjp_reuse(matfun, order, matvec, /, *, reortho: str = "full"):
     """Construct an integrand for SLQ for SPD matrices that comes with a custom VJP.
 
     The custom VJP efficiently computes a single backward-pass (by reusing
     the Lanczos decomposition from the forward pass), but does not admit
     higher derivatives.
     """
-    assert custom_vjp in ["none", "slq-reuse"]
-    assert reortho in ["full", "none"]
 
     def quadform(v0, *parameters):
         return quadform_fwd(v0, *parameters)[0]
@@ -48,7 +69,8 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "
             flat, unflatten = jax.flatten_util.ravel_pytree(av)
             return flat
 
-        algorithm = tridiag(matvec_flat, order, custom_vjp=False)
+        # We define our own custom vjp, so no need to select the one for tridiag()
+        algorithm = tridiag(matvec_flat, order, custom_vjp=False, reortho=reortho)
         (basis, (diag, off_diag)), _remainder = algorithm(v0_flat, *parameters)
 
         # todo: once jax supports eigh_tridiagonal(eigvals_only=False),
@@ -91,9 +113,8 @@ def integrand_spd(matfun, order, matvec, /, *, custom_vjp: str, reortho: str = "
         # todo: compute gradient wrt v?
         return 0.0, *vjp(vjp_incoming)
 
-    if custom_vjp == "slq-reuse":
-        quadform = jax.custom_vjp(quadform)
-        quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
+    quadform = jax.custom_vjp(quadform)
+    quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
 
     return quadform
 
