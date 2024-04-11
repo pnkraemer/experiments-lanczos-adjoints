@@ -1,3 +1,6 @@
+#Environment 
+mfe/
+
 # Data
 ./data/*
 .ssgetpy
