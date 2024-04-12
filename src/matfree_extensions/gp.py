@@ -19,7 +19,7 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     def prior(x, **kernel_params):
         mean = mean_fun(x)
         cov = kernel_fun(**kernel_params)(x, x)
-        return mean, cov
+        return mean, lambda v: cov @ v
 
     return prior
 
@@ -29,7 +29,8 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
 
     def likelihood(mean, cov, *, raw_noise):
         # Apply a soft-plus because GPyTorch does
-        return mean, cov + jnp.eye(len(cov)) * _softplus(raw_noise)
+        noise = _softplus(raw_noise)
+        return mean, lambda v: cov(v) + noise * v
 
     p = {"raw_noise": jnp.empty(())}
     return likelihood, p
@@ -55,8 +56,12 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
 def logpdf_scipy_stats() -> Callable:
     """Construct a logpdf function that wraps jax.scipy.stats."""
 
-    def logpdf(y, /, *, mean, cov):
-        return jax.scipy.stats.multivariate_normal.logpdf(y, mean=mean, cov=cov)
+    def logpdf(y, /, *, mean, cov: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov)(mean)
+
+        _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
+        return _logpdf_fun(y, mean=mean, cov=cov_matrix)
 
     return logpdf
 
@@ -64,9 +69,12 @@ def logpdf_scipy_stats() -> Callable:
 def logpdf_cholesky() -> Callable:
     """Construct a logpdf function that relies on a Cholesky decomposition."""
 
-    def logpdf(y, /, *, mean, cov):
+    def logpdf(y, /, *, mean, cov: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov)(mean)
+
         # Cholesky-decompose
-        cholesky = jnp.linalg.cholesky(cov)
+        cholesky = jnp.linalg.cholesky(cov_matrix)
 
         # Log-determinant
         logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
@@ -80,7 +88,7 @@ def logpdf_cholesky() -> Callable:
         mahalanobis = jnp.dot(tmp, tmp)
 
         # Combine the terms
-        n, _n = jnp.shape(cov)
+        (n,) = jnp.shape(mean)
         return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
 
     return logpdf
@@ -98,19 +106,19 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
     Then, increase the number of batches while keeping the batch size maximal.
     """
 
-    def solve(A, b):
-        result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
+    def solve(A: Callable, b):
+        result, _info = jax.scipy.sparse.linalg.cg(A, b)
         return result
 
-    def logdet(A, key):
+    def logdet(A: Callable, key):
         # todo: make the covariance a linear operator instead of a dense matrix
         # todo: figure out how to do really clever matvecs with covariances
 
-        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, lambda s, p: p @ s)
+        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
         keys = jax.random.split(key, num=slq_batch_num)
-        values = jax.lax.map(lambda k: estimate(k, A), keys)
+        values = jax.lax.map(lambda k: estimate(k), keys)
         return jnp.mean(values, axis=0) / 2
 
     def logpdf(y, *params_logdet, mean, cov):
@@ -122,7 +130,7 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms
-        n, _n = jnp.shape(cov)
+        (n,) = jnp.shape(mean)
         return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
 
     return logpdf
@@ -155,21 +163,19 @@ def logpdf_lanczos_reuse(
     }
     """
 
-    def solve(A, b):
-        result, _info = jax.scipy.sparse.linalg.cg(lambda s: A @ s, b)
+    def solve(A: Callable, b):
+        result, _info = jax.scipy.sparse.linalg.cg(A, b)
         return result
 
-    def logdet(A, key):
+    def logdet(A: Callable, key):
         # todo: make the covariance a linear operator instead of a dense matrix
         # todo: figure out how to do really clever matvecs with covariances
 
-        integrand = lanczos.integrand_spd_custom_vjp_reuse(
-            jnp.log, krylov_depth, lambda s, p: p @ s
-        )
+        integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
         keys = jax.random.split(key, num=slq_batch_num)
-        values = jax.lax.map(lambda k: estimate(k, A), keys)
+        values = jax.lax.map(lambda k: estimate(k), keys)
         return jnp.mean(values, axis=0) / 2
 
     def logpdf(y, *params_logdet, mean, cov):
@@ -181,7 +187,7 @@ def logpdf_lanczos_reuse(
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms
-        n, _n = jnp.shape(cov)
+        (n,) = jnp.shape(mean)
         return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
 
     return logpdf
