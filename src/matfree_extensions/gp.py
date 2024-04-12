@@ -18,7 +18,7 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
 
     def prior(x, **kernel_params):
         mean = mean_fun(x)
-        cov = kernel_fun(**kernel_params)(x, x)
+        cov = gram_matrix(kernel_fun(**kernel_params))(x, x)
         return mean, lambda v: cov @ v
 
     return prior
@@ -225,7 +225,7 @@ def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
             sqrt = jnp.sqrt(scaled + epsilon)
             return outputscale * (1 + sqrt) * jnp.exp(-sqrt)
 
-        return _vmap_gram(k)
+        return k
 
     params_like = {
         "raw_lengthscale": jnp.empty(()),
@@ -258,7 +258,7 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
             sqrt = jnp.sqrt(scaled + epsilon)
             return outputscale * jnp.exp(-sqrt)
 
-        return _vmap_gram(k)
+        return k
 
     params_like = {
         "raw_lengthscale": jnp.empty(()),
@@ -289,7 +289,7 @@ def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
             # Return the kernel function
             return outputscale * jnp.exp(-log_k / 2)
 
-        return _vmap_gram(k)
+        return k
 
     params_like = {
         "raw_lengthscale": jnp.empty(()),
@@ -323,6 +323,9 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def _vmap_gram(fun):
+def gram_matrix(fun: Callable, /) -> Callable:
     tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
+
+
+# todo: gram_matvec

@@ -25,7 +25,7 @@ def test_gram_matrix_shape_is_as_expected(kernel):
     x = jnp.arange(3)[:, None]
     y = jnp.arange(4)[:, None]
 
-    K = k(**p)(x, y)
+    K = gp.gram_matrix(k(**p))(x, y)
     assert K.shape == (2, 3, 4)
 
 
@@ -35,7 +35,7 @@ def test_raises_error_if_different_shapes(kernel):
     x = jnp.arange(3)[:, None]
     y = jnp.arange(4)[:, None, None]
     with pytest.raises(ValueError, match="different shapes"):
-        _ = k(**p)(x, y)
+        _ = gp.gram_matrix(k(**p))(x, y)
 
 
 @pytest_cases.parametrize_with_cases("kernel", cases=".")
@@ -46,4 +46,4 @@ def test_raises_value_error_if_shape_in_does_not_match_inputs(kernel):
     y = jnp.arange(4)[:, None]
 
     with pytest.raises(ValueError, match="shape_in"):
-        _ = k(**p)(x, y)
+        _ = gp.gram_matrix(k(**p))(x, y)
