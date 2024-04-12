@@ -9,13 +9,24 @@ from matfree import hutchinson
 from matfree_extensions import lanczos
 
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
-# todo: represent all covariance matrices via matrix-vector products
+
+# todo: figure out how to do parametrised matrix vector products
+#  (so that the HUtchinson-estimator is properly differentiable;
+#  currently, there may be an error message)
+
 # todo: implement keops-like symbolic matrix vector products
+#  (the answer to the previous two probably involves
+#   a gram_matvec() function next to gram_matrix, but maybe not...)
 
 
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
 
+    # todo: if the kernel is of the form k(**p)(x, y),
+    #  then this prior() function should be of the form
+    #  prior(**p)(x).
+    #  If we want to keep the prior of this form,
+    #  then the kernel function should be updated.
     def prior(x, **kernel_params):
         mean = mean_fun(x)
         cov = gram_matrix(kernel_fun(**kernel_params))(x, x)
@@ -111,9 +122,6 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
         return result
 
     def logdet(A: Callable, key):
-        # todo: make the covariance a linear operator instead of a dense matrix
-        # todo: figure out how to do really clever matvecs with covariances
-
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
@@ -168,9 +176,6 @@ def logpdf_lanczos_reuse(
         return result
 
     def logdet(A: Callable, key):
-        # todo: make the covariance a linear operator instead of a dense matrix
-        # todo: figure out how to do really clever matvecs with covariances
-
         integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
@@ -302,7 +307,8 @@ def _softplus(x, beta=1.0, threshold=20.0):
     # Shamelessly stolen from:
     # https://github.com/google/jax/issues/18443
 
-    # mirroring the pytorch implementation https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+    # mirroring the pytorch implementation
+    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
     x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
     return jax.lax.select(
         x * beta < threshold,
@@ -326,6 +332,3 @@ def _assert_shapes(x, y, shape_in):
 def gram_matrix(fun: Callable, /) -> Callable:
     tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
-
-
-# todo: gram_matvec
