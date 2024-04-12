@@ -79,3 +79,8 @@ This could be easier with `matfree_extensions.exp_util.create_matching_directory
 ## Using code
 
 Look at tests for how to use the library functions.
+
+
+# todos:
+
+- run tests without having to rely on (gpy)torch

@@ -1,40 +1,41 @@
+import os
+
+import flax.linen
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
 from matfree_extensions import exp_util
-import os
-import flax.linen 
-import tree_math as tm
 
 
-class MLP(flax.linen.Module):                    # create a Flax Module dataclass
-  out_dims: int
+class MLP(flax.linen.Module):  # create a Flax Module dataclass
+    out_dims: int
 
-  @flax.linen.compact
-  def __call__(self, x):
-    x = x.reshape((x.shape[0], -1))
-    x = flax.linen.Dense(8)(x)   
-    x = flax.linen.tanh(x)
-    x = flax.linen.Dense(self.out_dims)(x)
-    return x
+    @flax.linen.compact
+    def __call__(self, x):
+        x = x.reshape((x.shape[0], -1))
+        x = flax.linen.Dense(8)(x)
+        x = flax.linen.tanh(x)
+        return flax.linen.Dense(self.out_dims)(x)
+
 
 def f(x):
     return jnp.sin(x)
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     # Make directories
     directory = exp_util.matching_directory(__file__, "figures/")
     os.makedirs(directory, exist_ok=True)
 
     # Create data
     num_data = 100
-    x_train = jnp.linspace(0, 2*jnp.pi, num_data)
+    x_train = jnp.linspace(0, 2 * jnp.pi, num_data)
     eps = jax.random.normal(jax.random.PRNGKey(0), (num_data,)) * 0.05
     y_train = f(x_train) + eps
 
     # Plot data
-    plt.plot(x_train, y_train, 'o')
+    plt.plot(x_train, y_train, "o")
     plt.savefig(f"{directory}/figure.pdf")
 
     # Create model
@@ -44,14 +45,13 @@ if __name__=="__main__":
 
     def apply_fn(params: jax.Array, x: jax.Array):
         return model.apply(unflatten(params), x)
-    
+
     y = apply_fn(variables, x_train)
 
     # Train model via optax
     def loss_fn(params, x_, y_):
         y_pred = apply_fn(params, x_).reshape((-1,))
-        return jnp.mean((y_pred - y_)**2, axis=0)
-    
+        return jnp.mean((y_pred - y_) ** 2, axis=0)
 
     optimizer = optax.sgd(1e-1)
     optimizer_state = optimizer.init(variables)
@@ -71,21 +71,23 @@ if __name__=="__main__":
             print(f"Epoch {epoch}, loss {loss:.3f}")
 
     # Plot predictions
-    x_val = jnp.linspace(0, 2*jnp.pi, 1000)
+    x_val = jnp.linspace(0, 2 * jnp.pi, 1000)
     y_pred = apply_fn(variables, x_val)
     plt.plot(x_val, f(x_val))
     plt.plot(x_val, y_pred)
     plt.savefig(f"{directory}/predixcyions.pdf")
-    
+
     # Construct the GGN Matrix
     def calib_loss(log_alpha):
         D = len(variables)
-        log_prior = D / 2 * log_alpha - 0.5 * _alpha(log_alpha) * jnp.dot(variables, variables)
+        log_prior = D / 2 * log_alpha - 0.5 * _alpha(log_alpha) * jnp.dot(
+            variables, variables
+        )
         M = ggn_fn(log_alpha)
         _sign, logdet = jnp.linalg.slogdet(M)
         log_marginal = log_prior - 0.5 * logdet
-        return -log_marginal 
-    
+        return -log_marginal
+
     def data_likelihood(log_alpha, x_test, y_test):
         # GP in weight space
         mean = variables
@@ -97,24 +99,26 @@ if __name__=="__main__":
         cov_fn = J_test @ cov @ J_test.T
 
         # Compute the likelihood
-        import scipy.stats 
-        import numpy as np 
+        import numpy as np
+        import scipy.stats
+
         return scipy.stats.multivariate_normal.logpdf(
             np.asarray(y_test),
             np.asarray(mean_fn),
-            np.asarray(cov_fn + cov_fn.T) / 2 + np.eye(100)*1e-6,
+            np.asarray(cov_fn + cov_fn.T) / 2 + np.eye(100) * 1e-6,
             allow_singular=True,
         )
-        return jax.scipy.stats.multivariate_normal.logpdf(y_test, mean_fn, cov_fn, allow_singular=True)
-    
+        return jax.scipy.stats.multivariate_normal.logpdf(
+            y_test, mean_fn, cov_fn, allow_singular=True
+        )
+
     def ggn_fn(log_alpha):
         J = (jax.jacfwd(lambda p: apply_fn(p, x_train))(variables)).squeeze()
         GGN = J.T @ J
         return GGN + _alpha(log_alpha) * jnp.eye(GGN.shape[0])
-    
+
     def _alpha(log_alpha):
         return 1e-3 + jnp.exp(log_alpha)
-    
 
     # Optimize the calibration loss
     log_alpha = 0.0
