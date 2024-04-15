@@ -5,18 +5,17 @@ import jax
 import jax.numpy as jnp
 
 
-class _MLP(flax.linen.Module):
-    out_dims: int
-
-    @flax.linen.compact
-    def __call__(self, x):
-        x = x.reshape((x.shape[0], -1))
-        x = flax.linen.Dense(8)(x)
-        x = flax.linen.tanh(x)
-        return flax.linen.Dense(self.out_dims)(x)
-
-
 def model_mlp(output_dimensions):
+    class _MLP(flax.linen.Module):
+        out_dims: int
+
+        @flax.linen.compact
+        def __call__(self, x):
+            x = x.reshape((x.shape[0], -1))
+            x = flax.linen.Dense(8)(x)
+            x = flax.linen.tanh(x)
+            return flax.linen.Dense(self.out_dims)(x)
+
     model = _MLP(output_dimensions)
     return model.init, model.apply
 
