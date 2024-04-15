@@ -106,7 +106,14 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
 
         # Transpose the matrix vector product
         # (as a function of v, not of p)
-        vecmat = jax.linear_transpose(lambda s: matvec(s, *p), x_like)
+        #
+        # Note: we use vjp instead of linear_transpose,
+        #  even though the function is linear.
+        #  Why? Because if the matvec involves a map() or a scan()
+        #  over linear functions, linear_transpose() is not defined.
+        #  See: https://github.com/google/jax/issues/6619
+        #  VJP is a little bit slower, but more robust here.
+        _, vecmat = jax.vjp(lambda s: matvec(s, *p), x_like)
 
         # The output of the transpose is a tuple of length 1
         (a,) = vecmat(x)

@@ -64,8 +64,19 @@ def case_logpdf_lanczos_rademacher_reuse():
     return logpdf, params
 
 
-@pytest_cases.parametrize_with_cases("logpdf", cases=".")
-def test_mll_exact(logpdf):
+@pytest_cases.case
+def case_gram_matvec_dense():
+    return gp.gram_matvec_dense()
+
+
+@pytest_cases.case
+def case_gram_matvec_map():
+    return gp.gram_matvec_map()
+
+
+@pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
+@pytest_cases.parametrize_with_cases("gram_matvec", cases=".", prefix="case_gram_")
+def test_mll_exact(logpdf, gram_matvec):
     # Compute the reference model
     reference = _model_and_mll_via_gpytorch()
     (x, y), value_ref, ((lengthscale, outputscale), noise) = reference
@@ -75,7 +86,7 @@ def test_mll_exact(logpdf):
 
     # Set up a GP model
     k, p_prior = gp.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp.model(gp.mean_zero(), k)
+    prior = gp.model(gp.mean_zero(), k, gram_matvec=gram_matvec)
     likelihood, p_likelihood = gp.likelihood_gaussian()
     loss = gp.mll_exact(prior, likelihood, logpdf=logpdf_fun)
 

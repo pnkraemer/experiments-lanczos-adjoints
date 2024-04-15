@@ -1,5 +1,6 @@
 """Gaussian process models."""
 
+import functools
 from typing import Callable
 
 import jax
@@ -11,15 +12,16 @@ from matfree_extensions import lanczos
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
 
 
-def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
+def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Callable:
     """Construct a Gaussian process model."""
 
     def parametrise(**kernel_params):
         kfun = kernel_fun(**kernel_params)
+        make_matvec = gram_matvec(kfun)
 
         def prior(x):
             mean = mean_fun(x)
-            cov_matvec = _gram_matvec(kfun)(x, x)
+            cov_matvec = functools.partial(make_matvec, x, x)
             return mean, cov_matvec
 
         return prior
@@ -27,14 +29,35 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     return parametrise
 
 
-def _gram_matvec(fun: Callable, /) -> Callable:
-    def make_matvec(x, y) -> Callable:
-        return lambda v: _gram_matrix(fun)(x, y) @ v
+# todo: implement
+#  gram_matvec_map_over_vmap
+#  gram_matvec_pmap_over_vmap
+#  gram_matvec_map_over_pmap
+#  gram_matvec_map_over_pmap_over_vmap
 
-    return make_matvec
+
+def gram_matvec_map():
+    def matvec(fun: Callable) -> Callable:
+        def matvec_map(x, y, v):
+            Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x)
+            return jnp.reshape(Kv_mapped, (-1,))
+
+        def _matvec_single(x_single, y, v):
+            return gram_matrix(fun)(x_single[None, ...], y) @ v
+
+        return matvec_map
+
+    return matvec
 
 
-def _gram_matrix(fun: Callable, /) -> Callable:
+def gram_matvec_dense():
+    def matvec(fun: Callable) -> Callable:
+        return lambda x, y, v: gram_matrix(fun)(x, y) @ v
+
+    return matvec
+
+
+def gram_matrix(fun: Callable, /) -> Callable:
     tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
 
