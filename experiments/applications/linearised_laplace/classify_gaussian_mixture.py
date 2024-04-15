@@ -16,6 +16,25 @@ import matplotlib.pyplot as plt
 import optax
 from matfree_extensions import exp_util
 
+#
+# class ConvNet(flax.linen.Module):
+#     output_dim: int
+#
+#     @flax.linen.compact
+#     def __call__(self, x_batch):
+#         conv = flax.linen.Conv(
+#             features=4, kernel_size=(3, 3), strides=(2, 2), padding=1
+#         )
+#         # x = jnp.transpose(x_batch, (0, 2, 3, 1))
+#         x = conv(x)
+#         x = flax.linen.tanh(x)
+#         x = flax.linen.max_pool(x, window_shape=(2, 2), strides=(2, 2))
+#         x = conv(x)
+#         x = flax.linen.tanh(x)
+#         x = flax.linen.max_pool(x, window_shape=(2, 2), strides=(2, 2))
+#         x = x.reshape((x.shape[0], -1))
+#         return flax.linen.Dense(features=self.output_dim)(x)
+
 
 class MLP(flax.linen.Module):
     out_dims: int
@@ -39,6 +58,64 @@ if __name__ == "__main__":
 
     # Create data
     num_data = 100
+    key_1, key_2 = jax.random.split(jax.random.PRNGKey(1))
+    m = 2.0
+    mu_1 = jnp.array((-m, -m))
+    mu_2 = jnp.array((m, m))
+    x_1 = jax.random.normal(key_1, (num_data, 2)) + mu_1[None, :]
+    y_1 = jnp.asarray(num_data * [[1, 0]])
+    x_2 = jax.random.normal(key_2, (num_data, 2)) + mu_2[None, :]
+    y_2 = jnp.asarray(num_data * [[0, 1]])
+    x_train = jnp.concatenate([x_1, x_2], axis=0)
+    y_train = jnp.concatenate([y_1, y_2], axis=0)
+
+    # Create model
+    model = MLP(out_dims=2)
+    variables_dict = model.init(jax.random.PRNGKey(42), x_train)
+    variables, unflatten = jax.flatten_util.ravel_pytree(variables_dict)
+
+    # Loss and accuracy
+
+    def loss(params, x_, y_):
+        y_pred = model.apply(unflatten(params), x_)
+        logprobs = jax.nn.log_softmax(y_pred, axis=-1)
+        return -jnp.mean(jnp.sum(logprobs * y_, axis=-1))
+
+    def accuracy(params, x_, y_):
+        y_pred = model.apply(unflatten(params), x_)
+        return jnp.mean(jnp.argmax(y_pred, axis=-1) == jnp.argmax(y_, axis=-1))
+
+    # Optimise
+
+    optimizer = optax.adam(1e-2)
+    optimizer_state = optimizer.init(variables)
+    n_epochs = 200
+    key = jax.random.PRNGKey(412576)
+    batch_size = num_data
+    value_and_grad = jax.jit(jax.value_and_grad(loss, argnums=0))
+    for epoch in range(n_epochs):
+        # Subsample data
+        key, subkey = jax.random.split(key)
+        idx = jax.random.choice(subkey, x_train.shape[0], (batch_size,), replace=False)
+
+        # Optimiser step
+        loss, grad = value_and_grad(variables, x_train[idx], y_train[idx])
+        updates, optimizer_state = optimizer.update(grad, optimizer_state)
+        variables = optax.apply_updates(variables, updates)
+
+        # Look at intermediate results
+        if epoch % 10 == 0:
+            acc = accuracy(variables, x_train[idx], y_train[idx])
+            print(f"Epoch {epoch}, loss {loss:.3f}, accuracy {acc:.3f}")
+
+    #
+    #
+    #
+    # plt.scatter(x_train[:, 0], x_train[:, 1])
+    # plt.show()
+    #
+
+    assert False
     x_train = jnp.linspace(0, 2 * jnp.pi, num_data)
     eps = jax.random.normal(jax.random.PRNGKey(0), (num_data,)) * 0.05
     y_train = f(x_train) + eps
@@ -82,7 +159,7 @@ if __name__ == "__main__":
     plt.plot(x_val, y_pred, label="Prediction")
     plt.plot(x_train, y_train, "o", label="Data")
     plt.legend()
-    plt.savefig(f"{directory}/simple_sin_result.pdf")
+    plt.show()
 
     # Construct the GGN Matrix
     def calib_loss(log_alpha):
