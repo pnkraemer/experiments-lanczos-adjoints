@@ -1,3 +1,5 @@
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 
@@ -8,19 +10,23 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
         msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
         raise TypeError(msg)
 
-    def estimate(v, *params):
-        return _forward(matvec, krylov_depth, v, *params, reortho=reortho)
+    def estimate_public(v, *params):
+        matvec_convert, aux_args = jax.closure_convert(matvec, v, *params)
+        return estimate_backend(matvec_convert, v, *params, *aux_args)
 
-    def estimate_fwd(v, *params):
-        outputs = estimate(v, *params)
+    def estimate_backend(matvec_convert: Callable, v, *params):
+        return _forward(matvec_convert, krylov_depth, v, *params, reortho=reortho)
+
+    def estimate_fwd(matvec_convert: Callable, v, *params):
+        outputs = estimate_backend(matvec_convert, v, *params)
         return outputs, (outputs, params)
 
-    def estimate_bwd(cache, vjp_incoming):
+    def estimate_bwd(matvec_convert: Callable, cache, vjp_incoming):
         (Q, H, r, c), params = cache
         dQ, dH, dr, dc = vjp_incoming
 
         grads, _ = _adjoint(
-            matvec,
+            matvec_convert,
             *params,
             Q=Q,
             H=H,
@@ -35,9 +41,9 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
         return grads
 
     if custom_vjp:
-        estimate = jax.custom_vjp(estimate)
-        estimate.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
-    return estimate
+        estimate_backend = jax.custom_vjp(estimate_backend, nondiff_argnums=(0,))
+        estimate_backend.defvjp(estimate_fwd, estimate_bwd)  # type: ignore
+    return estimate_public
 
 
 def _forward(matvec, krylov_depth, v, *params, reortho: str):

@@ -68,20 +68,28 @@ def integrand_spd_custom_vjp_reuse(matfun, order, matvec, /, *, reortho: str = "
     higher derivatives.
     """
 
-    def quadform(v0, *parameters):
-        return quadform_fwd(v0, *parameters)[0]
+    def quadform_public(v0, *parameters):
+        # Convert closure. Why? See example under
+        # https://jax.readthedocs.io/en/latest/_autosummary/jax.closure_convert.html
+        Av, aux_args = jax.closure_convert(matvec, v0, *parameters)
+        v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
 
-    def quadform_fwd(v0, *parameters):
+        # Flatten the matvec
+        def matvec_flat(v_flat, *p):
+            v = v_unflatten(v_flat)
+            av = Av(v, *p)
+            flat, unflatten = jax.flatten_util.ravel_pytree(av)
+            return flat
+
+        return quadform_backend(matvec_flat, v0, *parameters, *aux_args)
+
+    def quadform_backend(matvec_flat: Callable, v0, *parameters):
+        return quadform_fwd(matvec_flat, v0, *parameters)[0]
+
+    def quadform_fwd(matvec_flat, v0, *parameters):
         v0_flat, v_unflatten = jax.flatten_util.ravel_pytree(v0)
         scale = jnp.linalg.norm(v0_flat)
         v0_flat /= scale
-
-        @jax.tree_util.Partial
-        def matvec_flat(v_flat, *p):
-            v = v_unflatten(v_flat)
-            av = matvec(v, *p)
-            flat, unflatten = jax.flatten_util.ravel_pytree(av)
-            return flat
 
         # We define our own custom vjp, so no need to select the one for tridiag()
         algorithm = tridiag(matvec_flat, order, custom_vjp=False, reortho=reortho)
@@ -109,16 +117,10 @@ def integrand_spd_custom_vjp_reuse(matfun, order, matvec, /, *, reortho: str = "
         w1, w2 = scale**2 * (basis.T @ sol), v0_flat
 
         # Return both
-        cache = {
-            "matvec_flat": matvec_flat,
-            "w1": w1,
-            "w2": w2,
-            "parameters": parameters,
-        }
+        cache = {"w1": w1, "w2": w2, "parameters": parameters}
         return slqval, cache
 
-    def quadform_bwd(cache, vjp_incoming):
-        matvec_flat = cache["matvec_flat"]
+    def quadform_bwd(matvec_flat: Callable, cache: dict, vjp_incoming):
         p = cache["parameters"]
         w1, w2 = cache["w1"], cache["w2"]
 
@@ -127,10 +129,10 @@ def integrand_spd_custom_vjp_reuse(matfun, order, matvec, /, *, reortho: str = "
         # todo: compute gradient wrt v?
         return 0.0, *vjp(vjp_incoming)
 
-    quadform = jax.custom_vjp(quadform)
-    quadform.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
+    quadform_backend = jax.custom_vjp(quadform_backend, nondiff_argnums=(0,))
+    quadform_backend.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
 
-    return quadform
+    return quadform_public
 
 
 def tridiag(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
