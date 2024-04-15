@@ -1,22 +1,31 @@
 """Utilities for BNNs."""
 
+from typing import Callable
+
 import flax.linen
 import jax
 import jax.numpy as jnp
 
 
-def model_mlp(output_dimensions):
+def model_mlp(output_dimensions, activation_fun):
     class _MLP(flax.linen.Module):
         out_dims: int
+        activation: Callable
 
         @flax.linen.compact
         def __call__(self, x):
             x = x.reshape((x.shape[0], -1))
-            x = flax.linen.Dense(8)(x)
-            x = flax.linen.tanh(x)
+            x = flax.linen.Dense(5)(x)
+            x = self.activation(x)
+            x = flax.linen.Dense(5)(x)
+            x = self.activation(x)
+            x = flax.linen.Dense(5)(x)
+            x = self.activation(x)
+            x = flax.linen.Dense(5)(x)
+            x = self.activation(x)
             return flax.linen.Dense(self.out_dims)(x)
 
-    model = _MLP(output_dimensions)
+    model = _MLP(output_dimensions, activation_fun)
     return model.init, model.apply
 
 
@@ -60,3 +69,22 @@ def loss_calibration(
         return jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
 
     return loss
+
+
+def predictive_variance(
+    *, loss_single, hyperparam_unconstrain, model_fun, param_unflatten
+):
+    def evaluate(a, variables, x_train, y_train, x_test):
+        alpha = hyperparam_unconstrain(a)
+        model_pred = model_fun(param_unflatten(variables), x_train)
+
+        H = jax.vmap(jax.hessian(loss_single, argnums=0))(model_pred, y_train)
+        J = jax.jacfwd(lambda v: model_fun(param_unflatten(v), x_train))(variables)
+
+        ggn_summands = jax.vmap(lambda j, h: j.T @ h @ j)(J, H)
+        ggn = jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
+        covariance = jnp.linalg.inv(ggn)
+        J_test = jax.jacfwd(lambda v: model_fun(param_unflatten(v), x_test))(variables)
+        return jax.vmap(lambda J_single: J_single @ covariance @ J_single.T)(J_test)
+
+    return evaluate
