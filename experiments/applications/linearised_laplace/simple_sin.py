@@ -8,7 +8,7 @@ import optax
 from matfree_extensions import exp_util
 
 
-class MLP(flax.linen.Module):  # create a Flax Module dataclass
+class MLP(flax.linen.Module):
     out_dims: int
 
     @flax.linen.compact
@@ -99,18 +99,8 @@ if __name__ == "__main__":
         cov_fn = J_test @ cov @ J_test.T
 
         # Compute the likelihood
-        import numpy as np
-        import scipy.stats
-
-        return scipy.stats.multivariate_normal.logpdf(
-            np.asarray(y_test),
-            np.asarray(mean_fn),
-            np.asarray(cov_fn + cov_fn.T) / 2 + np.eye(100) * 1e-6,
-            allow_singular=True,
-        )
-        return jax.scipy.stats.multivariate_normal.logpdf(
-            y_test, mean_fn, cov_fn, allow_singular=True
-        )
+        cov_matrix = (cov_fn + cov_fn.T) / 2 + jnp.eye(100) * 1e-6
+        return jax.scipy.stats.multivariate_normal.logpdf(y_test, mean_fn, cov_matrix)
 
     def ggn_fn(log_alpha):
         J = (jax.jacfwd(lambda p: apply_fn(p, x_train))(variables)).squeeze()
