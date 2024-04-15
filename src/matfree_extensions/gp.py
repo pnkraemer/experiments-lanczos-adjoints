@@ -10,10 +10,6 @@ from matfree_extensions import lanczos
 
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
 
-# todo: implement keops-like symbolic matrix vector products
-#  (the answer to the previous two probably involves
-#   a gram_matvec() function next to gram_matrix, but maybe not...)
-
 
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
@@ -23,12 +19,24 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
 
         def prior(x):
             mean = mean_fun(x)
-            cov = gram_matrix(kfun)(x, x)
-            return mean, lambda v: cov @ v
+            cov_matvec = _gram_matvec(kfun)(x, x)
+            return mean, cov_matvec
 
         return prior
 
     return parametrise
+
+
+def _gram_matvec(fun: Callable, /) -> Callable:
+    def make_matvec(x, y) -> Callable:
+        return lambda v: _gram_matrix(fun)(x, y) @ v
+
+    return make_matvec
+
+
+def _gram_matrix(fun: Callable, /) -> Callable:
+    tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
+    return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
 
 
 def likelihood_gaussian() -> tuple[Callable, dict]:
@@ -327,8 +335,3 @@ def _assert_shapes(x, y, shape_in):
         error = f"The shape {jnp.shape(x)} of the first argument "
         error += "does not match 'shape_in'={shape_in}"
         raise ValueError(error)
-
-
-def gram_matrix(fun: Callable, /) -> Callable:
-    tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
-    return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)

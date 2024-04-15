@@ -127,7 +127,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
     Sigma = jnp.zeros_like(dQ.T @ Q)
-    dp = jax.tree_util.tree_map(jnp.zeros_like, *params) if params != () else ()
+    dp = jax.tree_util.tree_map(jnp.zeros_like, params)
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
@@ -198,7 +198,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         "Sigma": jnp.triu(Sigma_t, 2).T,
         "eta": eta,
     }
-    return (dv, dp), multipliers
+    return (dv, *dp), multipliers
 
 
 def _adjoint_step(
@@ -250,7 +250,7 @@ def _adjoint_step(
     l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
 
     # Update the parameter-gradients
-    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, *vjp(q)) if params != () else ()
+    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, vjp(q))
 
     # Solve or (Gamma + Gamma.T) e_K
     tmp = lower_mask * (Pi_gamma - l_At @ Q.conj())
