@@ -5,6 +5,9 @@ from typing import Callable
 import flax.linen
 import jax
 import jax.numpy as jnp
+from matfree import hutchinson
+
+from matfree_extensions import lanczos
 
 
 def model_mlp(*, out_dims, activation: Callable):
@@ -43,20 +46,44 @@ def loss_training_cross_entropy_single(y_pred, y_data):
     return -jnp.sum(logprobs * y_data, axis=-1)
 
 
-def loss_calibration(*, ggn_fun, hyperparam_unconstrain):
-    def loss(a, variables, x_train, y_train):
+def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
+    def loss(a, variables, x_train, y_train, *logdet_params):
         alpha = hyperparam_unconstrain(a)
         tmp1 = len(variables) / 2 * a
         tmp2 = -0.5 * alpha * jnp.dot(variables, variables)
         log_prior = tmp1 + tmp2
 
         M = ggn_fun(alpha, variables, x_train, y_train)
-        _sign, logdet = jnp.linalg.slogdet(M)
+        logdet = logdet_fun(M, *logdet_params)
 
         log_marginal = log_prior - 0.5 * logdet
         return -log_marginal
 
     return loss
+
+
+def solver_logdet_dense():
+    def logdet(M: jax.Array):
+        _sign, logdet_value = jnp.linalg.slogdet(M)
+        return logdet_value
+
+    return logdet
+
+
+# ~10 because the rank of our GGN is 10
+def solver_logdet_sparse(*, slq_rank=10, slq_num_samples=100, slq_num_batches=1):
+    def logdet(M: jax.Array, key: jax.random.PRNGKey):
+        x_like = jnp.ones((len(M),), dtype=float)
+        sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
+
+        integrand = lanczos.integrand_spd(jnp.log, slq_rank, lambda v: M @ v)
+        estimate = hutchinson.hutchinson(integrand, sampler)
+
+        keys = jax.random.split(key, num=slq_num_batches)
+        values = jax.lax.map(lambda k: estimate(k), keys)
+        return jnp.mean(values, axis=0)
+
+    return logdet
 
 
 def predictive_variance(*, ggn_fun, model_fun, param_unflatten, hyperparam_unconstrain):

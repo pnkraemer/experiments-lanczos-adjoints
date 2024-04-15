@@ -51,7 +51,7 @@ def loss_p(v, x, y):
 
 loss_value_and_grad = jax.jit(jax.value_and_grad(loss_p, argnums=0))
 
-for epoch in range(n_epochs):
+for epoch in range(100):
     # Subsample data
     key, subkey = jax.random.split(key)
     idx = jax.random.choice(subkey, x_train.shape[0], (batch_size,), replace=False)
@@ -77,19 +77,26 @@ ggn_fun = bnn_util.ggn(
     loss_single=bnn_util.loss_training_cross_entropy_single,
     param_unflatten=unflatten,
 )
+# GGN = ggn_fun(0., variables, x_train, y_train)
+# print(jnp.linalg.matrix_rank(GGN))
+# print(jnp.shape(GGN))
+
 calib_loss = bnn_util.loss_calibration(
-    ggn_fun=ggn_fun, hyperparam_unconstrain=lambda s: 1e-3 + jnp.exp(s)
+    ggn_fun=ggn_fun,
+    hyperparam_unconstrain=lambda s: 1e-3 + jnp.exp(s),
+    logdet_fun=bnn_util.solver_logdet_sparse(),
 )
 value_and_grad = jax.jit(jax.value_and_grad(calib_loss, argnums=0))
 
-n_epochs = 100
-for epoch in range(n_epochs):
+
+for epoch in range(10_000):
     # Subsample data
     key, subkey = jax.random.split(key)
     idx = jax.random.choice(subkey, x_train.shape[0], (batch_size,), replace=False)
 
     # Optimisation step
-    loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx])
+    key, subkey = jax.random.split(key)
+    loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx], key)
     updates, optimizer_state = optimizer.update(grad, optimizer_state)
     log_alpha = optax.apply_updates(log_alpha, updates)
     if epoch % 10 == 0:
