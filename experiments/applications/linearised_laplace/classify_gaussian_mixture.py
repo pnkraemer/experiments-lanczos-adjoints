@@ -1,3 +1,12 @@
+# todo:
+#  - Replace regression problem with a classification problem
+#  - Reconsider all loss functions
+#  - Use them to evaluate the calibration result
+#  - Plot solutions
+#  - Move some code to the src
+#  - Split the script into different smaller scripts once big
+
+
 import os
 
 import flax.linen
@@ -34,10 +43,6 @@ if __name__ == "__main__":
     eps = jax.random.normal(jax.random.PRNGKey(0), (num_data,)) * 0.05
     y_train = f(x_train) + eps
 
-    # Plot data
-    plt.plot(x_train, y_train, "o")
-    plt.savefig(f"{directory}/figure.pdf")
-
     # Create model
     model = MLP(out_dims=1)
     variables_dict = model.init(jax.random.PRNGKey(42), x_train)
@@ -73,9 +78,11 @@ if __name__ == "__main__":
     # Plot predictions
     x_val = jnp.linspace(0, 2 * jnp.pi, 1000)
     y_pred = apply_fn(variables, x_val)
-    plt.plot(x_val, f(x_val))
-    plt.plot(x_val, y_pred)
-    plt.savefig(f"{directory}/predixcyions.pdf")
+    plt.plot(x_val, f(x_val), label="Truth")
+    plt.plot(x_val, y_pred, label="Prediction")
+    plt.plot(x_train, y_train, "o", label="Data")
+    plt.legend()
+    plt.savefig(f"{directory}/simple_sin_result.pdf")
 
     # Construct the GGN Matrix
     def calib_loss(log_alpha):
@@ -94,7 +101,7 @@ if __name__ == "__main__":
         cov = jnp.linalg.inv(ggn_fn(log_alpha))
 
         # GP in y space
-        mean_fn = (apply_fn)(mean, x_test).reshape((-1,))
+        mean_fn = apply_fn(mean, x_test).reshape((-1,))
         J_test = (jax.jacfwd(lambda p: apply_fn(p, x_test))(variables)).squeeze()
         cov_fn = J_test @ cov @ J_test.T
 
