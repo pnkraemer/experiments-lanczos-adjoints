@@ -85,7 +85,13 @@ def test_mll_exact(logpdf):
     p_likelihood["raw_noise"] = noise.squeeze()
 
     # Evaluate the MLL
-    value = loss(x, y, *p_logpdf, params_prior=p_prior, params_likelihood=p_likelihood)
+    # We do it in a weird way, by computing value_and_grad.
+    # The reason is that we need to ensure that the MLL function
+    # is differentiable, and this is the most obvious place for doing so.
+    def mll(p1, p2):
+        return loss(x, y, *p_logpdf, params_prior=p1, params_likelihood=p2)
+
+    value, _grad = jax.value_and_grad(mll)(p_prior, p_likelihood)
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)
