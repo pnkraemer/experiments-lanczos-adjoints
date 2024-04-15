@@ -30,10 +30,12 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
 
 
 # todo: implement
-#  gram_matvec_map_over_vmap
-#  gram_matvec_pmap_over_vmap
+#  gram_matvec_map_over_dense
+#  gram_matvec_pmap_over_dense
 #  gram_matvec_map_over_pmap
-#  gram_matvec_map_over_pmap_over_vmap
+#  gram_matvec_map_over_pmap_over_dense
+
+# todo: and consider renaming *_dense to *_vmap or *_batch
 
 
 def gram_matvec_map():
