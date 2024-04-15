@@ -10,10 +10,6 @@ from matfree_extensions import lanczos
 
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
 
-# todo: figure out how to do parametrised matrix vector products
-#  (so that the HUtchinson-estimator is properly differentiable;
-#  currently, there may be an error message)
-
 # todo: implement keops-like symbolic matrix vector products
 #  (the answer to the previous two probably involves
 #   a gram_matvec() function next to gram_matrix, but maybe not...)
@@ -22,29 +18,33 @@ from matfree_extensions import lanczos
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
 
-    # todo: if the kernel is of the form k(**p)(x, y),
-    #  then this prior() function should be of the form
-    #  prior(**p)(x).
-    #  If we want to keep the prior of this form,
-    #  then the kernel function should be updated.
-    def prior(x, **kernel_params):
-        mean = mean_fun(x)
-        cov = gram_matrix(kernel_fun(**kernel_params))(x, x)
-        return mean, lambda v: cov @ v
+    def parametrise(**kernel_params):
+        kfun = kernel_fun(**kernel_params)
 
-    return prior
+        def prior(x):
+            mean = mean_fun(x)
+            cov = gram_matrix(kfun)(x, x)
+            return mean, lambda v: cov @ v
+
+        return prior
+
+    return parametrise
 
 
 def likelihood_gaussian() -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def likelihood(mean, cov, *, raw_noise):
-        # Apply a soft-plus because GPyTorch does
+    def parametrise(*, raw_noise):
         noise = _softplus(raw_noise)
-        return mean, lambda v: cov(v) + noise * v
+
+        def likelihood(mean, cov):
+            # Apply a soft-plus because GPyTorch does
+            return mean, lambda v: cov(v) + noise * v
+
+        return likelihood
 
     p = {"raw_noise": jnp.empty(())}
-    return likelihood, p
+    return parametrise, p
 
 
 def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Callable:
@@ -52,8 +52,8 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
 
     def mll(x, y, *params_logdet, params_prior: dict, params_likelihood: dict):
         # Evaluate the marginal data likelihood
-        mean, cov = prior(x, **params_prior)
-        mean_, cov_ = likelihood(mean, cov, **params_likelihood)
+        mean, cov = prior(**params_prior)(x)
+        mean_, cov_ = likelihood(**params_likelihood)(mean, cov)
 
         # Evaluate the log-pdf
         value = logpdf(y, *params_logdet, mean=mean_, cov=cov_)
@@ -117,11 +117,11 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
     Then, increase the number of batches while keeping the batch size maximal.
     """
 
-    def solve(A: Callable, b):
+    def solve(A: Callable, /, b):
         result, _info = jax.scipy.sparse.linalg.cg(A, b)
         return result
 
-    def logdet(A: Callable, key):
+    def logdet(A: Callable, /, key):
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
