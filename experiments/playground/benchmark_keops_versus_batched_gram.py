@@ -15,7 +15,8 @@ num_matvecs = 3
 def print_ts(t):
     t = jnp.asarray(t)
     print(
-        f"\t{jnp.mean(t):.3f} +/- {jnp.std(t):.3f} (mean +/- std of {num_matvecs} runs)"
+        f"\t{jnp.mean(t):.3f} +/- {jnp.std(t):.3f} "
+        f"(mean +/- std of {num_matvecs} runs; all in seconds)"
     )
 
 
@@ -42,7 +43,8 @@ for num in 2 ** jnp.arange(10, 16):
     print("Matfree (Matern32)")
 
     kernel, params = gp.kernel_scaled_matern_32(shape_in=(), shape_out=())
-    K = jax.jit(gp.gram_matvec_map()(kernel(**params)))
+    matvec = gp.gram_matvec_map_over_batch(batch_size=16)
+    K = jax.jit(matvec(kernel(**params)))
     x_ = jnp.asarray(x.detach().numpy())
     v_ = jnp.asarray(v.detach().numpy())
     _ = K(x_, x_, v_)

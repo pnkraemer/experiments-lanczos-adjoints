@@ -52,6 +52,25 @@ def gram_matvec_map():
     return matvec
 
 
+def gram_matvec_map_over_batch(*, batch_size: int):
+    def matvec(fun: Callable) -> Callable:
+        def matvec_map(x, y, v):
+            num, *shape = jnp.shape(x)
+            if num % batch_size != 0:
+                raise ValueError
+
+            x_batched = jnp.reshape(x, (num // batch_size, batch_size, *shape))
+            Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)
+            return jnp.reshape(Kv_mapped, (-1,))
+
+        def _matvec_single(x_batched, y, v):
+            return gram_matrix(fun)(x_batched, y) @ v
+
+        return matvec_map
+
+    return matvec
+
+
 def gram_matvec_dense():
     def matvec(fun: Callable) -> Callable:
         return lambda x, y, v: gram_matrix(fun)(x, y) @ v

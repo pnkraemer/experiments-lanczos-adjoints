@@ -7,6 +7,7 @@ name = "matfree_extensions"
 version = "0.0.1"
 
 dependencies = [
+    # Ensure that JAX is installed:
     "matfree",
 ]
 
@@ -20,7 +21,8 @@ dev = [
 devtorch = [
     # Ensure that PyTorch is installed:
     # https://pytorch.org/
-    "gpytorch"
+    "gpytorch",
+    "pykeops"
 ]
 uci = [
     "ucimlrepo",
