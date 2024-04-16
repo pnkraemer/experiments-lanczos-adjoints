@@ -71,12 +71,12 @@ def solver_logdet_dense():
 
 
 # ~10 because the rank of our GGN is 10
-def solver_logdet_sparse(*, slq_rank=10, slq_num_samples=100, slq_num_batches=1):
+def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     def logdet(M: jax.Array, key: jax.random.PRNGKey):
         x_like = jnp.ones((len(M),), dtype=float)
         sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
 
-        integrand = lanczos.integrand_spd(jnp.log, slq_rank, lambda v: M @ v)
+        integrand = lanczos.integrand_spd(jnp.log, lanczos_rank, lambda v: M @ v)
         estimate = hutchinson.hutchinson(integrand, sampler)
 
         keys = jax.random.split(key, num=slq_num_batches)
@@ -107,5 +107,19 @@ def ggn(*, loss_single, model_fun, param_unflatten):
 
         ggn_summands = jax.vmap(lambda j, h: j.T @ h @ j)(J, H)
         return jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
+
+    return ggn_fun
+
+
+def ggn_diag(*, loss_single, model_fun, param_unflatten):
+    def ggn_fun(alpha, variables, x_train, y_train):
+        model_pred = model_fun(param_unflatten(variables), x_train)
+
+        H = jax.vmap(jax.hessian(loss_single, argnums=0))(model_pred, y_train)
+        J = jax.jacfwd(lambda v: model_fun(param_unflatten(v), x_train))(variables)
+
+        ggn_summands = jax.vmap(lambda j, h: j.T @ h @ j)(J, H)
+        ggn = jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
+        return jnp.diag(jnp.diag(ggn))
 
     return ggn_fun
