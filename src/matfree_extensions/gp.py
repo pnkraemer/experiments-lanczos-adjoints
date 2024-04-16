@@ -30,7 +30,6 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
 
 
 # todo: implement
-#  gram_matvec_map_over_dense
 #  gram_matvec_pmap_over_dense
 #  gram_matvec_map_over_pmap
 #  gram_matvec_map_over_pmap_over_dense
@@ -52,7 +51,10 @@ def gram_matvec_map():
     return matvec
 
 
+# todo: test?
 def gram_matvec_map_over_batch(*, batch_size: int):
+    matvec_dense = gram_matvec_dense()
+
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
             num, *shape = jnp.shape(x)
@@ -63,8 +65,10 @@ def gram_matvec_map_over_batch(*, batch_size: int):
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)
             return jnp.reshape(Kv_mapped, (-1,))
 
+        matvec_dense_f = matvec_dense(fun)
+
         def _matvec_single(x_batched, y, v):
-            return gram_matrix(fun)(x_batched, y) @ v
+            return matvec_dense_f(x_batched, y, v)
 
         return matvec_map
 
@@ -73,7 +77,11 @@ def gram_matvec_map_over_batch(*, batch_size: int):
 
 def gram_matvec_dense():
     def matvec(fun: Callable) -> Callable:
-        return lambda x, y, v: gram_matrix(fun)(x, y) @ v
+        def matvec_y(x, y, v):
+            fun_y = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
+            return fun_y(x, y) @ v
+
+        return jax.vmap(matvec_y, in_axes=(0, None, None), out_axes=0)
 
     return matvec
 

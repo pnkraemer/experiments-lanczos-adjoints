@@ -13,6 +13,7 @@
 
 import argparse
 import time
+from typing import Callable
 
 import gpytorch.kernels
 import gpytorch.kernels.keops
@@ -22,49 +23,48 @@ import torch
 from matfree_extensions import gp
 
 
-def print_ts(t: jax.Array, *, label: str, num_matvecs: int):
+def print_ts(t: jax.Array, *, label: str, num_runs: int):
     t = jnp.asarray(t)
-    m, s = jnp.mean(t), jnp.std(t)
-    print(f"{label}:\t{m:.3f} +/- {s:.3f} sec (mean +/- std of {num_matvecs} runs)")
+    amin, median, amax = jnp.amin(t), jnp.median(t), jnp.amax(t)
+    print(f"{label}: \t{amin:.3f} < {median:.3f} < {amax:.3f} of {num_runs} runs")
 
 
-def run(N, *, num_matvecs):
-    shape_in = ()
+def time_matvec(matvec: Callable, vec: jax.Array, params, *, num_runs: int):
+    ts = []
+    for _ in range(num_runs):
+        t0 = time.perf_counter()
+        _ = matvec(vec, params)
+        t1 = time.perf_counter()
+
+        ts.append(t1 - t0)
+    return jnp.asarray(ts)
+
+
+def time_gpytorch_via_pykeops(prng_seed, N: int, shape_in: tuple, *, num_runs: int):
+    torch.manual_seed(prng_seed)
     x = torch.randn((N, *shape_in))
-    v = torch.randn((N,))
-
+    vec = torch.randn((N,))
     kernel = gpytorch.kernels.keops.MaternKernel(nu=1.5)
-    K = kernel(x)
+    return time_matvec(lambda v, p: kernel(p) @ v, vec, x, num_runs=num_runs)
 
-    ts = []
-    for _ in range(num_matvecs):
-        t0 = time.perf_counter()
-        _ = K @ v
-        t1 = time.perf_counter()
-        ts.append(t1 - t0)
-    ts_torch = jnp.asarray(ts)
 
+def time_matfree(prng_seed, N: int, shape_in: tuple, matvec, *, num_runs: int):
+    key = jax.random.PRNGKey(prng_seed)
+    key1, key2 = jax.random.split(key)
+    x = jax.random.normal(key1, shape=(N, *shape_in))
+    vec = jax.random.normal(key1, shape=(N,))
     kernel, params = gp.kernel_scaled_matern_32(shape_in=(), shape_out=())
-    matvec = gp.gram_matvec_map()
-    K = jax.jit(matvec(kernel(**params)))
-    x_ = jnp.asarray(x.detach().numpy())
-    v_ = jnp.asarray(v.detach().numpy())
-    _ = K(x_, x_, v_)  # pre-compile
+    fun = jax.jit(matvec(kernel(**params)))
 
-    ts = []
-    for _ in range(num_matvecs):
-        t0 = time.perf_counter()
-        vv = K(x_, x_, v_)
-        vv.block_until_ready()
-        t1 = time.perf_counter()
-        ts.append(t1 - t0)
-    ts_matfree = jnp.asarray(ts)
-    return ts_torch, ts_matfree
+    def matvec_fun(v, p):
+        return fun(p, p, v).block_until_ready()
+
+    return time_matvec(matvec_fun, vec, x, num_runs=num_runs)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num_matvecs", type=int, required=True)
+    parser.add_argument("--num_runs", type=int, required=True)
     parser.add_argument("--matrix_size_min", type=int, required=True)
     parser.add_argument("--matrix_size_max", type=int, required=True)
     args = parser.parse_args()
@@ -72,9 +72,20 @@ if __name__ == "__main__":
     powers = jnp.arange(args.matrix_size_min, args.matrix_size_max)
     matrix_sizes = 2**powers
     for idx, num in zip(powers, matrix_sizes):
-        t_torch, t_matfree = run(num, num_matvecs=args.num_matvecs)
+        # Use the current "size" as a seed
+        seed = idx
+
+        matvec_map = gp.gram_matvec_map()
+        t_map = time_matfree(seed, num, (), matvec=matvec_map, num_runs=args.num_runs)
+
+        matvec_vmap = gp.gram_matvec_dense()
+        t_vmap = time_matfree(seed, num, (), matvec=matvec_vmap, num_runs=args.num_runs)
+
+        t_gpytorch = time_gpytorch_via_pykeops(seed, num, (), num_runs=args.num_runs)
+
         print(f"\nI = {idx}, N = {num}")
         print("------------------")
-        print_ts(t_torch, label="Keops", num_matvecs=args.num_matvecs)
-        print_ts(t_matfree, label="JAX", num_matvecs=args.num_matvecs)
+        print_ts(t_gpytorch, label="GPyTorch (via pykeops) ", num_runs=args.num_runs)
+        print_ts(t_map, label="Matfree (via JAX's map)", num_runs=args.num_runs)
+        print_ts(t_vmap, label="Matfree (via JAX's vmap)", num_runs=args.num_runs)
         print()
