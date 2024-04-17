@@ -10,6 +10,9 @@ from matfree import hutchinson
 from matfree_extensions import lanczos
 
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
+# todo: if we implememt GP covariances as kernel(p, x(, y)),
+#   then we can unify the API with that in BNN_utils and we gain
+#   a lot of functionality.
 
 
 def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Callable:
@@ -34,10 +37,15 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
 #  gram_matvec_map_over_pmap
 #  gram_matvec_map_over_pmap_over_dense
 
-# todo: and consider renaming *_dense to *_vmap or *_batch
-
 
 def gram_matvec_map():
+    """Turn a covariance function into a gram-matrix vector product.
+
+    Compute the matrix-vector product by row-wise mapping.
+
+    Use this function for gigantic matrices on GPUs.
+    """
+
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x)
@@ -51,9 +59,17 @@ def gram_matvec_map():
     return matvec
 
 
-# todo: test?
 def gram_matvec_map_over_batch(*, batch_size: int):
-    matvec_dense = gram_matvec_dense()
+    """Turn a covariance function into a gram-matrix vector product.
+
+    Compute the matrix-vector product by mapping over full batches.
+
+    This function is only useful for CPUs. Make the batch_size
+    a divisor of the data set size, and choose the largest batch
+    size such that `batch_size` rows of the Gram matrix fit into
+    memory.
+    """
+    matvec_dense = gram_matvec_full_batch()
 
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
@@ -75,7 +91,18 @@ def gram_matvec_map_over_batch(*, batch_size: int):
     return matvec
 
 
-def gram_matvec_dense():
+def gram_matvec_full_batch():
+    """Turn a covariance function into a gram-matrix vector product.
+
+    Compute the matrix-vector product over a full batch.
+
+    On CPU, use this function whenever the full Gram matrix
+    fits into memory.
+
+    On GPU, always use this function as the preferred method
+    (it seems to work even for gigantic matrices).
+    """
+
     def matvec(fun: Callable) -> Callable:
         def matvec_y(x, y, v):
             fun_y = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
@@ -87,6 +114,7 @@ def gram_matvec_dense():
 
 
 def gram_matrix(fun: Callable, /) -> Callable:
+    """Turn a covariance function into a gram-matrix function."""
     tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
 

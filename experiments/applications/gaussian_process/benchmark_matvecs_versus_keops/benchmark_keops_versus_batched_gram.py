@@ -4,17 +4,10 @@
 
 # todo: collect memory consumption
 
-# todo: inside a jit, and on GPU/CPU,
-#  is calling a map() instead of vmap() really necessary?
-
 # todo: understand how to benchmark memory in torch
 
 # todo: submit as a script
 #  (I think the memory stats might be contaminated by other processes)
-
-# todo: assert values are identical
-
-# todo: is broadcasting faster than vmap?
 
 import argparse
 import time

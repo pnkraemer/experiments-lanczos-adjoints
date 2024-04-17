@@ -65,8 +65,8 @@ def case_logpdf_lanczos_rademacher_reuse():
 
 
 @pytest_cases.case
-def case_gram_matvec_dense():
-    return gp.gram_matvec_dense()
+def case_gram_matvec_full_batch():
+    return gp.gram_matvec_full_batch()
 
 
 @pytest_cases.case
