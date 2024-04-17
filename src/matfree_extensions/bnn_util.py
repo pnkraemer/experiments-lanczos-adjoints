@@ -46,6 +46,8 @@ def loss_training_cross_entropy_single(y_pred, y_data):
     return -jnp.sum(logprobs * y_data, axis=-1)
 
 
+# todo: move to gp? (And rename gp.py appropriately, of course)
+#  laplace-torch calls this Laplace.log_prob(normalized=True)
 def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
     def loss(a, variables, x_train, y_train, *logdet_params):
         alpha = hyperparam_unconstrain(a)
@@ -62,6 +64,7 @@ def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
     return loss
 
 
+# todo: move to gp? (And rename gp.py appropriately, of course)
 def solver_logdet_dense():
     def logdet(M: jax.Array):
         _sign, logdet_value = jnp.linalg.slogdet(M)
@@ -70,7 +73,7 @@ def solver_logdet_dense():
     return logdet
 
 
-# ~10 because the rank of our GGN is 10
+# todo: move to gp? (And rename gp.py appropriately, of course)
 def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     def logdet(M: jax.Array, key: jax.random.PRNGKey):
         x_like = jnp.ones((len(M),), dtype=float)

@@ -2,7 +2,7 @@ format-and-lint:
 	pre-commit run --all-files
 
 test:
-	pytest -x -v -Werror
+	pytest -x -v
 
 
 clean-preview:

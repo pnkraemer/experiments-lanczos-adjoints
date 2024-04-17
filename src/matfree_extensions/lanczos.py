@@ -1,6 +1,7 @@
 """Extensions for the Matfree package."""
 
 import functools
+import warnings
 from typing import Callable
 
 import jax
@@ -117,7 +118,7 @@ def integrand_spd_custom_vjp_reuse(matfun, order, matvec, /, *, reortho: str = "
         w1, w2 = scale**2 * (basis.T @ sol), v0_flat
 
         # Return both
-        cache = {"w1": w1, "w2": w2, "parameters": parameters}
+        cache = {"w1": w1, "w2": w2, "parameters": parameters, "v0": v0}
         return slqval, cache
 
     def quadform_bwd(matvec_flat: Callable, cache: dict, vjp_incoming):
@@ -127,7 +128,10 @@ def integrand_spd_custom_vjp_reuse(matfun, order, matvec, /, *, reortho: str = "
         fx, vjp = jax.vjp(lambda *pa: matvec_flat(w2, *pa).T @ w1, *p)
 
         # todo: compute gradient wrt v?
-        return 0.0, *vjp(vjp_incoming)
+        msg = "Todo: implement gradient wrt v correctly"
+        warnings.warn(msg, stacklevel=1)
+        v0_like = jax.tree_util.tree_map(jnp.zeros_like, cache["v0"])
+        return v0_like, *vjp(vjp_incoming)
 
     quadform_backend = jax.custom_vjp(quadform_backend, nondiff_argnums=(0,))
     quadform_backend.defvjp(quadform_fwd, quadform_bwd)  # type: ignore
