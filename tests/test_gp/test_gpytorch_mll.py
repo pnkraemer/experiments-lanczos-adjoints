@@ -70,6 +70,11 @@ def case_gram_matvec_dense():
 
 
 @pytest_cases.case
+def case_gram_matvec_map_over_batch():
+    return gp.gram_matvec_map_over_batch(batch_size=1)
+
+
+@pytest_cases.case
 def case_gram_matvec_map():
     return gp.gram_matvec_map()
 
