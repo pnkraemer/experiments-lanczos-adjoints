@@ -10,7 +10,9 @@ from matfree import hutchinson
 from matfree_extensions import lanczos
 
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
-# todo: if we implememt GP covariances as kernel(p, x(, y)),
+#
+# todo: if we implememt GP models as kernel(p, x),
+#   and if model() expects a covariance_matvec function,
 #   then we can unify the API with that in BNN_utils and we gain
 #   a lot of functionality.
 
