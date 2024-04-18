@@ -7,7 +7,9 @@
 #  - Split the script into different smaller scripts once big
 #  - Look at diag and nondiag results next to each other in a single plot
 
+import argparse
 import os
+import pickle
 
 import jax
 import jax.numpy as jnp
@@ -16,8 +18,17 @@ import optax
 from matfree_extensions import bnn_util, exp_util
 
 # Make directories
-directory = exp_util.matching_directory(__file__, "figures/")
-os.makedirs(directory, exist_ok=True)
+directory_fig = exp_util.matching_directory(__file__, "figures/")
+os.makedirs(directory_fig, exist_ok=True)
+
+directory_results = exp_util.matching_directory(__file__, "results/")
+os.makedirs(directory_results, exist_ok=True)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--ggn_type", type=str)
+args = parser.parse_args()
+GGN_TYPE = args.ggn_type
 
 # Create data
 num_data = 100
@@ -82,7 +93,13 @@ log_alpha = 0.0
 optimizer = optax.adam(1e-1)
 optimizer_state = optimizer.init(log_alpha)
 
-ggn_fun = bnn_util.ggn(
+if GGN_TYPE == "diag":
+    ggn_type = bnn_util.ggn_diag
+elif GGN_TYPE == "full":
+    ggn_type = bnn_util.ggn
+else:
+    raise ValueError
+ggn_fun = ggn_type(
     model_fun=model_apply,
     loss_single=bnn_util.loss_training_cross_entropy_single,
     param_unflatten=unflatten,
@@ -114,7 +131,7 @@ for epoch in range(100):
 print()
 
 num_linspace = 250
-x_1d = jnp.linspace(-4, 4, num=num_linspace)
+x_1d = jnp.linspace(-7, 7, num=num_linspace)
 xs, ys = jnp.meshgrid(x_1d, x_1d)
 X = jnp.stack((xs, ys)).reshape((2, -1)).T  # (2500, 2)
 predvar = bnn_util.predictive_variance(
@@ -148,23 +165,45 @@ samples_lin_pred = jax.vmap(lambda s: lin_pred(s, variables, x_train))(samples)
 mean_predictive = jnp.mean(samples_lin_pred, axis=0)
 probs = jax.nn.softmax(mean_predictive, axis=-1)
 accuracy = bnn_util.metric_accuracy(probs=probs, labels_hot=y_train)
-print()
-print("Accuracy mean before softmax:", accuracy)
 
 probs = jax.nn.softmax(samples_lin_pred, axis=-1)
 mean_probs = jnp.mean(probs, axis=0)
 accuracy = bnn_util.metric_accuracy(probs=mean_probs, labels_hot=y_train)
-print("Accuracy mean after softmax:", accuracy)
-print()
 
 
 # Compute NLL
 nll_fun = jax.vmap(lambda s: bnn_util.metric_nll(logits=s, labels_hot=y_train))
 nll = nll_fun(samples_lin_pred).mean(axis=0)
-print("NLL:", nll)
 
-ece, mce = bnn_util.metric_ece(probs=mean_probs, labels_hot=y_train, num_bins=100)
-print("ECE:", ece)
+ece, mce = bnn_util.metric_ece(probs=mean_probs, labels_hot=y_train, num_bins=10)
+
+conf_in = bnn_util.metric_confidence(probs=mean_probs)
+
+# Create OOD data
+key, subkey, subsubkey = jax.random.split(key, num=3)
+x_ood = 6 * jax.random.rademacher(subkey, (num_data, 2))
+x_ood += 0.5 * jax.random.normal(subsubkey, (num_data, 2))
+
+# Predict OOD
+ood_pred = jax.vmap(lambda s: lin_pred(s, variables, x_ood))(samples)
+probs = jnp.mean(jax.nn.softmax(ood_pred, axis=-1), axis=0)
+
+# Compute OOD metrics
+conf_out = bnn_util.metric_confidence(probs=probs)
+
+# Create dictionary
+results = {
+    "Accuracy": accuracy,
+    "NLL": nll,
+    "ECE": ece,
+    "Confidence": conf_in,
+    "OOD Confidence": conf_out,
+}
+print(results)
+
+# Save dictionary to pickle file
+with open(f"{directory_results}/results_{GGN_TYPE}.pkl", "wb") as f:
+    pickle.dump(results, f)
 
 
 # Plot
@@ -173,22 +212,43 @@ fig, axes = plt.subplot_mosaic(
     [["uncertainty", "boundary"]], figsize=figsize, constrained_layout=True
 )
 
+style_data = {
+    "in": {
+        "color": "black",
+        "zorder": 1,
+        "linestyle": "None",
+        "marker": "o",
+        "markeredgecolor": "grey",
+        "alpha": 0.75,
+    },
+    "out": {
+        "color": "white",
+        "zorder": 1,
+        "linestyle": "None",
+        "marker": "P",
+        "markeredgecolor": "black",
+        "alpha": 0.75,
+    },
+}
+style_contour = {
+    "uncertainty": {"cmap": "viridis", "zorder": 0},
+    "boundary": {"vmin": 0, "vmax": 1, "cmap": "seismic", "zorder": 0, "alpha": 0.5},
+}
+
 axes["boundary"].set_title("Decision boundary")
 y_pred = model_apply(unflatten(variables), X)
 which_class = jax.nn.log_softmax(y_pred).argmax(axis=-1)
 values = which_class.T.reshape((num_linspace, num_linspace))
-axes["boundary"].contourf(
-    xs, ys, values, 3, vmin=0, vmax=1, cmap="seismic", alpha=0.5, zorder=0
-)
-axes["boundary"].scatter(x_train[:, 0], x_train[:, 1], color="black", zorder=1)
+axes["boundary"].contourf(xs, ys, values, 3, **style_contour["boundary"])
+axes["boundary"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
+axes["boundary"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
+
 
 axes["uncertainty"].set_title("Standard deviation of logits")
-# variances = jax.vmap(lambda a, b: b[a, a])(which_class, covs)
 variances = jax.vmap(jnp.trace)(covs)
 z = jnp.sqrt(variances).T.reshape((num_linspace, num_linspace))
-axes["uncertainty"].scatter(x_train[:, 0], x_train[:, 1], color="black", zorder=1)
-colorbar_values = axes["uncertainty"].contourf(
-    xs, ys, z, 50, alpha=0.95, zorder=0, vmin=0, vmax=10
-)
-plt.colorbar(colorbar_values)
-plt.savefig(f"{directory}/classify_gaussian_mixture.pdf")
+axes["uncertainty"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
+axes["uncertainty"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
+cbar = axes["uncertainty"].contourf(xs, ys, z, **style_contour["uncertainty"])
+plt.colorbar(cbar)
+plt.savefig(f"{directory_fig}/classify_gaussian_mixture.pdf")

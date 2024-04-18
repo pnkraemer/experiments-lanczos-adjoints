@@ -37,7 +37,8 @@ experiments = [
     "tueplots",
     "optax",
     "flax",
-    "tree-math",
+    "pandas",
+    "jinja2"
 ]
 
 

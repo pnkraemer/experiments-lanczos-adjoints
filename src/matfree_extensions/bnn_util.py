@@ -9,6 +9,8 @@ from matfree import hutchinson
 
 from matfree_extensions import lanczos
 
+# TODO: Decide if we abbreviate metric in function names
+
 
 def model_mlp(*, out_dims, activation: Callable):
     class _MLP(flax.linen.Module):
@@ -47,6 +49,12 @@ def metric_nll(*, logits, labels_hot, sum_or_mean_fun=jnp.sum):
     return -sum_or_mean_fun(nll, axis=0)
 
 
+def metric_confidence(*, probs):
+    assert probs.ndim == 2
+    confs = jnp.max(probs, axis=-1)
+    return jnp.mean(confs, axis=0)
+
+
 def metric_ece(*, probs, labels_hot, num_bins):
     # Put the confidence into M bins
     _, bins = jnp.histogram(probs, bins=num_bins, range=(0, 1))
@@ -69,13 +77,12 @@ def metric_ece(*, probs, labels_hot, num_bins):
         acc = jnp.mean(preds_i == labels_i)
         conf = jnp.mean(confs_i)
 
+        # Todo: think about handling empty bins
         # Mean of empty array defaults to NaN, but it should be zero
-        acc = jnp.nan_to_num(acc, 0)
-        conf = jnp.nan_to_num(conf, 0)
-
-        accs_bin.append(acc)
-        confs_bin.append(conf)
-        nitems_bin.append(len(preds_i))
+        if not jnp.isnan(acc) and not jnp.isnan(conf):
+            accs_bin.append(acc)
+            confs_bin.append(conf)
+            nitems_bin.append(len(preds_i))
 
     accs_bin = jnp.asarray(accs_bin)
     confs_bin = jnp.asarray(confs_bin)
@@ -169,14 +176,12 @@ def ggn(*, loss_single, model_fun, param_unflatten):
 
 
 def ggn_diag(*, loss_single, model_fun, param_unflatten):
+    ggn_fun_dense = ggn(
+        loss_single=loss_single, model_fun=model_fun, param_unflatten=param_unflatten
+    )
+
     def ggn_fun(alpha, variables, x_train, y_train):
-        model_pred = model_fun(param_unflatten(variables), x_train)
-
-        H = jax.vmap(jax.hessian(loss_single, argnums=0))(model_pred, y_train)
-        J = jax.jacfwd(lambda v: model_fun(param_unflatten(v), x_train))(variables)
-
-        ggn_summands = jax.vmap(lambda j, h: j.T @ h @ j)(J, H)
-        ggn = jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
+        ggn = ggn_fun_dense(alpha, variables, x_train, y_train)
         return jnp.diag(jnp.diag(ggn))
 
     return ggn_fun
