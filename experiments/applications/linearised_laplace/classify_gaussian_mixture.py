@@ -80,7 +80,7 @@ log_alpha = 0.0
 optimizer = optax.adam(1e-1)
 optimizer_state = optimizer.init(log_alpha)
 
-ggn_fun = bnn_util.ggn_diag(
+ggn_fun = bnn_util.ggn(
     model_fun=model_apply,
     loss_single=bnn_util.loss_training_cross_entropy_single,
     param_unflatten=unflatten,
@@ -124,6 +124,34 @@ predvar = bnn_util.predictive_variance(
 
 covs = predvar(log_alpha, variables, x_train, y_train, X)
 
+# Sample from the posterior
+num_samples = 100
+key, subkey = jax.random.split(key)
+
+sampler = bnn_util.sampler_cholesky(ggn_fun, num=num_samples)
+samples = sampler(key, unconstrain(log_alpha), variables, x_train, y_train)
+
+
+# Compute ID metrics
+def lin_pred(sample, v, x):
+    fx = model_apply(unflatten(v), x)
+    _, jvp = jax.jvp(lambda p: model_apply(unflatten(p), x), (v,), (sample - v,))
+    return fx + jvp
+
+
+samples_lin_pred = jax.vmap(lambda s: lin_pred(s, variables, x_train))(samples)
+
+
+mean_predictive = jnp.mean(samples_lin_pred, axis=0)
+probs = jax.nn.softmax(mean_predictive, axis=-1)
+print("Accuracy mean before softmax:", bnn_util.metric_accuracy(probs, y_train))
+
+probs = jax.nn.softmax(samples_lin_pred, axis=-1)
+mean_probs = jnp.mean(probs, axis=0)
+print("Accuracy mean after softmax:", bnn_util.metric_accuracy(mean_probs, y_train))
+
+
+# Plot
 figsize = (10, 3)
 fig, axes = plt.subplot_mosaic(
     [["uncertainty", "boundary"]], figsize=figsize, constrained_layout=True
@@ -147,6 +175,4 @@ colorbar_values = axes["uncertainty"].contourf(
     xs, ys, z, 50, alpha=0.95, zorder=0, vmin=0, vmax=10
 )
 plt.colorbar(colorbar_values)
-
-
-plt.show()
+plt.savefig(f"{directory}/classify_gaussian_mixture.pdf")

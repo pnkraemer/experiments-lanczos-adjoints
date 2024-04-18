@@ -126,3 +126,14 @@ def ggn_diag(*, loss_single, model_fun, param_unflatten):
         return jnp.diag(jnp.diag(ggn))
 
     return ggn_fun
+
+
+def sampler_cholesky(ggn_fun, num):
+    def sample(key, alpha, variables, x_train, y_train):
+        GGN = ggn_fun(alpha, variables, x_train, y_train)
+        GGN_inv_sqrt = jnp.linalg.cholesky(jnp.linalg.inv(GGN))
+
+        eps = jax.random.normal(key, (num, *variables.shape))
+        return jnp.dot(GGN_inv_sqrt, eps.T).T + variables[None, ...]
+
+    return sample
