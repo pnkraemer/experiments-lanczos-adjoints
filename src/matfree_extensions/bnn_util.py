@@ -49,12 +49,12 @@ def metric_nll(*, logits, labels_hot, sum_or_mean_fun=jnp.sum):
 
 def metric_ece(*, probs, labels_hot, num_bins):
     # Put the confidence into M bins
-    _, bins = jnp.histogram(probs, num_bins, range=(0, 1))
+    _, bins = jnp.histogram(probs, bins=num_bins, range=(0, 1))
 
-    preds = probs.argmax(1)
-    labels = labels_hot.argmax(1)  # This line?
+    preds = probs.argmax(axis=1)
+    labels = labels_hot.argmax(axis=1)  # This line?
     confs = jnp.max(probs, axis=1)
-    conf_idxs = jnp.digitize(confs, bins)
+    conf_idxs = jnp.digitize(confs, bins=bins)
 
     # Accuracy and avg. confidence per bin
     accs_bin = []
@@ -65,22 +65,29 @@ def metric_ece(*, probs, labels_hot, num_bins):
         preds_i = preds[conf_idxs == i]
         labels_i = labels[conf_idxs == i]
         confs_i = confs[conf_idxs == i]
-        acc = jnp.nan_to_num(jnp.mean(preds_i == labels_i), 0)
-        conf = jnp.nan_to_num(jnp.mean(confs_i), 0)
+
+        acc = jnp.mean(preds_i == labels_i)
+        conf = jnp.mean(confs_i)
+
+        # Mean of empty array defaults to NaN, but it should be zero
+        acc = jnp.nan_to_num(acc, 0)
+        conf = jnp.nan_to_num(conf, 0)
 
         accs_bin.append(acc)
         confs_bin.append(conf)
         nitems_bin.append(len(preds_i))
 
-    accs_bin, confs_bin = jnp.array(accs_bin), jnp.array(confs_bin)
-    nitems_bin = jnp.array(nitems_bin)
+    accs_bin = jnp.asarray(accs_bin)
+    confs_bin = jnp.asarray(confs_bin)
+    nitems_bin = jnp.asarray(nitems_bin)
 
-    ECE = jnp.average(
-        jnp.abs(confs_bin - accs_bin), weights=nitems_bin / nitems_bin.sum()
-    )
-    MCE = jnp.max(jnp.abs(accs_bin - confs_bin))
+    ce = jnp.abs(confs_bin - accs_bin)
+    weights = nitems_bin / nitems_bin.sum()
 
-    return ECE, MCE
+    # avg() not mean() because weights
+    ce_avg_weighted = jnp.average(ce, weights=weights)
+    ce_max = jnp.max(ce)
+    return ce_avg_weighted, ce_max
 
 
 def loss_training_cross_entropy(y_pred, y_data):
