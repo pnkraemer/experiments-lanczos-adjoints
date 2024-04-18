@@ -66,9 +66,11 @@ for epoch in range(100):
     # Look at intermediate results
     if epoch % 10 == 0:
         y_pred = model_apply(unflatten(variables), x_train[idx])
-        acc = bnn_util.metric_accuracy(y_pred, y_train[idx])
+        y_probs = jax.nn.softmax(y_pred, axis=-1)
+        acc = bnn_util.metric_accuracy(probs=y_probs, labels_hot=y_train[idx])
         print(f"Epoch {epoch}, loss {loss:.3f}, accuracy {acc:.3f}")
 
+print()
 # Optimize the calibration loss
 
 
@@ -109,6 +111,7 @@ for epoch in range(100):
     log_alpha = optax.apply_updates(log_alpha, updates)
     if epoch % 10 == 0:
         print(f"Epoch {epoch}, loss {loss:.3f}, alpha {log_alpha:.3f}")
+print()
 
 num_linspace = 250
 x_1d = jnp.linspace(-4, 4, num=num_linspace)
@@ -144,11 +147,24 @@ samples_lin_pred = jax.vmap(lambda s: lin_pred(s, variables, x_train))(samples)
 
 mean_predictive = jnp.mean(samples_lin_pred, axis=0)
 probs = jax.nn.softmax(mean_predictive, axis=-1)
-print("Accuracy mean before softmax:", bnn_util.metric_accuracy(probs, y_train))
+accuracy = bnn_util.metric_accuracy(probs=probs, labels_hot=y_train)
+print()
+print("Accuracy mean before softmax:", accuracy)
 
 probs = jax.nn.softmax(samples_lin_pred, axis=-1)
 mean_probs = jnp.mean(probs, axis=0)
-print("Accuracy mean after softmax:", bnn_util.metric_accuracy(mean_probs, y_train))
+accuracy = bnn_util.metric_accuracy(probs=mean_probs, labels_hot=y_train)
+print("Accuracy mean after softmax:", accuracy)
+print()
+
+
+# Compute NLL
+nll_fun = jax.vmap(lambda s: bnn_util.metric_nll(logits=s, labels_hot=y_train))
+nll = nll_fun(samples_lin_pred).mean(axis=0)
+print("NLL:", nll)
+
+ece, mce = bnn_util.metric_ece(probs=mean_probs, labels_hot=y_train, num_bins=100)
+print("ECE:", ece)
 
 
 # Plot

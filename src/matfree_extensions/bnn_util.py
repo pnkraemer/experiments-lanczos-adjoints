@@ -32,8 +32,55 @@ def model_mlp(*, out_dims, activation: Callable):
     return model.init, model.apply
 
 
-def metric_accuracy(y_pred, y_data):
-    return jnp.mean(jnp.argmax(y_pred, axis=-1) == jnp.argmax(y_data, axis=-1))
+def metric_accuracy(*, probs, labels_hot):
+    assert probs.ndim == 2
+    assert labels_hot.ndim == 2
+    acc = jnp.argmax(probs, axis=-1) == jnp.argmax(labels_hot, axis=-1)
+    return jnp.mean(acc, axis=-1)
+
+
+def metric_nll(*, logits, labels_hot, sum_or_mean_fun=jnp.sum):
+    assert logits.ndim == 2
+    assert labels_hot.ndim == 2
+    logprobs = jax.nn.log_softmax(logits)
+    nll = jnp.sum(labels_hot * logprobs, axis=-1)
+    return -sum_or_mean_fun(nll, axis=0)
+
+
+def metric_ece(*, probs, labels_hot, num_bins):
+    # Put the confidence into M bins
+    _, bins = jnp.histogram(probs, num_bins, range=(0, 1))
+
+    preds = probs.argmax(1)
+    labels = labels_hot.argmax(1)  # This line?
+    confs = jnp.max(probs, axis=1)
+    conf_idxs = jnp.digitize(confs, bins)
+
+    # Accuracy and avg. confidence per bin
+    accs_bin = []
+    confs_bin = []
+    nitems_bin = []
+
+    for i in range(num_bins):
+        preds_i = preds[conf_idxs == i]
+        labels_i = labels[conf_idxs == i]
+        confs_i = confs[conf_idxs == i]
+        acc = jnp.nan_to_num(jnp.mean(preds_i == labels_i), 0)
+        conf = jnp.nan_to_num(jnp.mean(confs_i), 0)
+
+        accs_bin.append(acc)
+        confs_bin.append(conf)
+        nitems_bin.append(len(preds_i))
+
+    accs_bin, confs_bin = jnp.array(accs_bin), jnp.array(confs_bin)
+    nitems_bin = jnp.array(nitems_bin)
+
+    ECE = jnp.average(
+        jnp.abs(confs_bin - accs_bin), weights=nitems_bin / nitems_bin.sum()
+    )
+    MCE = jnp.max(jnp.abs(accs_bin - confs_bin))
+
+    return ECE, MCE
 
 
 def loss_training_cross_entropy(y_pred, y_data):
