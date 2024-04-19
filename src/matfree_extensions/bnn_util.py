@@ -1,5 +1,6 @@
 """Utilities for BNNs."""
 
+import functools
 from typing import Callable
 
 import flax.linen
@@ -97,14 +98,15 @@ def metric_ece(*, probs, labels_hot, num_bins):
     return ce_avg_weighted, ce_max
 
 
-def loss_training_cross_entropy(y_pred, y_data):
-    loss_single = jax.vmap(loss_training_cross_entropy_single)(y_pred, y_data)
+def loss_training_cross_entropy(logits, labels_hot):
+    loss_vmapped = jax.vmap(loss_training_cross_entropy_single)
+    loss_single = loss_vmapped(logits, labels_hot)
     return jnp.mean(loss_single, axis=0)
 
 
-def loss_training_cross_entropy_single(y_pred, y_data):
-    logprobs = jax.nn.log_softmax(y_pred, axis=-1)
-    return -jnp.sum(logprobs * y_data, axis=-1)
+def loss_training_cross_entropy_single(logits, labels_hot):
+    logprobs = jax.nn.log_softmax(logits, axis=-1)
+    return -jnp.sum(logprobs * labels_hot, axis=-1)
 
 
 # todo: move to gp? (And rename gp.py appropriately, of course)
@@ -162,7 +164,7 @@ def predictive_cov(*, ggn_fun, model_fun, param_unflatten, hyperparam_unconstrai
     return evaluate
 
 
-def ggn(*, loss_single, model_fun, param_unflatten):
+def ggn_full(*, loss_single, model_fun, param_unflatten):
     def ggn_fun(alpha, variables, x_train, y_train):
         model_pred = model_fun(param_unflatten(variables), x_train)
 
@@ -176,23 +178,47 @@ def ggn(*, loss_single, model_fun, param_unflatten):
 
 
 def ggn_diag(*, loss_single, model_fun, param_unflatten):
-    ggn_fun_dense = ggn(
+    ggn_fun_full = ggn_full(
         loss_single=loss_single, model_fun=model_fun, param_unflatten=param_unflatten
     )
 
     def ggn_fun(alpha, variables, x_train, y_train):
-        ggn = ggn_fun_dense(alpha, variables, x_train, y_train)
+        ggn = ggn_fun_full(alpha, variables, x_train, y_train)
         return jnp.diag(jnp.diag(ggn))
 
     return ggn_fun
 
 
-def sampler_cholesky(ggn_fun, num):
+def sampler_cholesky(*, ggn_fun, num):
     def sample(key, alpha, variables, x_train, y_train):
-        GGN = ggn_fun(alpha, variables, x_train, y_train)
-        GGN_inv_sqrt = jnp.linalg.cholesky(jnp.linalg.inv(GGN))
+        ggn = ggn_fun(alpha, variables, x_train, y_train)
+        ggn_inv_sqrt = jnp.linalg.cholesky(jnp.linalg.inv(ggn))
 
         eps = jax.random.normal(key, (num, *variables.shape))
-        return jnp.dot(GGN_inv_sqrt, eps.T).T + variables[None, ...]
+        return jnp.dot(ggn_inv_sqrt, eps.T).T + variables[None, ...]
 
     return sample
+
+
+def sampler_lanczos(*, ggn_fun, num, lanczos_rank):
+    def sample(key, alpha, variables, x_train, y_train):
+        ggn = ggn_fun(alpha, variables, x_train, y_train)
+
+        tridiag = lanczos.tridiag(lambda v: ggn @ v, lanczos_rank, reortho="full")
+        eps = jax.random.normal(key, (num, *variables.shape))
+
+        sample_one = functools.partial(_sample_single, tridiag=tridiag)
+        return jax.vmap(sample_one)(eps) + variables[None, ...]
+
+    def _sample_single(eps, *, tridiag):
+        (Q, tridiag), _ = tridiag(eps)
+        dense_matrix = _dense_tridiag(*tridiag)
+
+        tri_inv_sqrt = jnp.linalg.cholesky(jnp.linalg.inv(dense_matrix))
+        return Q.T @ (tri_inv_sqrt @ (Q @ eps))
+
+    return sample
+
+
+def _dense_tridiag(diagonal, off_diagonal):
+    return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)

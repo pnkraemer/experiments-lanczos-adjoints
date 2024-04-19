@@ -26,7 +26,8 @@ os.makedirs(directory_results, exist_ok=True)
 
 # Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--ggn_type", type=str)
+parser.add_argument("--ggn", type=str)
+parser.add_argument("--numerics", type=str)
 args = parser.parse_args()
 
 # A bunch of hyperparameters
@@ -42,6 +43,9 @@ calibrate_batch_size = num_data_in
 calibrate_lrate = 1e-1
 calibrate_print_frequency = 10
 calibrate_log_alpha_min = 1e-3
+numerics_lanczos_rank = 10
+numerics_slq_num_samples = 100
+numerics_slq_num_batches = 1
 evaluate_num_samples = 100
 plot_num_linspace = 250
 plot_xmin, plot_xmax = -7, 7
@@ -73,7 +77,7 @@ optimizer_state = optimizer.init(variables)
 
 def loss_p(v, x, y):
     logits = model_apply(unflatten(v), x)
-    return bnn_util.loss_training_cross_entropy(logits, y)
+    return bnn_util.loss_training_cross_entropy(logits=logits, labels_hot=y)
 
 
 loss_value_and_grad = jax.jit(jax.value_and_grad(loss_p, argnums=0))
@@ -102,10 +106,10 @@ print()
 
 # Calibrate the linearised Laplace
 
-if args.ggn_type == "diag":
+if args.ggn == "diag":
     ggn_type = bnn_util.ggn_diag
-elif args.ggn_type == "full":
-    ggn_type = bnn_util.ggn
+elif args.ggn == "full":
+    ggn_type = bnn_util.ggn_full
 else:
     raise ValueError
 
@@ -126,11 +130,22 @@ key, subkey = jax.random.split(key, num=2)
 log_alpha = jax.random.normal(subkey, shape=())
 optimizer_state = optimizer.init(log_alpha)
 
-# rank ~10 because GGN rank is 10 in current parametrisation
-# logdet_fun = bnn_util.solver_logdet_slq(
-#     lanczos_rank=10, slq_num_samples=100, slq_num_batches=1
-# )
-logdet_fun = bnn_util.solver_logdet_dense()
+
+if args.numerics == "lanczos":
+    logdet_fun = bnn_util.solver_logdet_slq(
+        lanczos_rank=numerics_lanczos_rank,
+        slq_num_samples=numerics_slq_num_samples,
+        slq_num_batches=numerics_slq_num_batches,
+    )
+    sample_fun = bnn_util.sampler_lanczos(
+        lanczos_rank=numerics_lanczos_rank, ggn_fun=ggn_fun, num=evaluate_num_samples
+    )
+elif args.numerics == "dense":
+    logdet_fun = bnn_util.solver_logdet_dense()
+    sample_fun = bnn_util.sampler_cholesky(ggn_fun=ggn_fun, num=evaluate_num_samples)
+else:
+    raise ValueError
+
 calib_loss = bnn_util.loss_calibration(
     ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
 )
@@ -145,7 +160,15 @@ for epoch in range(calibrate_num_epochs):
     )
 
     # Optimisation step
-    loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx])
+    if args.numerics == "lanczos":
+        key, subkey = jax.random.split(key)
+        loss, grad = value_and_grad(
+            log_alpha, variables, x_train[idx], y_train[idx], subkey
+        )
+    elif args.numerics == "dense":
+        loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx])
+    else:
+        raise ValueError
     updates, optimizer_state = optimizer.update(grad, optimizer_state)
     log_alpha = optax.apply_updates(log_alpha, updates)
     if epoch % calibrate_print_frequency == 0:
@@ -165,8 +188,7 @@ def model_linear(sample, v, x):
 
 # Sample from the posterior
 key, subkey = jax.random.split(key)
-sampler = bnn_util.sampler_cholesky(ggn_fun, num=evaluate_num_samples)
-samples_params = sampler(subkey, unconstrain(log_alpha), variables, x_train, y_train)
+samples_params = sample_fun(subkey, unconstrain(log_alpha), variables, x_train, y_train)
 
 
 # Predict (in-distribution)
@@ -208,7 +230,7 @@ results = {
 print(results)
 
 # Save dictionary to file
-file_path = f"{directory_results}/results_{args.ggn_type}.pkl"
+file_path = f"{directory_results}/results_{args.ggn}_{args.numerics}.pkl"
 with open(file_path, "wb") as f:
     pickle.dump(results, f)
 
