@@ -1,4 +1,5 @@
 """Classify a Gaussian mixture model and calibrated different GGNs."""
+
 # todo:
 #  - No more dense GGN matrices
 #  - Make fancy table of results
@@ -25,10 +26,13 @@ directory_results = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory_results, exist_ok=True)
 
 # Parse arguments
+# todo: add seed to argparse and average results over seeds in dataframe script?
 parser = argparse.ArgumentParser()
 parser.add_argument("--ggn", type=str)
 parser.add_argument("--numerics", type=str)
 args = parser.parse_args()
+assert args.numerics in ["lanczos", "cholesky"]
+assert args.ggn in ["full", "diag"]
 
 # A bunch of hyperparameters
 seed = 1
@@ -140,11 +144,14 @@ if args.numerics == "lanczos":
     sample_fun = bnn_util.sampler_lanczos(
         lanczos_rank=numerics_lanczos_rank, ggn_fun=ggn_fun, num=evaluate_num_samples
     )
-elif args.numerics == "dense":
+elif args.numerics == "cholesky":
     logdet_fun = bnn_util.solver_logdet_dense()
     sample_fun = bnn_util.sampler_cholesky(ggn_fun=ggn_fun, num=evaluate_num_samples)
 else:
     raise ValueError
+
+sample_fun = jax.jit(sample_fun)
+logdet_fun = jax.jit(logdet_fun)
 
 calib_loss = bnn_util.loss_calibration(
     ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
@@ -165,7 +172,7 @@ for epoch in range(calibrate_num_epochs):
         loss, grad = value_and_grad(
             log_alpha, variables, x_train[idx], y_train[idx], subkey
         )
-    elif args.numerics == "dense":
+    elif args.numerics == "cholesky":
         loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx])
     else:
         raise ValueError
@@ -284,7 +291,6 @@ style_contour = {
 
 
 # Plot the results
-
 layout = [["bdry", "uq"]]
 _fig, axes = plt.subplot_mosaic(layout, figsize=plot_figsize, constrained_layout=True)
 

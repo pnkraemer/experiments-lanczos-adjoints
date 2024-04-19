@@ -9,11 +9,12 @@ directory_results = exp_util.matching_directory(__file__, "results/")
 
 # Load the dictionary results
 results = {}
-for ggn_type in ["full", "diag"]:
-    file_path = f"{directory_results}/results_{ggn_type}.pkl"
-    with open(file_path, "rb") as f:
-        label = f"GGN ({ggn_type})"
-        results[label] = pickle.load(f)
+for ggn in ["full", "diag"]:
+    for numerics in ["cholesky", "lanczos"]:
+        file_path = f"{directory_results}/results_{ggn}_{numerics}.pkl"
+        with open(file_path, "rb") as f:
+            label = f"GGN ({ggn} + {numerics})"
+            results[label] = pickle.load(f)
 
 # Turn shape=() arrays into floats (so the formatter below applies)
 results = jax.tree_util.tree_map(float, results)
