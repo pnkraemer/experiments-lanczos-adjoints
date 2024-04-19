@@ -193,11 +193,11 @@ conf_out = bnn_util.metric_confidence(probs=probs)
 
 # Create dictionary
 results = {
-    "Accuracy": accuracy,
-    "NLL": nll,
-    "ECE": ece,
-    "Confidence": conf_in,
-    "OOD Confidence": conf_out,
+    r"Accuracy $\uparrow$": accuracy,
+    r"NLL $\downarrow$": nll,
+    r"ECE $\downarrow$": ece,
+    r"Confidence (in-dist) $\uparrow$": conf_in,
+    r"Confidence (out-dist) $\downarrow$": conf_out,
 }
 print(results)
 
