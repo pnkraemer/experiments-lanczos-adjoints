@@ -17,7 +17,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
-from matfree_extensions import bnn_util, exp_util
+from matfree_extensions.util import bnn_util, exp_util
 
 # Make directories
 directory_fig = exp_util.matching_directory(__file__, "figures/")
