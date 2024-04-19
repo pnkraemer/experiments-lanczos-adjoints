@@ -55,16 +55,6 @@ def metric_confidence(*, probs):
     return jnp.mean(confs, axis=0)
 
 
-# def metric_auroc(*, labels_pred, labels_hot):
-#     return sklern
-#     def get_auroc(py_in, py_out):
-#         labels = np.zeros(len(py_in) + len(py_out), dtype='int32')
-#         labels[:len(py_in)] = 1
-#         examples = np.concatenate([py_in.max(1), py_out.max(1)])
-#         return roc_auc_score(labels, examples).item()
-#
-
-
 def metric_ece(*, probs, labels_hot, num_bins):
     # Put the confidence into M bins
     _, bins = jnp.histogram(probs, bins=num_bins, range=(0, 1))
@@ -160,7 +150,7 @@ def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     return logdet
 
 
-def predictive_variance(*, ggn_fun, model_fun, param_unflatten, hyperparam_unconstrain):
+def predictive_cov(*, ggn_fun, model_fun, param_unflatten, hyperparam_unconstrain):
     def evaluate(a, variables, x_train, y_train, x_test):
         alpha = hyperparam_unconstrain(a)
         ggn = ggn_fun(alpha, variables, x_train, y_train)

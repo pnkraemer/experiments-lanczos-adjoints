@@ -30,33 +30,44 @@ parser.add_argument("--ggn_type", type=str)
 args = parser.parse_args()
 
 # A bunch of hyperparameters
-
+seed = 1
+num_data_in = 100
+num_data_out = 100  # OOD
+train_num_epochs = 100
+train_batch_size = num_data_in
+train_lrate = 1e-2
+train_print_frequency = 10
+calibrate_num_epochs = 100
+calibrate_batch_size = num_data_in
+calibrate_lrate = 1e-1
+calibrate_print_frequency = 10
+evaluate_num_samples = 100
+plot_num_linspace = 250
+plot_xmin, plot_xmax = -7, 7
+plot_figsize = (8, 3)
 
 # Create data
-num_data = 100
-key_1, key_2 = jax.random.split(jax.random.PRNGKey(1))
+key = jax.random.PRNGKey(seed)
+key, key_1, key_2 = jax.random.split(key, num=3)
 m = 1.15
-mu_1 = jnp.array((-m, m))
-mu_2 = jnp.array((m, -m))
-x_1 = 0.6 * jax.random.normal(key_1, (num_data, 2)) + mu_1[None, :]
-y_1 = jnp.asarray(num_data * [[1, 0]])
-x_2 = 0.6 * jax.random.normal(key_2, (num_data, 2)) + mu_2[None, :]
-y_2 = jnp.asarray(num_data * [[0, 1]])
+mu_1, mu_2 = jnp.array((-m, m)), jnp.array((m, -m))
+x_1 = 0.6 * jax.random.normal(key_1, (num_data_in, 2)) + mu_1[None, :]
+y_1 = jnp.asarray(num_data_in * [[1, 0]])
+x_2 = 0.6 * jax.random.normal(key_2, (num_data_in, 2)) + mu_2[None, :]
+y_2 = jnp.asarray(num_data_in * [[0, 1]])
 x_train = jnp.concatenate([x_1, x_2], axis=0)
 y_train = jnp.concatenate([y_1, y_2], axis=0)
 
 # Create model
 model_init, model_apply = bnn_util.model_mlp(out_dims=2, activation=jnp.tanh)
-variables_dict = model_init(jax.random.PRNGKey(42), x_train)
+key, subkey = jax.random.split(key, num=2)
+variables_dict = model_init(subkey, x_train)
 variables, unflatten = jax.flatten_util.ravel_pytree(variables_dict)
 
 # Train the model
 
-optimizer = optax.adam(1e-2)
+optimizer = optax.adam(train_lrate)
 optimizer_state = optimizer.init(variables)
-n_epochs = 100
-key = jax.random.PRNGKey(412576)
-batch_size = num_data
 
 
 def loss_p(v, x, y):
@@ -66,10 +77,12 @@ def loss_p(v, x, y):
 
 loss_value_and_grad = jax.jit(jax.value_and_grad(loss_p, argnums=0))
 
-for epoch in range(n_epochs):
+for epoch in range(train_num_epochs):
     # Subsample data
     key, subkey = jax.random.split(key)
-    idx = jax.random.choice(subkey, x_train.shape[0], (batch_size,), replace=False)
+    idx = jax.random.choice(
+        subkey, x_train.shape[0], (train_batch_size,), replace=False
+    )
 
     # Optimiser step
     loss, grad = loss_value_and_grad(variables, x_train[idx], y_train[idx])
@@ -77,7 +90,7 @@ for epoch in range(n_epochs):
     variables = optax.apply_updates(variables, updates)
 
     # Look at intermediate results
-    if epoch % 10 == 0:
+    if epoch % train_print_frequency == 0:
         y_pred = model_apply(unflatten(variables), x_train[idx])
         y_probs = jax.nn.softmax(y_pred, axis=-1)
         acc = bnn_util.metric_accuracy(probs=y_probs, labels_hot=y_train[idx])
@@ -106,8 +119,10 @@ def unconstrain(a):
     return 1e-3 + jnp.exp(a)
 
 
-log_alpha = 0.0
-optimizer = optax.adam(1e-1)
+optimizer = optax.adam(calibrate_lrate)
+
+key, subkey = jax.random.split(key, num=2)
+log_alpha = jax.random.normal(subkey, shape=())
 optimizer_state = optimizer.init(log_alpha)
 
 # rank ~10 because GGN rank is 10 in current parametrisation
@@ -121,27 +136,27 @@ calib_loss = bnn_util.loss_calibration(
 value_and_grad = jax.jit(jax.value_and_grad(calib_loss, argnums=0))
 
 
-for epoch in range(100):
+for epoch in range(calibrate_num_epochs):
     # Subsample data
     key, subkey = jax.random.split(key)
-    idx = jax.random.choice(subkey, x_train.shape[0], (batch_size,), replace=False)
+    idx = jax.random.choice(
+        subkey, a=num_data_in, shape=(calibrate_batch_size,), replace=False
+    )
 
     # Optimisation step
-    key, subkey = jax.random.split(key)
     loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx])
     updates, optimizer_state = optimizer.update(grad, optimizer_state)
     log_alpha = optax.apply_updates(log_alpha, updates)
-    if epoch % 10 == 0:
+    if epoch % calibrate_print_frequency == 0:
         print(f"Epoch {epoch}, loss {loss:.3f}, alpha {log_alpha:.3f}")
 print()
 
 
 # Sample from the posterior
-num_samples = 100
-sampler = bnn_util.sampler_cholesky(ggn_fun, num=num_samples)
+sampler = bnn_util.sampler_cholesky(ggn_fun, num=evaluate_num_samples)
 
 key, subkey = jax.random.split(key)
-samples = sampler(key, unconstrain(log_alpha), variables, x_train, y_train)
+samples = sampler(subkey, unconstrain(log_alpha), variables, x_train, y_train)
 
 
 # Predict (in-distribution)
@@ -170,16 +185,14 @@ conf_in = bnn_util.metric_confidence(probs=mean_probs)
 # Create out-of-distribution data
 key, subkey = jax.random.split(key, num=2)
 key_ood1, key_ood2 = jax.random.split(subkey, num=2)
-x_ood = 6 * jax.random.rademacher(key_ood1, (num_data, 2))
-x_ood += 0.5 * jax.random.normal(key_ood2, (num_data, 2))
+x_ood = 6 * jax.random.rademacher(key_ood1, (num_data_out, 2))
+x_ood += 0.5 * jax.random.normal(key_ood2, (num_data_out, 2))
 
 # Predict (out-of-distribution)
-
 ood_pred = jax.vmap(lambda s: lin_pred(s, variables, x_ood))(samples)
 probs = jnp.mean(jax.nn.softmax(ood_pred, axis=-1), axis=0)
 
 # Compute metrics (out-of-distribution)
-
 conf_out = bnn_util.metric_confidence(probs=probs)
 
 # Create dictionary
@@ -198,26 +211,30 @@ with open(file_path, "wb") as f:
     pickle.dump(results, f)
 
 
-# Plot
+# Create plotting grid
+x_1d = jnp.linspace(plot_xmin, plot_xmax, num=plot_num_linspace)
+x_plot_x, x_plot_y = jnp.meshgrid(x_1d, x_1d)
+x_plot = jnp.stack((x_plot_x, x_plot_y)).reshape((2, -1)).T
 
-num_linspace = 250
-x_1d = jnp.linspace(-7, 7, num=num_linspace)
-xs, ys = jnp.meshgrid(x_1d, x_1d)
-X = jnp.stack((xs, ys)).reshape((2, -1)).T  # (2500, 2)
-predvar = bnn_util.predictive_variance(
+# Compute marginal standard deviations for plotting inputs
+predictive_cov = bnn_util.predictive_cov(
     hyperparam_unconstrain=unconstrain,
     model_fun=model_apply,
     param_unflatten=unflatten,
     ggn_fun=ggn_fun,
 )
+covs = predictive_cov(log_alpha, variables, x_train, y_train, x_plot)
+variances = jax.vmap(jnp.trace)(covs)
+stdevs = jnp.sqrt(variances)
+stdevs_plot = stdevs.T.reshape((plot_num_linspace, plot_num_linspace))
 
 
-covs = predvar(log_alpha, variables, x_train, y_train, X)
+# Compute labels for plotting inputs
+logits_plot = model_apply(unflatten(variables), x_plot)
+labels_plot = jax.nn.log_softmax(logits_plot).argmax(axis=-1)
+labels_plot = labels_plot.T.reshape((plot_num_linspace, plot_num_linspace))
 
-figsize = (10, 3)
-fig, axes = plt.subplot_mosaic(
-    [["uncertainty", "boundary"]], figsize=figsize, constrained_layout=True
-)
+# Plot the results
 
 style_data = {
     "in": {
@@ -238,25 +255,22 @@ style_data = {
     },
 }
 style_contour = {
-    "uncertainty": {"cmap": "viridis", "zorder": 0},
-    "boundary": {"vmin": 0, "vmax": 1, "cmap": "seismic", "zorder": 0, "alpha": 0.5},
+    "uq": {"cmap": "viridis", "zorder": 0},
+    "bdry": {"vmin": 0, "vmax": 1, "cmap": "seismic", "zorder": 0, "alpha": 0.5},
 }
 
-axes["boundary"].set_title("Decision boundary")
-y_pred = model_apply(unflatten(variables), X)
-which_class = jax.nn.log_softmax(y_pred).argmax(axis=-1)
-values = which_class.T.reshape((num_linspace, num_linspace))
-axes["boundary"].contourf(xs, ys, values, 3, **style_contour["boundary"])
-axes["boundary"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
-axes["boundary"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
+layout = [["bdry", "uq"]]
+_fig, axes = plt.subplot_mosaic(layout, figsize=plot_figsize, constrained_layout=True)
 
+axes["bdry"].set_title("Decision boundary")
+axes["bdry"].contourf(x_plot_x, x_plot_y, labels_plot, 3, **style_contour["bdry"])
+axes["bdry"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
+axes["bdry"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
 
-axes["uncertainty"].set_title("Standard deviation of logits")
-variances = jax.vmap(jnp.trace)(covs)
-z = jnp.sqrt(variances).T.reshape((num_linspace, num_linspace))
-axes["uncertainty"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
-axes["uncertainty"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
-cbar = axes["uncertainty"].contourf(xs, ys, z, **style_contour["uncertainty"])
-
+axes["uq"].set_title("Standard deviation of logits")
+axes["uq"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
+axes["uq"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
+cbar = axes["uq"].contourf(x_plot_x, x_plot_y, stdevs_plot, **style_contour["uq"])
 plt.colorbar(cbar)
+
 plt.savefig(f"{directory_fig}/classify_gaussian_mixture.pdf")
