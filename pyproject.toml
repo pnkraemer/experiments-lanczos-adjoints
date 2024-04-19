@@ -18,26 +18,21 @@ dev = [
     "pytest",
     "pytest-cases",
 ]
-devtorch = [
+experiments = [
     # Ensure that PyTorch is installed:
     # https://pytorch.org/
+    # and ensure that JAX is installed:
+    # https://jax.readthedocs.io/en/latest/installation.html
     "gpytorch",
-    "pykeops"
-]
-uci = [
-    "ucimlrepo",
+    "pykeops",
+    "ucimlrepo",  # UCI datasets
     "pandas",
-]
-suitesparse = [
-    "ssgetpy",
-]
-experiments = [
+    "ssgetpy",  # SuiteSparse set
     "jaxopt",
     "matplotlib",
     "tueplots",
     "optax",
     "flax",
-    "pandas",
     "jinja2"
 ]
 

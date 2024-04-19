@@ -21,26 +21,19 @@ To install the development-related dependencies, run
 pip install ".[dev]"
 ```
 
-To install the experiment-related dependencies, run
+To install the experiment-related dependencies, first make sure
+that JAX and pytorch are installed (JAX has been mentioned above;
+for PyTorch, see [here](https://pytorch.org/), then run
 ```commandline
-pip install ".[experiments, suitesparse, uci]"
-```
-
-To install everything and in editable mode, run
-```commandline
-pip install -e ".[dev,experiments,suitesparse,uci]"
+pip install ".[experiments]"
 ```
 
 
-To run all comparisons to GPyTorch (including those in tests/test_gp/),
-make sure that PyTorch is installed.
-
-Then, run
+To install everything and in editable mode (recommended!),
+first install JAX and PyTorch, and then run
 ```commandline
-pip install ".[devtorch]"
+pip install -e ".[dev,experiments]"
 ```
-which is separate from `dev` because it depends on pytorch, not on JAX.
-
 
 ## Running dev-related code
 
