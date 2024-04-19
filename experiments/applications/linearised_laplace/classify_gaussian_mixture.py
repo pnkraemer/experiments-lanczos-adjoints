@@ -1,3 +1,4 @@
+"""Classify a Gaussian mixture model and calibrated different GGNs."""
 # todo:
 #  - No more dense GGN matrices
 #  - Make fancy table of results
@@ -20,15 +21,16 @@ from matfree_extensions import bnn_util, exp_util
 # Make directories
 directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
-
 directory_results = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory_results, exist_ok=True)
 
-
+# Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--ggn_type", type=str)
 args = parser.parse_args()
-GGN_TYPE = args.ggn_type
+
+# A bunch of hyperparameters
+
 
 # Create data
 num_data = 100
@@ -48,7 +50,7 @@ model_init, model_apply = bnn_util.model_mlp(out_dims=2, activation=jnp.tanh)
 variables_dict = model_init(jax.random.PRNGKey(42), x_train)
 variables, unflatten = jax.flatten_util.ravel_pytree(variables_dict)
 
-# Optimise
+# Train the model
 
 optimizer = optax.adam(1e-2)
 optimizer_state = optimizer.init(variables)
@@ -58,13 +60,13 @@ batch_size = num_data
 
 
 def loss_p(v, x, y):
-    y_pred = model_apply(unflatten(v), x)
-    return bnn_util.loss_training_cross_entropy(y_pred, y)
+    logits = model_apply(unflatten(v), x)
+    return bnn_util.loss_training_cross_entropy(logits, y)
 
 
 loss_value_and_grad = jax.jit(jax.value_and_grad(loss_p, argnums=0))
 
-for epoch in range(100):
+for epoch in range(n_epochs):
     # Subsample data
     key, subkey = jax.random.split(key)
     idx = jax.random.choice(subkey, x_train.shape[0], (batch_size,), replace=False)
@@ -82,7 +84,22 @@ for epoch in range(100):
         print(f"Epoch {epoch}, loss {loss:.3f}, accuracy {acc:.3f}")
 
 print()
-# Optimize the calibration loss
+
+
+# Calibrate the linearised Laplace
+
+if args.ggn_type == "diag":
+    ggn_type = bnn_util.ggn_diag
+elif args.ggn_type == "full":
+    ggn_type = bnn_util.ggn
+else:
+    raise ValueError
+
+ggn_fun = ggn_type(
+    model_fun=model_apply,
+    loss_single=bnn_util.loss_training_cross_entropy_single,
+    param_unflatten=unflatten,
+)
 
 
 def unconstrain(a):
@@ -92,18 +109,6 @@ def unconstrain(a):
 log_alpha = 0.0
 optimizer = optax.adam(1e-1)
 optimizer_state = optimizer.init(log_alpha)
-
-if GGN_TYPE == "diag":
-    ggn_type = bnn_util.ggn_diag
-elif GGN_TYPE == "full":
-    ggn_type = bnn_util.ggn
-else:
-    raise ValueError
-ggn_fun = ggn_type(
-    model_fun=model_apply,
-    loss_single=bnn_util.loss_training_cross_entropy_single,
-    param_unflatten=unflatten,
-)
 
 # rank ~10 because GGN rank is 10 in current parametrisation
 # logdet_fun = bnn_util.solver_logdet_slq(
@@ -130,6 +135,71 @@ for epoch in range(100):
         print(f"Epoch {epoch}, loss {loss:.3f}, alpha {log_alpha:.3f}")
 print()
 
+
+# Sample from the posterior
+num_samples = 100
+sampler = bnn_util.sampler_cholesky(ggn_fun, num=num_samples)
+
+key, subkey = jax.random.split(key)
+samples = sampler(key, unconstrain(log_alpha), variables, x_train, y_train)
+
+
+# Predict (in-distribution)
+
+
+def lin_pred(sample, v, x):
+    fx = model_apply(unflatten(v), x)
+    _, jvp = jax.jvp(lambda p: model_apply(unflatten(p), x), (v,), (sample - v,))
+    return fx + jvp
+
+
+samples_lin_pred = jax.vmap(lambda s: lin_pred(s, variables, x_train))(samples)
+
+
+# Compute metrics (in-distribution)
+
+probs = jax.nn.softmax(samples_lin_pred, axis=-1)
+mean_probs = jnp.mean(probs, axis=0)
+accuracy = bnn_util.metric_accuracy(probs=mean_probs, labels_hot=y_train)
+nll_fun = jax.vmap(lambda s: bnn_util.metric_nll(logits=s, labels_hot=y_train))
+nll = nll_fun(samples_lin_pred).mean(axis=0)
+ece, mce = bnn_util.metric_ece(probs=mean_probs, labels_hot=y_train, num_bins=10)
+conf_in = bnn_util.metric_confidence(probs=mean_probs)
+
+
+# Create out-of-distribution data
+key, subkey = jax.random.split(key, num=2)
+key_ood1, key_ood2 = jax.random.split(subkey, num=2)
+x_ood = 6 * jax.random.rademacher(key_ood1, (num_data, 2))
+x_ood += 0.5 * jax.random.normal(key_ood2, (num_data, 2))
+
+# Predict (out-of-distribution)
+
+ood_pred = jax.vmap(lambda s: lin_pred(s, variables, x_ood))(samples)
+probs = jnp.mean(jax.nn.softmax(ood_pred, axis=-1), axis=0)
+
+# Compute metrics (out-of-distribution)
+
+conf_out = bnn_util.metric_confidence(probs=probs)
+
+# Create dictionary
+results = {
+    r"Accuracy $\uparrow$": accuracy,
+    r"NLL $\downarrow$": nll,
+    r"ECE $\downarrow$": ece,
+    r"Confidence (in-dist) $\uparrow$": conf_in,
+    r"Confidence (out-dist) $\downarrow$": conf_out,
+}
+print(results)
+
+# Save dictionary to file
+file_path = f"{directory_results}/results_{args.ggn_type}.pkl"
+with open(file_path, "wb") as f:
+    pickle.dump(results, f)
+
+
+# Plot
+
 num_linspace = 250
 x_1d = jnp.linspace(-7, 7, num=num_linspace)
 xs, ys = jnp.meshgrid(x_1d, x_1d)
@@ -144,69 +214,6 @@ predvar = bnn_util.predictive_variance(
 
 covs = predvar(log_alpha, variables, x_train, y_train, X)
 
-# Sample from the posterior
-num_samples = 100
-key, subkey = jax.random.split(key)
-
-sampler = bnn_util.sampler_cholesky(ggn_fun, num=num_samples)
-samples = sampler(key, unconstrain(log_alpha), variables, x_train, y_train)
-
-
-# Compute ID metrics
-def lin_pred(sample, v, x):
-    fx = model_apply(unflatten(v), x)
-    _, jvp = jax.jvp(lambda p: model_apply(unflatten(p), x), (v,), (sample - v,))
-    return fx + jvp
-
-
-samples_lin_pred = jax.vmap(lambda s: lin_pred(s, variables, x_train))(samples)
-
-
-mean_predictive = jnp.mean(samples_lin_pred, axis=0)
-probs = jax.nn.softmax(mean_predictive, axis=-1)
-accuracy = bnn_util.metric_accuracy(probs=probs, labels_hot=y_train)
-
-probs = jax.nn.softmax(samples_lin_pred, axis=-1)
-mean_probs = jnp.mean(probs, axis=0)
-accuracy = bnn_util.metric_accuracy(probs=mean_probs, labels_hot=y_train)
-
-
-# Compute NLL
-nll_fun = jax.vmap(lambda s: bnn_util.metric_nll(logits=s, labels_hot=y_train))
-nll = nll_fun(samples_lin_pred).mean(axis=0)
-
-ece, mce = bnn_util.metric_ece(probs=mean_probs, labels_hot=y_train, num_bins=10)
-
-conf_in = bnn_util.metric_confidence(probs=mean_probs)
-
-# Create OOD data
-key, subkey, subsubkey = jax.random.split(key, num=3)
-x_ood = 6 * jax.random.rademacher(subkey, (num_data, 2))
-x_ood += 0.5 * jax.random.normal(subsubkey, (num_data, 2))
-
-# Predict OOD
-ood_pred = jax.vmap(lambda s: lin_pred(s, variables, x_ood))(samples)
-probs = jnp.mean(jax.nn.softmax(ood_pred, axis=-1), axis=0)
-
-# Compute OOD metrics
-conf_out = bnn_util.metric_confidence(probs=probs)
-
-# Create dictionary
-results = {
-    r"Accuracy $\uparrow$": accuracy,
-    r"NLL $\downarrow$": nll,
-    r"ECE $\downarrow$": ece,
-    r"Confidence (in-dist) $\uparrow$": conf_in,
-    r"Confidence (out-dist) $\downarrow$": conf_out,
-}
-print(results)
-
-# Save dictionary to pickle file
-with open(f"{directory_results}/results_{GGN_TYPE}.pkl", "wb") as f:
-    pickle.dump(results, f)
-
-
-# Plot
 figsize = (10, 3)
 fig, axes = plt.subplot_mosaic(
     [["uncertainty", "boundary"]], figsize=figsize, constrained_layout=True
@@ -250,5 +257,6 @@ z = jnp.sqrt(variances).T.reshape((num_linspace, num_linspace))
 axes["uncertainty"].plot(x_train[:, 0], x_train[:, 1], **style_data["in"])
 axes["uncertainty"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
 cbar = axes["uncertainty"].contourf(xs, ys, z, **style_contour["uncertainty"])
+
 plt.colorbar(cbar)
 plt.savefig(f"{directory_fig}/classify_gaussian_mixture.pdf")
