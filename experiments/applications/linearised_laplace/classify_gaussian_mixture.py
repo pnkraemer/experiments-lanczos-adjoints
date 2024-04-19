@@ -26,13 +26,14 @@ directory_results = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory_results, exist_ok=True)
 
 # Parse arguments
-# todo: add seed to argparse and average results over seeds in dataframe script?
+# todo: add seed-argument to argparse and
+#  average results over seeds in dataframe script?
 parser = argparse.ArgumentParser()
 parser.add_argument("--ggn", type=str)
 parser.add_argument("--numerics", type=str)
 args = parser.parse_args()
-assert args.numerics in ["lanczos", "cholesky"]
-assert args.ggn in ["full", "diag"]
+assert args.numerics in ["Lanczos", "Cholesky"]
+assert args.ggn in ["full", "diagonal"]
 
 # A bunch of hyperparameters
 seed = 1
@@ -110,7 +111,7 @@ print()
 
 # Calibrate the linearised Laplace
 
-if args.ggn == "diag":
+if args.ggn == "diagonal":
     ggn_type = bnn_util.ggn_diag
 elif args.ggn == "full":
     ggn_type = bnn_util.ggn_full
@@ -135,7 +136,7 @@ log_alpha = jax.random.normal(subkey, shape=())
 optimizer_state = optimizer.init(log_alpha)
 
 
-if args.numerics == "lanczos":
+if args.numerics == "Lanczos":
     logdet_fun = bnn_util.solver_logdet_slq(
         lanczos_rank=numerics_lanczos_rank,
         slq_num_samples=numerics_slq_num_samples,
@@ -144,7 +145,7 @@ if args.numerics == "lanczos":
     sample_fun = bnn_util.sampler_lanczos(
         lanczos_rank=numerics_lanczos_rank, ggn_fun=ggn_fun, num=evaluate_num_samples
     )
-elif args.numerics == "cholesky":
+elif args.numerics == "Cholesky":
     logdet_fun = bnn_util.solver_logdet_dense()
     sample_fun = bnn_util.sampler_cholesky(ggn_fun=ggn_fun, num=evaluate_num_samples)
 else:
@@ -167,12 +168,12 @@ for epoch in range(calibrate_num_epochs):
     )
 
     # Optimisation step
-    if args.numerics == "lanczos":
+    if args.numerics == "Lanczos":
         key, subkey = jax.random.split(key)
         loss, grad = value_and_grad(
             log_alpha, variables, x_train[idx], y_train[idx], subkey
         )
-    elif args.numerics == "cholesky":
+    elif args.numerics == "Cholesky":
         loss, grad = value_and_grad(log_alpha, variables, x_train[idx], y_train[idx])
     else:
         raise ValueError
@@ -231,8 +232,8 @@ results = {
     r"NLL $\downarrow$": nll,
     r"ECE $\downarrow$": ece,
     r"MCE $\downarrow$": mce,
-    r"Confidence (in-dist) $\uparrow$": conf_in,
-    r"Confidence (out-dist) $\downarrow$": conf_out,
+    r"Conf. (in-dist) $\uparrow$": conf_in,
+    r"Conf. (out-dist) $\downarrow$": conf_out,
 }
 print(results)
 
