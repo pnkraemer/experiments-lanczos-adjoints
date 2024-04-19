@@ -9,9 +9,10 @@ directory_results = exp_util.matching_directory(__file__, "results/")
 
 # Load the dictionary results
 results = {}
-for GGN_TYPE in ["full", "diag"]:
-    with open(f"{directory_results}/results_{GGN_TYPE}.pkl", "rb") as f:
-        label = f"GGN ({GGN_TYPE})"
+for ggn_type in ["full", "diag"]:
+    file_path = f"{directory_results}/results_{ggn_type}.pkl"
+    with open(file_path, "rb") as f:
+        label = f"GGN ({ggn_type})"
         results[label] = pickle.load(f)
 
 # Turn shape=() arrays into floats (so the formatter below applies)
@@ -21,5 +22,7 @@ results = jax.tree_util.tree_map(float, results)
 results_dataframe = pd.DataFrame(results).T
 
 # Create a latex-table
-latex = results_dataframe.to_latex(column_format="lccccc", float_format="%.2f")
+num_keys = len(results[label].keys())
+column_format = f"l{'c'*num_keys}"
+latex = results_dataframe.to_latex(column_format=column_format, float_format="%.2f")
 print(latex)

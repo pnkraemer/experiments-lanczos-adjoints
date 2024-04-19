@@ -41,6 +41,7 @@ calibrate_num_epochs = 100
 calibrate_batch_size = num_data_in
 calibrate_lrate = 1e-1
 calibrate_print_frequency = 10
+calibrate_log_alpha_min = 1e-3
 evaluate_num_samples = 100
 plot_num_linspace = 250
 plot_xmin, plot_xmax = -7, 7
@@ -116,7 +117,7 @@ ggn_fun = ggn_type(
 
 
 def unconstrain(a):
-    return 1e-3 + jnp.exp(a)
+    return calibrate_log_alpha_min + jnp.exp(a)
 
 
 optimizer = optax.adam(calibrate_lrate)
