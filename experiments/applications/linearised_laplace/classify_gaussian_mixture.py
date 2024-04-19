@@ -84,7 +84,7 @@ for epoch in range(train_num_epochs):
         subkey, x_train.shape[0], (train_batch_size,), replace=False
     )
 
-    # Optimiser step
+    # Apply an optimizer-step
     loss, grad = loss_value_and_grad(variables, x_train[idx], y_train[idx])
     updates, optimizer_state = optimizer.update(grad, optimizer_state)
     variables = optax.apply_updates(variables, updates)
@@ -152,32 +152,33 @@ for epoch in range(calibrate_num_epochs):
 print()
 
 
-# Sample from the posterior
-sampler = bnn_util.sampler_cholesky(ggn_fun, num=evaluate_num_samples)
-
-key, subkey = jax.random.split(key)
-samples = sampler(subkey, unconstrain(log_alpha), variables, x_train, y_train)
+# Linearise the model around the calibrated alpha
 
 
-# Predict (in-distribution)
-
-
-def lin_pred(sample, v, x):
+def model_linear(sample, v, x):
+    """Evaluate the model after linearising around the optimal parameters."""
     fx = model_apply(unflatten(v), x)
     _, jvp = jax.jvp(lambda p: model_apply(unflatten(p), x), (v,), (sample - v,))
     return fx + jvp
 
 
-samples_lin_pred = jax.vmap(lambda s: lin_pred(s, variables, x_train))(samples)
+# Sample from the posterior
+key, subkey = jax.random.split(key)
+sampler = bnn_util.sampler_cholesky(ggn_fun, num=evaluate_num_samples)
+samples_params = sampler(subkey, unconstrain(log_alpha), variables, x_train, y_train)
+
+
+# Predict (in-distribution)
+samples_logits = jax.vmap(lambda s: model_linear(s, variables, x_train))(samples_params)
 
 
 # Compute metrics (in-distribution)
-
-probs = jax.nn.softmax(samples_lin_pred, axis=-1)
-mean_probs = jnp.mean(probs, axis=0)
+samples_probs = jax.nn.softmax(samples_logits, axis=-1)
+mean_probs = jnp.mean(samples_probs, axis=0)
 accuracy = bnn_util.metric_accuracy(probs=mean_probs, labels_hot=y_train)
 nll_fun = jax.vmap(lambda s: bnn_util.metric_nll(logits=s, labels_hot=y_train))
-nll = nll_fun(samples_lin_pred).mean(axis=0)
+samples_nll = nll_fun(samples_logits)
+nll = jnp.mean(samples_nll, axis=0)
 ece, mce = bnn_util.metric_ece(probs=mean_probs, labels_hot=y_train, num_bins=10)
 conf_in = bnn_util.metric_confidence(probs=mean_probs)
 
@@ -188,18 +189,18 @@ key_ood1, key_ood2 = jax.random.split(subkey, num=2)
 x_ood = 6 * jax.random.rademacher(key_ood1, (num_data_out, 2))
 x_ood += 0.5 * jax.random.normal(key_ood2, (num_data_out, 2))
 
-# Predict (out-of-distribution)
-ood_pred = jax.vmap(lambda s: lin_pred(s, variables, x_ood))(samples)
-probs = jnp.mean(jax.nn.softmax(ood_pred, axis=-1), axis=0)
+# Predict and compute metrics (out-of-distribution)
+samples_logits = jax.vmap(lambda s: model_linear(s, variables, x_ood))(samples_params)
+samples_probs = jax.nn.softmax(samples_logits, axis=-1)
+mean_probs = jnp.mean(samples_probs, axis=0)
+conf_out = bnn_util.metric_confidence(probs=mean_probs)
 
-# Compute metrics (out-of-distribution)
-conf_out = bnn_util.metric_confidence(probs=probs)
-
-# Create dictionary
+# Create dictionary with all results (to be saved to a file)
 results = {
     r"Accuracy $\uparrow$": accuracy,
     r"NLL $\downarrow$": nll,
     r"ECE $\downarrow$": ece,
+    r"MCE $\downarrow$": mce,
     r"Confidence (in-dist) $\uparrow$": conf_in,
     r"Confidence (out-dist) $\downarrow$": conf_out,
 }
@@ -234,8 +235,7 @@ logits_plot = model_apply(unflatten(variables), x_plot)
 labels_plot = jax.nn.log_softmax(logits_plot).argmax(axis=-1)
 labels_plot = labels_plot.T.reshape((plot_num_linspace, plot_num_linspace))
 
-# Plot the results
-
+# Choose a plotting style
 style_data = {
     "in": {
         "color": "black",
@@ -259,6 +259,9 @@ style_contour = {
     "bdry": {"vmin": 0, "vmax": 1, "cmap": "seismic", "zorder": 0, "alpha": 0.5},
 }
 
+
+# Plot the results
+
 layout = [["bdry", "uq"]]
 _fig, axes = plt.subplot_mosaic(layout, figsize=plot_figsize, constrained_layout=True)
 
@@ -273,4 +276,5 @@ axes["uq"].plot(x_ood[:, 0], x_ood[:, 1], **style_data["out"])
 cbar = axes["uq"].contourf(x_plot_x, x_plot_y, stdevs_plot, **style_contour["uq"])
 plt.colorbar(cbar)
 
+# Save the plot to a file
 plt.savefig(f"{directory_fig}/classify_gaussian_mixture.pdf")
