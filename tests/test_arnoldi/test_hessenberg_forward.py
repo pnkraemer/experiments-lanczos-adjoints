@@ -3,7 +3,8 @@ import jax.flatten_util
 import jax.numpy as jnp
 import pytest
 import pytest_cases
-from matfree_extensions import arnoldi, exp_util
+from matfree_extensions import arnoldi
+from matfree_extensions.util import exp_util
 
 
 @pytest_cases.parametrize("nrows", [10])

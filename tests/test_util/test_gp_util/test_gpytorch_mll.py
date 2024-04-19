@@ -6,17 +6,17 @@ import jax.numpy as jnp
 import pytest_cases
 import torch
 from matfree import hutchinson
-from matfree_extensions import gp
+from matfree_extensions.util import gp_util
 
 
 @pytest_cases.case
 def case_logpdf_scipy_stats():
-    return gp.logpdf_scipy_stats(), ()
+    return gp_util.logpdf_scipy_stats(), ()
 
 
 @pytest_cases.case
 def case_logpdf_cholesky():
-    return gp.logpdf_cholesky(), ()
+    return gp_util.logpdf_cholesky(), ()
 
 
 @pytest_cases.case
@@ -29,7 +29,7 @@ def case_logpdf_lanczos_rademacher():
 
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    logpdf = gp.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
+    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
@@ -44,7 +44,7 @@ def case_logpdf_lanczos_normal():
 
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_normal(x_like, num=num_samples)
-    logpdf = gp.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
+    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
@@ -59,24 +59,26 @@ def case_logpdf_lanczos_rademacher_reuse():
 
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    logpdf = gp.logpdf_lanczos_reuse(krylov_depth, sampler, slq_batch_num=num_batches)
+    logpdf = gp_util.logpdf_lanczos_reuse(
+        krylov_depth, sampler, slq_batch_num=num_batches
+    )
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
 
 @pytest_cases.case
 def case_gram_matvec_full_batch():
-    return gp.gram_matvec_full_batch()
+    return gp_util.gram_matvec_full_batch()
 
 
 @pytest_cases.case
 def case_gram_matvec_map_over_batch():
-    return gp.gram_matvec_map_over_batch(batch_size=1)
+    return gp_util.gram_matvec_map_over_batch(batch_size=1)
 
 
 @pytest_cases.case
 def case_gram_matvec_map():
-    return gp.gram_matvec_map()
+    return gp_util.gram_matvec_map()
 
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
@@ -90,10 +92,10 @@ def test_mll_exact(logpdf, gram_matvec):
     logpdf_fun, p_logpdf = logpdf
 
     # Set up a GP model
-    k, p_prior = gp.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp.model(gp.mean_zero(), k, gram_matvec=gram_matvec)
-    likelihood, p_likelihood = gp.likelihood_gaussian()
-    loss = gp.mll_exact(prior, likelihood, logpdf=logpdf_fun)
+    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
+    prior = gp_util.model(gp_util.mean_zero(), k, gram_matvec=gram_matvec)
+    likelihood, p_likelihood = gp_util.likelihood_gaussian()
+    loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf_fun)
 
     # Ensure that the parameters match
     p_prior["raw_lengthscale"] = lengthscale.squeeze()

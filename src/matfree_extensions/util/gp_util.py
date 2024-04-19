@@ -17,6 +17,8 @@ from matfree_extensions import lanczos
 #   a lot of functionality.
 
 
+# todo: if we rename this to model_gp, we could
+#  even place it next to model_mlp and whatnot
 def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Callable:
     """Construct a Gaussian process model."""
 

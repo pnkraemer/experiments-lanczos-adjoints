@@ -6,21 +6,21 @@ import gpytorch
 import jax.numpy as jnp
 import pytest_cases
 import torch
-from matfree_extensions import gp
+from matfree_extensions.util import gp_util
 
 
 def case_kernels_scaled_rbf():
-    return gpytorch.kernels.RBFKernel, gp.kernel_scaled_rbf
+    return gpytorch.kernels.RBFKernel, gp_util.kernel_scaled_rbf
 
 
 def case_kernels_scaled_matern_12():
     matern = functools.partial(gpytorch.kernels.MaternKernel, nu=0.5)
-    return matern, gp.kernel_scaled_matern_12
+    return matern, gp_util.kernel_scaled_matern_12
 
 
 def case_kernels_scaled_matern_32():
     matern = functools.partial(gpytorch.kernels.MaternKernel, nu=1.5)
-    return matern, gp.kernel_scaled_matern_32
+    return matern, gp_util.kernel_scaled_matern_32
 
 
 @pytest_cases.parametrize_with_cases("kernels", cases=".")
@@ -42,7 +42,7 @@ def test_gp_kernels_match_gpy_torch_parametrisation(kernels):
     p["raw_outputscale"] = _torch_to_array(k_torch.raw_outputscale)
     x_jax = _torch_to_array(x_torch)
     y_jax = _torch_to_array(y_torch)
-    K_jax = gp.gram_matrix(k_jax(**p))(x_jax, y_jax)
+    K_jax = gp_util.gram_matrix(k_jax(**p))(x_jax, y_jax)
 
     # Compare that the kernel matrices are equal
     assert jnp.allclose(K_torch, K_jax)
