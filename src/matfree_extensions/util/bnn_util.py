@@ -1,12 +1,18 @@
 """Utilities for BNNs."""
 
 import functools
+import random
 from typing import Callable
 
 import flax.linen
 import jax
 import jax.numpy as jnp
+import numpy as np
+import torch
+import torch.utils.data as data
+import torchvision
 from matfree import hutchinson
+from torchvision import transforms as T
 
 from matfree_extensions import lanczos
 
@@ -222,3 +228,161 @@ def sampler_lanczos(*, ggn_fun, num, lanczos_rank):
 
 def _dense_tridiag(diagonal, off_diagonal):
     return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+
+def numpy_collate_fn(batch):
+    data, target = zip(*batch)
+    data = np.stack(data)
+    target = np.stack(target)
+    return {"image": data, "label": target}
+
+
+def get_cifar10(
+    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
+):
+    n_classes = 10
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=data_path, train=True, download=download
+    )
+    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
+    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
+    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
+    # For training, we add some augmentation.
+    # Networks are too powerful and would overfit.
+    train_transform = T.Compose(
+        [
+            T.RandomHorizontalFlip(),
+            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+            T.ToTensor(),
+            T.Normalize(means, std),
+        ]
+    )
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=data_path, train=True, transform=train_transform, download=download
+    )
+    val_dataset = torchvision.datasets.CIFAR10(
+        root=data_path, train=True, transform=test_transform, download=download
+    )
+    set_seed(seed)
+    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
+    set_seed(seed)
+    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
+    test_set = torchvision.datasets.CIFAR10(
+        root=data_path, train=False, transform=test_transform, download=download
+    )
+    train_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(train_set.dataset.targets), n_classes
+    ).numpy()
+    val_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(val_set.dataset.targets), n_classes
+    ).numpy()
+    test_set.targets = torch.nn.functional.one_hot(
+        torch.tensor(test_set.targets), n_classes
+    ).numpy()
+    train_loader = data.DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        pin_memory=True,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    val_loader = data.DataLoader(
+        val_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    test_loader = data.DataLoader(
+        test_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+
+    return train_loader, val_loader, test_loader
+
+
+def get_cifar100(
+    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
+):
+    n_classes = 100
+    train_dataset = torchvision.datasets.CIFAR100(
+        root=data_path, train=True, download=download
+    )
+    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
+    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
+    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
+    # For training, we add some augmentation.
+    # Networks are too powerful and would overfit.
+    train_transform = T.Compose(
+        [
+            T.RandomHorizontalFlip(),
+            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+            T.ToTensor(),
+            T.Normalize(means, std),
+        ]
+    )
+    train_dataset = torchvision.datasets.CIFAR100(
+        root=data_path, train=True, transform=train_transform, download=download
+    )
+    val_dataset = torchvision.datasets.CIFAR100(
+        root=data_path, train=True, transform=test_transform, download=download
+    )
+    set_seed(seed)
+    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
+    set_seed(seed)
+    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
+    test_set = torchvision.datasets.CIFAR100(
+        root=data_path, train=False, transform=test_transform, download=download
+    )
+    train_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(train_set.dataset.targets), n_classes
+    ).numpy()
+    val_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(val_set.dataset.targets), n_classes
+    ).numpy()
+    test_set.targets = torch.nn.functional.one_hot(
+        torch.tensor(test_set.targets), n_classes
+    ).numpy()
+    train_loader = data.DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        pin_memory=True,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    val_loader = data.DataLoader(
+        val_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    test_loader = data.DataLoader(
+        test_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+
+    return train_loader, val_loader, test_loader
