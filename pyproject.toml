@@ -17,6 +17,11 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cases",
+    # Ensure that PyTorch is installed:
+    # https://pytorch.org/
+    # and ensure that JAX is installed:
+    # https://jax.readthedocs.io/en/latest/installation.html
+    "gpytorch",
 ]
 experiments = [
     # Ensure that PyTorch is installed:
@@ -33,7 +38,8 @@ experiments = [
     "tueplots",
     "optax",
     "flax",
-    "jinja2"
+    "jinja2",  # for pandas.DataFrame.to_latex()
+    "laplace-torch",
 ]
 
 
