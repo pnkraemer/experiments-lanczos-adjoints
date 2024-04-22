@@ -15,7 +15,8 @@ import jax.numpy as jnp
 import jax.scipy.linalg
 import matplotlib.pyplot as plt
 import optax
-from matfree_extensions import arnoldi, exp_util
+from matfree_extensions import arnoldi
+from matfree_extensions.util import exp_util
 from tueplots import axes, figsizes, fontsizes
 
 # Set a few display-related parameters
@@ -31,7 +32,6 @@ xs_2 = jnp.arange(0.0, 1.0 + dx, step=dx)
 mesh = jnp.stack(jnp.meshgrid(xs_1, xs_2))
 xs = mesh.reshape((2, -1))
 xs_flat, unflatten_xs = jax.flatten_util.ravel_pytree(xs)
-
 
 coeff_true = {"init": jnp.asarray([0.5, 0.5]), "rhs": 0.01}
 _coeff, unflatten_p = jax.flatten_util.ravel_pytree(coeff_true)
@@ -57,7 +57,7 @@ _, unflatten_y = jax.flatten_util.ravel_pytree(jnp.meshgrid(xs_1, xs_2)[0])
 
 @jax.jit
 def rhs(x, d):
-    d = 1e-3
+    d = 1e-3  # todo: this is a parameter vector!
     x = unflatten_y(x)
     x_padded = jnp.pad(x, 1, mode="constant", constant_values=0.0)
 
@@ -65,7 +65,7 @@ def rhs(x, d):
     return jax.flatten_util.ravel_pytree(fx)[0]
 
 
-algorithm = arnoldi.arnoldi(rhs, krylov_depth, reortho="full", custom_vjp=True)
+algorithm = arnoldi.hessenberg(rhs, krylov_depth, reortho="full", custom_vjp=True)
 
 
 # Parameter-to-solution/error operators
