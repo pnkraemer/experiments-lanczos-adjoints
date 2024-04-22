@@ -6,7 +6,6 @@
 # todo: make this example just minimally shinier and it could end up in the paper!
 
 
-import functools
 import os
 
 import jax
@@ -15,8 +14,7 @@ import jax.numpy as jnp
 import jax.scipy.linalg
 import matplotlib.pyplot as plt
 import optax
-from matfree_extensions import arnoldi
-from matfree_extensions.util import exp_util
+from matfree_extensions.util import exp_util, pde_util
 from tueplots import axes, figsizes, fontsizes
 
 # Set a few display-related parameters
@@ -25,163 +23,104 @@ plt.rcParams.update(fontsizes.icml2024())
 plt.rcParams.update(axes.lines())
 
 
-# Set discretisation parameters
-dx = 1e-2
-xs_1 = jnp.arange(0.0, 1.0 + dx, step=dx)
-xs_2 = jnp.arange(0.0, 1.0 + dx, step=dx)
-mesh = jnp.stack(jnp.meshgrid(xs_1, xs_2))
-xs = mesh.reshape((2, -1))
-xs_flat, unflatten_xs = jax.flatten_util.ravel_pytree(xs)
-
-coeff_true = {"init": jnp.asarray([0.5, 0.5]), "rhs": 0.01}
-_coeff, unflatten_p = jax.flatten_util.ravel_pytree(coeff_true)
-
-krylov_depth = 100
-print(xs_flat.shape)
-
-
-# Set problem parameters
-def init(x, s):
-    x = unflatten_xs(x)
-    diff = x - s[:, None]
-    fx = jax.vmap(lambda d: jnp.exp(-50 * jnp.dot(d, d)), in_axes=-1, out_axes=-1)(diff)
-    return jax.flatten_util.ravel_pytree(fx)[0]
-
-
-# Discretise
-stencil = jnp.asarray([[0.0, -1.0, 0.0], [-1, 2.0, -1], [0.0, -1.0, 0.0]]) / dx**2
-
-
-_, unflatten_y = jax.flatten_util.ravel_pytree(jnp.meshgrid(xs_1, xs_2)[0])
-
-
-@jax.jit
-def rhs(x, d):
-    d = 1e-3  # todo: this is a parameter vector!
-    x = unflatten_y(x)
-    x_padded = jnp.pad(x, 1, mode="constant", constant_values=0.0)
-
-    fx = jax.scipy.signal.convolve2d(-d * stencil, x_padded, mode="valid")
-    return jax.flatten_util.ravel_pytree(fx)[0]
-
-
-algorithm = arnoldi.hessenberg(rhs, krylov_depth, reortho="full", custom_vjp=True)
-
-
-# Parameter-to-solution/error operators
-
-
-@jax.jit
-@jax.value_and_grad
-def parameter_to_error(params, targets):
-    solution = parameter_to_solution(1.0, params)
-    diff = solution - targets
-    return jnp.sqrt(jnp.dot(diff, diff) / diff.size)
-
-
-@jax.jit
-def parameter_to_solution(t, params):
-    coeff_ = unflatten_p(params)
-    y0 = init(xs, coeff_["init"])
-    Q, H, _r, c = algorithm(y0, coeff_["rhs"])
-    e1 = jnp.eye(len(H))[0, :]
-
-    H = (H + H.T) / 2
-    eigvals, eigvecs = jnp.linalg.eigh(H)
-
-    expm = eigvecs @ jnp.diag(jnp.exp(t * eigvals)) @ eigvecs.T
-
-    # print(expm)
-    # print(eigvecs @ jnp.diag(eigvals) @ eigvecs.T)
-    # print(H)
-    # assert False
-    # expm = jax.scipy.linalg.expm(t * H)
-    return c * Q @ expm @ e1
-
-
-# Create an optimization problem
-coeff_true_flat, _unflatten = jax.flatten_util.ravel_pytree(coeff_true)
-solution_true = parameter_to_solution(1.0, coeff_true_flat)
-noise = 1e-8 * jax.random.normal(jax.random.PRNGKey(2), shape=solution_true.shape)
-data = solution_true + noise
-loss_value_and_grad = functools.partial(parameter_to_error, targets=data)
-
-
-print("....", loss_value_and_grad(coeff_true_flat))
-
-
-y0 = init(xs_flat, coeff_true["init"])
-
-
-ts = jnp.arange(0.0, 1.2, step=0.2)
-
-fig, (axes, axes_before, axes_after) = plt.subplots(
-    nrows=3,
-    ncols=len(ts),
-    # figsize=(len(ts) * 2, 5),
-    sharex=True,
-    sharey=True,
-    # constrained_layout=True,
-)
-fig.suptitle(f"N={xs.size //2} points; K={krylov_depth} Krylov-depth")
-
-
 def magnitude(x):
     return jnp.log10(jnp.abs(x) + jnp.finfo(x.dtype).eps)
 
 
-y1 = jax.vmap(lambda t_: parameter_to_solution(t_, coeff_true_flat))(ts)
-plot_kwargs = {"vmin": jnp.amin(magnitude(y1)), "vmax": jnp.amax(magnitude(y1))}
-print(plot_kwargs)
-for t_, y1_, ax in zip(ts, y1, axes):
-    ax.set_title(f"$t={t_:2F}$")
-    ax.contourf(mesh[0], mesh[1], magnitude(unflatten_y(y1_)), **plot_kwargs)
+if __name__ == "__main__":
+    # Set parameters
+    dx = 2.5e-2
+    krylov_depth = 10
+    seed = 1
+    num_epochs = 25
 
-axes[0].set_ylabel("Truth")
+    # Random key
+    key = jax.random.PRNGKey(seed)
 
+    # Set discretisation parameters
+    xs_1d = jnp.arange(0.0, 1.0 + dx, step=dx)
+    mesh = pde_util.mesh_2d_tensorproduct(xs_1d, xs_1d)
+    print(f"Number of points: {mesh.size // 2}")
+    # Initial condition
+    pde_init, _p_init = pde_util.pde_2d_init_bell()
 
-# initial guess
-coeff = jnp.asarray([0.8, 0.8, 1e-3])
+    # Right-hand side
+    stencil = pde_util.stencil_2d_laplacian(dx)
+    pde_rhs, _p_rhs = pde_util.pde_2d_rhs_laplacian(stencil=stencil)
 
-y1 = jax.vmap(lambda t_: parameter_to_solution(t_, coeff))(ts)
-for y1_, ax in zip(y1, axes_before):
-    ax.contourf(mesh[0], mesh[1], magnitude(unflatten_y(y1_)), **plot_kwargs)
+    # Solution operator
+    expm_fun = pde_util.expm_arnoldi(krylov_depth, reortho="full", custom_vjp=True)
+    solution_operator = pde_util.solution_terminal(
+        init=pde_init, rhs=pde_rhs, expm=expm_fun
+    )
+    loss_fun = pde_util.loss_mse()
 
-axes_before[0].set_ylabel("Initial guess")
+    # Data
+    p_init = {"center": jnp.asarray([0.5, 0.5])}
+    p_rhs = {"intensity_sqrt": 0.125}
+    param_to_solution_true = solution_operator(p_init=p_init, p_rhs=p_rhs)
+    data = param_to_solution_true(1.0, mesh)
 
-# Optimizer
-learning_rate = 1e-1
-optimizer = optax.adam(learning_rate)
-opt_state = optimizer.init(coeff)
+    # PyTree structure of parameters
+    p_like = (p_init, p_rhs)
+    p_flat, unflatten_p = jax.flatten_util.ravel_pytree(p_like)
 
+    @jax.value_and_grad
+    def loss_value_and_grad(p):
+        evaluated = solution_operator(*unflatten_p(p))(1.0, mesh)
+        return loss_fun(evaluated, targets=data)
 
-# Optimize
+    # Initial guess
+    params_before = jnp.asarray([0.8, 0.8, 1e-3])
+    params_after = params_before
 
+    # Optimizer
+    learning_rate = 1e-1
+    optimizer = optax.adam(learning_rate)
+    opt_state = optimizer.init(params_after)
 
-value, gradient = loss_value_and_grad(coeff)  # JIT-compile
+    # Optimize
 
+    value, gradient = loss_value_and_grad(params_after)  # JIT-compile
+    gradient = jnp.ones_like(gradient)
+    count = 0
+    for count in range(num_epochs):
+        value, gradient = loss_value_and_grad(params_after)
 
-gradient = jnp.ones_like(gradient)
-count = 0
-for count in range(12):
-    value, gradient = loss_value_and_grad(coeff)
+        updates, opt_state = optimizer.update(gradient, opt_state)
+        params_after = optax.apply_updates(params_after, updates)
+        print(count, unflatten_p(params_after))
 
-    updates, opt_state = optimizer.update(gradient, opt_state)
-    coeff = optax.apply_updates(coeff, updates)
+    # Plot
 
-    print(count, coeff, magnitude(jnp.linalg.norm(gradient)))
+    ts = jnp.arange(0.0, 1.2, step=0.2)
 
+    fig, (axes, axes_before, axes_after) = plt.subplots(
+        nrows=3, ncols=len(ts), sharex=True, sharey=True
+    )
+    fig.suptitle(f"N={mesh.size //2} points; K={krylov_depth} Krylov-depth")
 
-y1 = jax.vmap(lambda t_: parameter_to_solution(t_, coeff))(ts)
+    axes[0].set_ylabel("Truth")
+    y1 = jax.vmap(param_to_solution_true, in_axes=(0, None))(ts, mesh)
+    plot_kwargs = {"vmin": jnp.amin(magnitude(y1)), "vmax": jnp.amax(magnitude(y1))}
+    for t_, y1_, ax in zip(ts, y1, axes):
+        ax.set_title(f"$t={t_:2F}$")
+        ax.contourf(mesh[0], mesh[1], magnitude(y1_), **plot_kwargs)
 
-for y1_, ax in zip(y1, axes_after):
-    ax.contourf(mesh[0], mesh[1], magnitude(unflatten_y(y1_)), **plot_kwargs)
-axes_after[0].set_ylabel("Recovered")
+    axes_before[0].set_ylabel("Before optimisation")
+    param_to_solution_approx = solution_operator(*unflatten_p(params_before))
+    y1 = jax.vmap(param_to_solution_approx, in_axes=(0, None))(ts, mesh)
+    for y1_, ax in zip(y1, axes_before):
+        ax.contourf(mesh[0], mesh[1], magnitude(y1_), **plot_kwargs)
 
+    axes_after[0].set_ylabel("After optimisation")
+    param_to_solution_approx = solution_operator(*unflatten_p(params_after))
+    y1 = jax.vmap(param_to_solution_approx, in_axes=(0, None))(ts, mesh)
+    for y1_, ax in zip(y1, axes_after):
+        ax.contourf(mesh[0], mesh[1], magnitude(y1_), **plot_kwargs)
 
-directory = exp_util.matching_directory(__file__, "figures/")
-os.makedirs(directory, exist_ok=True)
+    # Save figure
+    directory = exp_util.matching_directory(__file__, "figures/")
+    os.makedirs(directory, exist_ok=True)
 
-plt.savefig(f"{directory}/figure.pdf")
-
-plt.show()
+    plt.savefig(f"{directory}/figure.pdf")
