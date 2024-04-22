@@ -41,12 +41,14 @@ if __name__ == "__main__":
     xs_1d = jnp.arange(0.0, 1.0 + dx, step=dx)
     mesh = pde_util.mesh_2d_tensorproduct(xs_1d, xs_1d)
     print(f"Number of points: {mesh.size // 2}")
+
     # Initial condition
     pde_init, _p_init = pde_util.pde_2d_init_bell()
 
     # Right-hand side
     stencil = pde_util.stencil_2d_laplacian(dx)
-    pde_rhs, _p_rhs = pde_util.pde_2d_rhs_laplacian(stencil=stencil)
+    boundary = pde_util.boundary_neumann()
+    pde_rhs, _p_rhs = pde_util.pde_2d_rhs_laplacian(stencil=stencil, boundary=boundary)
 
     # Solution operator
     expm_fun = pde_util.expm_arnoldi(krylov_depth, reortho="full", custom_vjp=True)
@@ -57,7 +59,7 @@ if __name__ == "__main__":
 
     # Data
     p_init = {"center": jnp.asarray([0.5, 0.5])}
-    p_rhs = {"intensity_sqrt": 0.125}
+    p_rhs = {"intensity_sqrt": 1e-3}
     param_to_solution_true = solution_operator(p_init=p_init, p_rhs=p_rhs)
     data = param_to_solution_true(1.0, mesh)
 
@@ -86,10 +88,11 @@ if __name__ == "__main__":
     count = 0
     for count in range(num_epochs):
         value, gradient = loss_value_and_grad(params_after)
+        # todo: the values of the losses get insanely big
 
         updates, opt_state = optimizer.update(gradient, opt_state)
         params_after = optax.apply_updates(params_after, updates)
-        print(count, unflatten_p(params_after))
+        print(count, value, unflatten_p(params_after))
 
     # Plot
 

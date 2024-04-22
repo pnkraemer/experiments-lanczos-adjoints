@@ -1,5 +1,7 @@
 """Partial differential equation utilities."""
 
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 
@@ -16,6 +18,7 @@ def stencil_2d_laplacian(dx):
 
 
 def solution_terminal(*, init, rhs, expm):
+    # todo: make "how to compute the dense expm" an argument
     def parametrize(p_init, p_rhs):
         def operator(t, x):
             y0 = init(**p_init)(x)
@@ -34,17 +37,15 @@ def solution_terminal(*, init, rhs, expm):
             eigvals, eigvecs = jnp.linalg.eigh(H)
 
             expmat = eigvecs @ jnp.diag(jnp.exp(t * eigvals)) @ eigvecs.T
-
-            # print(expm)
-            # print(eigvecs @ jnp.diag(eigvals) @ eigvecs.T)
-            # print(H)
-            # assert False
-            # expm = jax.scipy.linalg.expm(t * H)
+            # expmat = jax.scipy.linalg.expm(t * H)
             return unflatten(c * Q @ expmat @ e1)
 
         return operator
 
     return parametrize
+
+
+# todo: other initial conditions
 
 
 def pde_2d_init_bell():
@@ -56,6 +57,7 @@ def pde_2d_init_bell():
             diff = x - center[:, None, None]
 
             def bell(d):
+                # todo: make the "50" a parameter?
                 return jnp.exp(-50 * jnp.dot(d, d))
 
             bell = jax.vmap(bell, in_axes=-1, out_axes=-1)
@@ -68,19 +70,33 @@ def pde_2d_init_bell():
     return parametrize, params
 
 
-def pde_2d_rhs_laplacian(*, stencil):
+def boundary_dirichlet():
+    def pad(x, /):
+        return jnp.pad(x, 1, mode="constant", constant_values=0.0)
+
+    return pad
+
+
+def boundary_neumann():
+    def pad(x, /):
+        return jnp.pad(x, 1, mode="edge")
+
+    return pad
+
+
+# todo: other rhs (e.g. Laplace + NN drift)?
+def pde_2d_rhs_laplacian(*, stencil, boundary: Callable):
     def parametrize(*, intensity_sqrt):
+        # todo: remove the stop_gradient
         intensity_sqrt = jax.lax.stop_gradient(intensity_sqrt)
 
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
             assert x.shape[0] == x.shape[-1]
 
-            x_padded = jnp.pad(x, 1, mode="constant", constant_values=0.0)
+            x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
-
-            fx *= -(intensity_sqrt**2)
-
+            fx *= -(intensity_sqrt**2)  # todo: other positivity transforms?
             return fx
 
         return rhs
@@ -95,18 +111,10 @@ def loss_mse():
     return loss
 
 
-def expm_arnoldi(krylov_depth, reortho, custom_vjp):
+def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
     def expm(matvec):
         return arnoldi.hessenberg(
             matvec, krylov_depth, reortho=reortho, custom_vjp=custom_vjp
         )
 
     return expm
-
-
-# def init_2d_gaussian_bell():
-#     def parametrize(mean):
-#         def init(x):
-#             return jnp.ones_like(x)
-#
-#     return init, {}
