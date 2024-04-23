@@ -31,13 +31,18 @@ pde_rhs, params_rhs = pde_util.pde_2d_rhs_laplacian(stencil=stencil, boundary=bo
 key, subkey = jax.random.split(key, num=2)
 params_rhs = exp_util.tree_random_like(subkey, params_rhs)
 
-# Print results
+# Print a test-run of results
 num_steps = int((t1 - t0) / dt)
 ts = jnp.linspace(t0, t1, num=num_steps, endpoint=True)
 solve = pde_util.solver_euler_fixed_step(ts, lambda x, p: pde_rhs(**p)(x))
-
 y0 = pde_init(**params_init)(mesh)
 y_final, ys = solve(y0, params_rhs)
 
-print(y_final)
-print(ys.shape)
+# Build a model
+params, unflatten_p = jax.flatten_util.ravel_pytree((params_init, params_rhs))
+model = pde_util.model_pde(
+    unflatten=unflatten_p, init=lambda x, s: pde_init(**s)(x), solve=solve
+)
+y1, y_all = model(params, mesh)
+
+print(y1)

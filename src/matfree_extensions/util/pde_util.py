@@ -147,6 +147,7 @@ def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
     return expm
 
 
+# Below here is proper tested
 def solver_euler_fixed_step(ts, vector_field, /):
     def step_fun(t_and_y, dt, p):
         t, y = t_and_y
@@ -160,3 +161,13 @@ def solver_euler_fixed_step(ts, vector_field, /):
         return jax.lax.scan(step, xs=dts, init=(t0, y0))
 
     return solve
+
+
+def model_pde(*, unflatten, init, solve):
+    def model(p, x):
+        p_init, p_solve = unflatten(p)
+        y0 = init(x, p_init)
+        y1, y_all = solve(y0, p_solve)
+        return y1, y_all
+
+    return model
