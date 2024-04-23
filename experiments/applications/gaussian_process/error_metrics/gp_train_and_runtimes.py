@@ -1,4 +1,5 @@
-"""RMSE, NLL and Runtime of Gaussian process models on a UCI dataset.
+"""
+Script for training/calibrating Gaussian process models on UCI datasets.
 
 Currently, use either of the following datasets:
 * concrete_compressive_strength  (small)
@@ -8,6 +9,7 @@ Currently, use either of the following datasets:
 """
 
 import argparse
+import json
 import os
 import time
 from typing import Literal, get_args
@@ -21,6 +23,19 @@ import tqdm
 from matfree import hutchinson
 from matfree_extensions.util import data_util, exp_util
 from matfree_extensions.util import gp_util as gp
+
+
+def save_parser(directory, args):
+    with open(f"{directory}/args_config_" + args.gp_method + ".json", "w") as f:
+        json.dump(vars(args), f, indent=4)
+
+
+def load_parser(directory, args, parser):
+    with open(f"{directory}/args_config_" + args.gp_method + ".json") as f:
+        t_args = argparse.Namespace()
+        t_args.__dict__.update(json.load(f))
+        args = parser.parse_args(namespace=t_args)
+
 
 # 1,000     ---> concrete_compressive_strength
 # 10,000    ---> combined_cycle_power_plant
@@ -144,11 +159,17 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
 
 
 def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
+    """Performs the specific training loop for a given GP method"""
+
     if which not in GP_METHODS:
         msg = "The dataset is unknown."
         msg += f"\n\tExpected: One of {GP_METHODS}."
         msg += f"\n\tReceived: '{which}'."
         raise ValueError(msg)
+
+    # convergence curves + time-stamps
+    loss_curve = []
+    loss_timestamps = []
 
     if which == "naive" or which == "adjoints" or which == "gpjax" or which == "cg":
         # getting data, loss and model/params
@@ -176,6 +197,10 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
         progressbar = tqdm.tqdm(range(args.num_epochs))
         progressbar.set_description(f"loss: {value:.3F}")
         start = time.time()
+
+        loss_curve.append(float(value))
+        loss_timestamps.append(start - start)
+
         for _ in progressbar:
             try:
                 # todo: if we use lanjczos, split the random key HERE
@@ -183,9 +208,15 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                 updates, state = optimizer.update(grads, state)
                 p_opt = optax.apply_updates(p_opt, updates)
                 progressbar.set_description(f"loss: {value:.3F}")
+
+                current = time.time()
+                loss_curve.append(float(value))
+                loss_timestamps.append(current - start)
+
             except KeyboardInterrupt:
                 break
         end = time.time()
+        opt_params = p_opt
 
     elif which == "gpytorch":
         # getting data, loss and model/params
@@ -194,6 +225,10 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
         optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
         progressbar = tqdm.tqdm(range(num_epochs))
         start = time.time()
+
+        loss_curve.append(-loss(model(X), y.flatten()).item())
+        loss_timestamps.append(start - start)
+
         for _ in progressbar:
             try:
                 # Zero gradients from previous iteration
@@ -203,24 +238,35 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                 value.backward()
                 optimizer.step()
                 progressbar.set_description(f"loss: {value.item():.3F}")
+
+                current = time.time()
+                loss_curve.append(value.item())
+                loss_timestamps.append(current - start)
+
             except KeyboardInterrupt:
                 break
         end = time.time()
 
-    return end - start  # save stuff here
+        lengthscale = model.covar_module.base_kernel.raw_lengthscale.detach().numpy()
+        outputscale = model.covar_module.raw_outputscale.detach().numpy()
+        noise = model.likelihood.raw_noise.detach().numpy()
+
+        opt_params = [lengthscale.item(), outputscale.item(), noise.item()]
+
+    return end - start, (loss_curve, loss_timestamps), opt_params  # save stuff here
 
 
 if __name__ == "__main__":
     # Parse the arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--name_of_run", type=str, default="")
+    parser.add_argument("--name_of_file", "-nof", type=str, default="gp_train")
     parser.add_argument("--seed", "-s", type=int, default=1)
     parser.add_argument("--num_points", "-n", type=int, default=-1)
     parser.add_argument("--num_epochs", "-e", type=int, default=100)
     parser.add_argument("--gp_method", "-gpm", type=str, default="gpytorch")
     parser.add_argument("--slq_num_batches", type=int, default=1)
-    parser.add_argument("--slq_krylov_depth", type=int, default=100)
-    parser.add_argument("--slq_num_samples", type=int, default=1_000)
+    parser.add_argument("--slq_krylov_depth", type=int, default=10)
+    parser.add_argument("--slq_num_samples", type=int, default=2)
     parser.add_argument(
         "--dataset", "-data", type=str, default="concrete_compressive_strength"
     )
@@ -246,15 +292,20 @@ if __name__ == "__main__":
 
     # Training the GP with different methods/matrix-solvers
     start = time.time()
-    train_time = gp_train(args.gp_method, reference, args.num_epochs)
-
-    print(
-        # "(rmse={:.3f},".format(rmse),
-        # "nll={:.3f},".format(nll),
-        f"(epochs={args.num_epochs:.0f},",
-        f"training time={train_time:.3f})",
+    train_time, (conv, tstamp), params = gp_train(
+        args.gp_method, reference, args.num_epochs
     )
 
+    print(f"(epochs={args.num_epochs:.0f},", f"training time={train_time:.3f})")
+
     # Create a directory for the results
-    directory_local = exp_util.matching_directory(__file__, "results/")
-    os.makedirs(directory_local, exist_ok=True)
+    dir_local = exp_util.matching_directory(__file__, "results/")
+    os.makedirs(dir_local, exist_ok=True)
+
+    # Saving {convergence_curve, convergence time_stamps, optimized parameters}
+    jnp.save(f"{dir_local}/convergence_{args.gp_method}.npy", jnp.array(conv))
+    jnp.save(f"{dir_local}/time_{args.gp_method}.npy", jnp.array(tstamp))
+    jnp.save(f"{dir_local}/params_{args.gp_method}.npy", jnp.array(params))
+
+    # Saving {argparse configuration}
+    save_parser(dir_local, args)
