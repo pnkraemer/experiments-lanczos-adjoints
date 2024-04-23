@@ -1,5 +1,6 @@
 """Partial differential equation utilities."""
 
+import functools
 from typing import Callable
 
 import jax
@@ -8,6 +9,12 @@ import jax.numpy as jnp
 from matfree_extensions import arnoldi
 
 
+# todo: write code for discretisation, and code for solving ODEs
+#  build different solvers (the one-step thing below does not work)
+#  start small (by comparing euler to chunk-euler+lanczos), and then slowly
+#  move to crank-nicholson
+#  maybe even start by implementing euler or even diffrax version or whatnot?
+#  to get a feeling for api and then build the cool arnoldi-solvers
 def mesh_2d_tensorproduct(x, y, /):
     return jnp.stack(jnp.meshgrid(x, y))
 
@@ -35,9 +42,9 @@ def solution_terminal(*, init, rhs, expm):
 
             H = (H + H.T) / 2
             eigvals, eigvecs = jnp.linalg.eigh(H)
-
             expmat = eigvecs @ jnp.diag(jnp.exp(t * eigvals)) @ eigvecs.T
             # expmat = jax.scipy.linalg.expm(t * H)
+
             return unflatten(c * Q @ expmat @ e1)
 
         return operator
@@ -49,7 +56,9 @@ def solution_terminal(*, init, rhs, expm):
 
 
 def pde_2d_init_bell():
-    def parametrize(*, center):
+    def parametrize(*, center_logits):
+        center = _sigmoid(center_logits)
+
         def fun(x, /):
             assert x.ndim == 3, jnp.shape(x)
             assert x.shape[0] == 2
@@ -66,8 +75,12 @@ def pde_2d_init_bell():
 
         return fun
 
-    params = {"center": jnp.empty(())}
+    params = {"center_logits": jnp.empty((2,))}
     return parametrize, params
+
+
+def _sigmoid(x):
+    return 1 / (1 + jnp.exp(-x))
 
 
 def boundary_dirichlet():
@@ -85,10 +98,10 @@ def boundary_neumann():
 
 
 # todo: other rhs (e.g. Laplace + NN drift)?
-def pde_2d_rhs_laplacian(*, stencil, boundary: Callable):
-    def parametrize(*, intensity_sqrt):
+def pde_2d_rhs_laplacian(stencil, *, boundary: Callable):
+    def parametrize(*, intensity_raw):
         # todo: remove the stop_gradient
-        intensity_sqrt = jax.lax.stop_gradient(intensity_sqrt)
+        intensity = _softplus(intensity_raw)
 
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
@@ -96,12 +109,26 @@ def pde_2d_rhs_laplacian(*, stencil, boundary: Callable):
 
             x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
-            fx *= -(intensity_sqrt**2)  # todo: other positivity transforms?
+            fx *= -intensity  # todo: other positivity transforms?
             return fx
 
         return rhs
 
-    return parametrize, {"intensity_sqrt": jnp.empty(())}
+    return parametrize, {"intensity_raw": jnp.empty(())}
+
+
+def _softplus(x, beta=1.0, threshold=20.0):
+    # Shamelessly stolen from:
+    # https://github.com/google/jax/issues/18443
+
+    # mirroring the pytorch implementation
+    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
+    return jax.lax.select(
+        x * beta < threshold,
+        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
+        x,
+    )
 
 
 def loss_mse():
@@ -118,3 +145,18 @@ def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
         )
 
     return expm
+
+
+def solver_euler_fixed_step(ts, vector_field, /):
+    def step_fun(t_and_y, dt, p):
+        t, y = t_and_y
+        t = t + dt
+        y = y + dt * vector_field(y, *p)
+        return (t, y), y
+
+    def solve(y0, *p):
+        t0, dts = ts[0], jnp.diff(ts)
+        step = functools.partial(step_fun, p=p)
+        return jax.lax.scan(step, xs=dts, init=(t0, y0))
+
+    return solve
