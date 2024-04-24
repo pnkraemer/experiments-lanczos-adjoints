@@ -208,7 +208,9 @@ def model_pde(*, unflatten, init, solve):
     return model
 
 
-def model_mlp(mesh_like, /, activation: Callable):
+def model_mlp(mesh_like, features, /, activation: Callable):
+    assert features[-1] == 1
+
     class MLP(flax.linen.Module):
         features: Sequence[int]
 
@@ -222,7 +224,7 @@ def model_mlp(mesh_like, /, activation: Callable):
     assert mesh_like.ndim == 3
     mesh_like = mesh_like.reshape((2, -1)).T
 
-    model = MLP([12, 8, 1])
+    model = MLP(features)
 
     def init(key):
         variables = model.init(key, mesh_like)

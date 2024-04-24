@@ -4,12 +4,16 @@ import jax.numpy as jnp
 import jax.scipy.linalg
 import matplotlib.pyplot as plt
 import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
+import optax
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
 # Set parameters
 pde_t0, pde_t1 = 0.0, 1.0
 dx_time, dx_space = 2e-2, 2e-2
 seed = 1
+train_num_epochs = 100
+mlp_features = [50, 50, 1]
+mlp_activation = jax.nn.tanh
 
 # Process the parameters
 key = jax.random.PRNGKey(seed)
@@ -33,11 +37,12 @@ grf_drift = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
 
 
 # Initial condition
-pde_init, _params_init = pde_util.pde_init_sine()
+pde_init, params_init = pde_util.pde_init_sine()
+pde_init = pde_init(**params_init)
 
 
-def init(x, p):
-    return pde_init(**p)(x)
+def init(x, _p):
+    return pde_init(x)
 
 
 # Discretise the PDE dynamics with method of lines (MOL)
@@ -72,7 +77,7 @@ target_model = pde_util.model_pde(
 # Sample initial parameters
 
 
-mlp_init, mlp_apply = pde_util.model_mlp(mesh, activation=jnp.tanh)
+mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
 key, subkey = jax.random.split(key, num=2)
 mlp_params, mlp_unflatten = mlp_init(subkey)
 
@@ -94,24 +99,40 @@ approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
 approx_model = pde_util.model_pde(
     unflatten=(unflatten_p, unflatten_x), init=init, solve=approx_solve
 )
+loss = pde_util.loss_mse()
 
 
 @jax.jit
 @jax.value_and_grad
-def loss_function(p, x, y):
-    loss = pde_util.loss_mse()
+def loss_value_and_grad(p, x, y):
     (_, approx), _ = approx_model(p, x)
     return loss(approx, targets=y)
 
 
-print(loss_function(approx_params, mesh, target_y1))
+# Optimize
+
+variables = approx_params
+optimizer = optax.adam(1e-1)
+opt_state = optimizer.init(variables)
+
+for epoch in range(train_num_epochs):
+    # Subsample data
+    key, subkey = jax.random.split(key)
+
+    # Apply an optimizer-step
+    loss, grad = loss_value_and_grad(variables, mesh, target_y1)
+    updates, opt_state = optimizer.update(grad, opt_state)
+    variables = optax.apply_updates(variables, updates)
+    print(epoch, loss)
+
 
 # Print the solution
 
 layout = onp.asarray(
     [
-        ["truth_t0", "truth_t1", "truth_drift"],
-        ["before_t0", "before_t1", "before_drift"],
+        ["truth_drift", "truth_t0", "truth_t1"],
+        ["before_drift", "before_t0", "before_t1"],
+        ["after_drift", "after_t0", "after_t1"],
     ]
 )
 figsize = (onp.shape(layout)[1] * 3, onp.shape(layout)[0] * 2)
@@ -121,16 +142,25 @@ axes["truth_t0"].set_title("t0")
 axes["truth_t1"].set_title("t1")
 axes["truth_drift"].set_title("Drift")
 
-axes["truth_t0"].set_ylabel("Truth")
+axes["truth_drift"].set_ylabel("Truth")
 axes["truth_t0"].contourf(mesh[0], mesh[1], targets_all[0])
 axes["truth_t1"].contourf(mesh[0], mesh[1], targets_all[-1])
 axes["truth_drift"].contourf(mesh[0], mesh[1], grf_drift)
 
-axes["before_t0"].set_ylabel("Before optimisation")
+axes["before_drift"].set_ylabel("Before optimisation")
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(approx_params, mesh)
 axes["before_t0"].contourf(mesh[0], mesh[1], approx_all[0])
 axes["before_t1"].contourf(mesh[0], mesh[1], approx_all[-1])
 axes["before_drift"].contourf(mesh[0], mesh[1], mlp_drift)
+
+
+axes["after_drift"].set_ylabel("After optimisation")
+mlp_params = unflatten_p(variables)[1]
+mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
+_, approx_all = approx_model(variables, mesh)
+axes["after_t0"].contourf(mesh[0], mesh[1], approx_all[0])
+axes["after_t1"].contourf(mesh[0], mesh[1], approx_all[-1])
+axes["after_drift"].contourf(mesh[0], mesh[1], mlp_drift)
 
 plt.show()
