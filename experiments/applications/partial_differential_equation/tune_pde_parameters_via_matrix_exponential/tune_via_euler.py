@@ -11,7 +11,7 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 pde_t0, pde_t1 = 0.0, 1.0
 dx_time, dx_space = 2e-2, 2e-2
 seed = 1
-train_num_epochs = 100
+train_num_epochs = 10
 mlp_features = [50, 50, 1]
 mlp_activation = jax.nn.tanh
 
@@ -27,10 +27,14 @@ print(f"Number of points: {mesh.size // 2}")
 
 # Sample a Gaussian random field as a "true" drift
 grf_xs = mesh.reshape((2, -1)).T
-grf_matern = gp_util.kernel_scaled_matern_32(shape_in=(2,), shape_out=())
+grf_matern = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
 grf_kernel, grf_params = grf_matern
+key, subkey = jax.random.split(key, num=2)
+grf_params = exp_util.tree_random_like(subkey, grf_params)
+
+
 grf_K = gp_util.gram_matrix(grf_kernel(**grf_params))(grf_xs, grf_xs)
-grf_cholesky = jnp.linalg.cholesky(grf_K + 1e-5 * jnp.eye(len(grf_K)))
+grf_cholesky = jnp.linalg.cholesky(grf_K + 2e-5 * jnp.eye(len(grf_K)))
 key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
 grf_drift = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
@@ -136,31 +140,44 @@ layout = onp.asarray(
     ]
 )
 figsize = (onp.shape(layout)[1] * 3, onp.shape(layout)[0] * 2)
-_fig, axes = plt.subplot_mosaic(layout, figsize=figsize, sharex=True, sharey=True)
+fig, axes = plt.subplot_mosaic(layout, figsize=figsize, sharex=True, sharey=True)
 
-axes["truth_t0"].set_title("t0")
-axes["truth_t1"].set_title("t1")
-axes["truth_drift"].set_title("Drift")
+
+kwargs_drift = {"vmin": jnp.amin(grf_drift), "vmax": jnp.amax(grf_drift)}
+kwargs_t0 = {"vmin": jnp.amin(targets_all[0]), "vmax": jnp.amax(targets_all[0])}
+kwargs_t1 = {"vmin": jnp.amin(targets_all[-1]), "vmax": jnp.amax(targets_all[-1])}
+
+axes["truth_t0"].set_title("t0 (known)")
+axes["truth_t1"].set_title("t1 (target)")
+axes["truth_drift"].set_title("Drift (unknown)")
 
 axes["truth_drift"].set_ylabel("Truth")
-axes["truth_t0"].contourf(mesh[0], mesh[1], targets_all[0])
-axes["truth_t1"].contourf(mesh[0], mesh[1], targets_all[-1])
-axes["truth_drift"].contourf(mesh[0], mesh[1], grf_drift)
+clr = axes["truth_t0"].contourf(mesh[0], mesh[1], targets_all[0], **kwargs_t0)
+fig.colorbar(clr, ax=axes["truth_t0"])
+clr = axes["truth_t1"].contourf(mesh[0], mesh[1], targets_all[-1], **kwargs_t1)
+fig.colorbar(clr, ax=axes["truth_t1"])
+clr = axes["truth_drift"].contourf(mesh[0], mesh[1], grf_drift, **kwargs_drift)
+fig.colorbar(clr, ax=axes["truth_drift"])
 
 axes["before_drift"].set_ylabel("Before optimisation")
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(approx_params, mesh)
-axes["before_t0"].contourf(mesh[0], mesh[1], approx_all[0])
-axes["before_t1"].contourf(mesh[0], mesh[1], approx_all[-1])
-axes["before_drift"].contourf(mesh[0], mesh[1], mlp_drift)
+clr = axes["before_t0"].contourf(mesh[0], mesh[1], approx_all[0], **kwargs_t0)
+fig.colorbar(clr, ax=axes["before_t0"])
+clr = axes["before_t1"].contourf(mesh[0], mesh[1], approx_all[-1], **kwargs_t1)
+fig.colorbar(clr, ax=axes["before_t1"])
+clr = axes["before_drift"].contourf(mesh[0], mesh[1], mlp_drift, **kwargs_drift)
+fig.colorbar(clr, ax=axes["before_drift"])
 
 
 axes["after_drift"].set_ylabel("After optimisation")
 mlp_params = unflatten_p(variables)[1]
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(variables, mesh)
-axes["after_t0"].contourf(mesh[0], mesh[1], approx_all[0])
-axes["after_t1"].contourf(mesh[0], mesh[1], approx_all[-1])
-axes["after_drift"].contourf(mesh[0], mesh[1], mlp_drift)
-
+clr = axes["after_t0"].contourf(mesh[0], mesh[1], approx_all[0], **kwargs_t0)
+fig.colorbar(clr, ax=axes["after_t0"])
+clr = axes["after_t1"].contourf(mesh[0], mesh[1], approx_all[-1], **kwargs_t1)
+fig.colorbar(clr, ax=axes["after_t1"])
+clr = axes["after_drift"].contourf(mesh[0], mesh[1], mlp_drift, **kwargs_drift)
+fig.colorbar(clr, ax=axes["after_drift"])
 plt.show()
