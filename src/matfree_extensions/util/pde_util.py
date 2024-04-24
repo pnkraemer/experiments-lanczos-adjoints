@@ -112,7 +112,7 @@ def _sigmoid(x):
 
 
 # todo: other rhs (e.g. Laplace + NN drift)?
-def pde_rhs_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
+def pde_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
     def parametrize():
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
@@ -128,7 +128,7 @@ def pde_rhs_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
     return parametrize, {}
 
 
-def pde_rhs_heat_affine(c_sqrt: float, drift_like, /, stencil, *, boundary: Callable):
+def pde_heat_affine(c_sqrt: float, drift_like, /, stencil, *, boundary: Callable):
     def parametrize(*, drift):
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
