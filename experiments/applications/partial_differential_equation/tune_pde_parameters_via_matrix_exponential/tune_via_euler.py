@@ -8,12 +8,14 @@ import optax
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
 # Set parameters
-pde_t0, pde_t1 = 0.0, 1.0
-dx_time, dx_space = 2e-2, 2e-2
+pde_t0, pde_t1 = 0.0, 0.1
+dx_time, dx_space = 0.01, 0.0125
 seed = 1
-train_num_epochs = 10
-mlp_features = [50, 50, 1]
+train_num_epochs = 30
+mlp_features = [20, 20, 20, 1]
 mlp_activation = jax.nn.tanh
+diffusion = -0.002
+print(f"{jnp.abs(diffusion) * dx_time / dx_space**2} <= 0.5?")
 
 # Process the parameters
 key = jax.random.PRNGKey(seed)
@@ -32,16 +34,14 @@ grf_kernel, grf_params = grf_matern
 key, subkey = jax.random.split(key, num=2)
 grf_params = exp_util.tree_random_like(subkey, grf_params)
 
-
 grf_K = gp_util.gram_matrix(grf_kernel(**grf_params))(grf_xs, grf_xs)
 grf_cholesky = jnp.linalg.cholesky(grf_K + 2e-5 * jnp.eye(len(grf_K)))
 key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
 grf_drift = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
 
-
 # Initial condition
-pde_init, params_init = pde_util.pde_init_sine()
+pde_init, params_init = pde_util.pde_init_bell(7.5)
 pde_init = pde_init(**params_init)
 
 
@@ -49,11 +49,13 @@ def init(x, _p):
     return pde_init(x)
 
 
+y0 = init(mesh, None)
+
 # Discretise the PDE dynamics with method of lines (MOL)
 stencil = pde_util.stencil_laplacian(dx_space)
-boundary = pde_util.boundary_neumann()
+boundary = pde_util.boundary_dirichlet()
 pde_rhs, _params_rhs = pde_util.pde_heat_affine(
-    0.02, grf_drift, stencil=stencil, boundary=boundary
+    diffusion, grf_drift, stencil=stencil, boundary=boundary
 )
 
 
@@ -64,6 +66,8 @@ def vector_field(x, p):
 # Prepare the solver
 _mesh, unflatten_x = jax.flatten_util.ravel_pytree(mesh)
 
+weights = jnp.sin(jnp.pi * mesh[0]) * jnp.sin(jnp.pi * mesh[1])
+grf_drift *= weights
 
 # Create the data/targets
 target_p_init = {"scale_sin": 5.0, "scale_cos": 3.0}
@@ -89,6 +93,7 @@ mlp_params, mlp_unflatten = mlp_init(subkey)
 def vector_field_mlp(x, p):
     """Evaluate parametrised PDE dynamics."""
     drift_predicted = mlp_apply(mlp_unflatten(p), mesh)
+    drift_predicted *= weights
     return pde_rhs(drift=drift_predicted)(x)
 
 
@@ -116,7 +121,7 @@ def loss_value_and_grad(p, x, y):
 # Optimize
 
 variables = approx_params
-optimizer = optax.adam(1e-1)
+optimizer = optax.adam(1e-2)
 opt_state = optimizer.init(variables)
 
 for epoch in range(train_num_epochs):
@@ -143,30 +148,58 @@ figsize = (onp.shape(layout)[1] * 3, onp.shape(layout)[0] * 2)
 fig, axes = plt.subplot_mosaic(layout, figsize=figsize, sharex=True, sharey=True)
 
 
-kwargs_drift = {"vmin": jnp.amin(grf_drift), "vmax": jnp.amax(grf_drift)}
-kwargs_t0 = {"vmin": jnp.amin(targets_all[0]), "vmax": jnp.amax(targets_all[0])}
-kwargs_t1 = {"vmin": jnp.amin(targets_all[-1]), "vmax": jnp.amax(targets_all[-1])}
+def plot_t0():
+    pass
+
+
+def plot_t1():
+    pass
+
+
+def plot_drift():
+    pass
+
+
+kwargs_drift = {
+    "vmin": jnp.amin(grf_drift),
+    "vmax": jnp.amax(grf_drift),
+    "cmap": "Blues",
+}
+kwargs_t0 = {
+    "vmin": jnp.amin(targets_all[0]),
+    "vmax": jnp.amax(targets_all[0]),
+    "cmap": "Greys",
+}
+kwargs_t1 = {
+    # "vmin": jnp.amin(targets_all[-1]),
+    # "vmax": jnp.amax(targets_all[-1]),
+    "cmap": "Oranges"
+}
 
 axes["truth_t0"].set_title("t0 (known)")
 axes["truth_t1"].set_title("t1 (target)")
 axes["truth_drift"].set_title("Drift (unknown)")
 
 axes["truth_drift"].set_ylabel("Truth")
-clr = axes["truth_t0"].contourf(mesh[0], mesh[1], targets_all[0], **kwargs_t0)
+clr = axes["truth_t0"].contourf(mesh[0], mesh[1], y0, **kwargs_t0)
 fig.colorbar(clr, ax=axes["truth_t0"])
 clr = axes["truth_t1"].contourf(mesh[0], mesh[1], targets_all[-1], **kwargs_t1)
 fig.colorbar(clr, ax=axes["truth_t1"])
-clr = axes["truth_drift"].contourf(mesh[0], mesh[1], grf_drift, **kwargs_drift)
+clr = axes["truth_drift"].contourf(
+    mesh[0], mesh[1], grf_drift * weights, **kwargs_drift
+)
 fig.colorbar(clr, ax=axes["truth_drift"])
 
 axes["before_drift"].set_ylabel("Before optimisation")
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(approx_params, mesh)
-clr = axes["before_t0"].contourf(mesh[0], mesh[1], approx_all[0], **kwargs_t0)
+clr = axes["before_t0"].contourf(mesh[0], mesh[1], y0, **kwargs_t0)
 fig.colorbar(clr, ax=axes["before_t0"])
 clr = axes["before_t1"].contourf(mesh[0], mesh[1], approx_all[-1], **kwargs_t1)
 fig.colorbar(clr, ax=axes["before_t1"])
-clr = axes["before_drift"].contourf(mesh[0], mesh[1], mlp_drift, **kwargs_drift)
+clr = axes["before_drift"].contourf(
+    mesh[0], mesh[1], mlp_drift * weights, **kwargs_drift
+)
 fig.colorbar(clr, ax=axes["before_drift"])
 
 
@@ -174,10 +207,12 @@ axes["after_drift"].set_ylabel("After optimisation")
 mlp_params = unflatten_p(variables)[1]
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(variables, mesh)
-clr = axes["after_t0"].contourf(mesh[0], mesh[1], approx_all[0], **kwargs_t0)
+clr = axes["after_t0"].contourf(mesh[0], mesh[1], y0, **kwargs_t0)
 fig.colorbar(clr, ax=axes["after_t0"])
 clr = axes["after_t1"].contourf(mesh[0], mesh[1], approx_all[-1], **kwargs_t1)
 fig.colorbar(clr, ax=axes["after_t1"])
-clr = axes["after_drift"].contourf(mesh[0], mesh[1], mlp_drift, **kwargs_drift)
+clr = axes["after_drift"].contourf(
+    mesh[0], mesh[1], mlp_drift * weights, **kwargs_drift
+)
 fig.colorbar(clr, ax=axes["after_drift"])
 plt.show()

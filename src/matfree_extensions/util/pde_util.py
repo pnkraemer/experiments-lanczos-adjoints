@@ -21,7 +21,7 @@ def mesh_tensorproduct(x, y, /):
 
 
 def stencil_laplacian(dx):
-    stencil = jnp.asarray([[0.0, -1.0, 0.0], [-1, 2.0, -1], [0.0, -1.0, 0.0]])
+    stencil = jnp.asarray([[0.0, 1.0, 0.0], [1.0, -2.0, 1.0], [0.0, 1.0, 0.0]])
     return stencil / dx**2
 
 
@@ -66,9 +66,7 @@ def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
 # todo: other initial conditions
 
 
-def pde_init_bell(intensity_sqrt, /):
-    intensity = intensity_sqrt**2
-
+def pde_init_bell(c, /):
     def parametrize(*, center_logits):
         center = _sigmoid(center_logits)
 
@@ -79,7 +77,7 @@ def pde_init_bell(intensity_sqrt, /):
             diff = x - center[:, None, None]
 
             def bell(d):
-                return jnp.exp(-intensity * jnp.dot(d, d))
+                return jnp.exp(-(c**2) * jnp.dot(d, d))
 
             bell = jax.vmap(bell, in_axes=-1, out_axes=-1)
             bell = jax.vmap(bell, in_axes=-1, out_axes=-1)
@@ -112,7 +110,7 @@ def _sigmoid(x):
 
 
 # todo: other rhs (e.g. Laplace + NN drift)?
-def pde_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
+def pde_heat(c: float, /, stencil, *, boundary: Callable):
     def parametrize():
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
@@ -120,7 +118,7 @@ def pde_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
 
             x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
-            fx *= intensity_sqrt**2
+            fx *= c
             return fx
 
         return rhs
@@ -128,7 +126,7 @@ def pde_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
     return parametrize, {}
 
 
-def pde_heat_affine(c_sqrt: float, drift_like, /, stencil, *, boundary: Callable):
+def pde_heat_affine(c: float, drift_like, /, stencil, *, boundary: Callable):
     def parametrize(*, drift):
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
@@ -136,7 +134,7 @@ def pde_heat_affine(c_sqrt: float, drift_like, /, stencil, *, boundary: Callable
 
             x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
-            fx *= -(c_sqrt**2)
+            fx *= c
             return fx + drift
 
         return rhs
