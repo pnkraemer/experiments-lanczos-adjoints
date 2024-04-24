@@ -12,9 +12,9 @@ pde_t0, pde_t1 = 0.0, 0.05
 dx_time, dx_space = 0.005, 0.0125
 seed = 1
 train_num_epochs = 1000
-mlp_features = [20, 20, 20, 1]
+mlp_features = [20, 20, 1]
 mlp_activation = jax.nn.tanh
-optimizer = optax.adam(1e-2)
+optimizer = optax.adam(1e-3)
 
 
 # Process the parameters
@@ -183,7 +183,8 @@ def plot_drift(ax, args, /):
         # "vmax": jnp.amax(grf_drift),
         "cmap": "Blues"
     }
-    args_plot = args + jnp.finfo(jnp.dtype(args)).eps
+    args_plot = 0.001 + args**2
+
     clr = ax.contourf(mesh[0], mesh[1], args_plot, **kwargs_drift)
     fig.colorbar(clr, ax=ax)
     return ax
@@ -199,7 +200,7 @@ plot_t1(axes["truth_t1"], targets_all[-1])
 plot_drift(axes["truth_drift"], grf_drift)
 
 
-axes["before_drift"].set_ylabel("Before optimisation (MLP)")
+axes["before_drift"].set_ylabel("Before optim. (MLP)")
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(approx_params, mesh)
 plot_t0(axes["before_t0"], y0)
@@ -207,7 +208,7 @@ plot_t1(axes["before_t1"], approx_all[-1])
 plot_drift(axes["before_drift"], mlp_drift)
 
 
-axes["after_drift"].set_ylabel("After optimisation (MLP)")
+axes["after_drift"].set_ylabel("After optim. (MLP)")
 mlp_params = unflatten_p(variables)[1]
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
 _, approx_all = approx_model(variables, mesh)
