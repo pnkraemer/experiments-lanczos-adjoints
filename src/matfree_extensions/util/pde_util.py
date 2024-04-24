@@ -1,8 +1,9 @@
 """Partial differential equation utilities."""
 
 import functools
-from typing import Callable
+from typing import Callable, Sequence
 
+import flax.linen
 import jax
 import jax.numpy as jnp
 
@@ -205,3 +206,31 @@ def model_pde(*, unflatten, init, solve):
         return y1, y_all
 
     return model
+
+
+def model_mlp(mesh_like, /, activation: Callable):
+    class MLP(flax.linen.Module):
+        features: Sequence[int]
+
+        @flax.linen.compact
+        def __call__(self, x):
+            for feat in self.features[:-1]:
+                x = flax.linen.Dense(feat)(x)
+                x = activation(x)
+            return flax.linen.Dense(self.features[-1])(x)
+
+    assert mesh_like.ndim == 3
+    mesh_like = mesh_like.reshape((2, -1)).T
+
+    model = MLP([12, 8, 1])
+
+    def init(key):
+        variables = model.init(key, mesh_like)
+        return jax.flatten_util.ravel_pytree(variables)
+
+    def apply(params, args):
+        args_ = args.reshape((2, -1)).T
+        fx = model.apply(params, args_).reshape((-1,))
+        return fx.reshape(args[0].shape)
+
+    return init, apply
