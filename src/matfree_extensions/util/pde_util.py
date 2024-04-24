@@ -15,16 +15,17 @@ from matfree_extensions import arnoldi
 #  move to crank-nicholson
 #  maybe even start by implementing euler or even diffrax version or whatnot?
 #  to get a feeling for api and then build the cool arnoldi-solvers
-def mesh_2d_tensorproduct(x, y, /):
+def mesh_tensorproduct(x, y, /):
     return jnp.stack(jnp.meshgrid(x, y))
 
 
-def stencil_2d_laplacian(dx):
+def stencil_laplacian(dx):
     stencil = jnp.asarray([[0.0, -1.0, 0.0], [-1, 2.0, -1], [0.0, -1.0, 0.0]])
     return stencil / dx**2
 
 
 def solution_terminal(*, init, rhs, expm):
+    # todo: turn into a solver
     # todo: make "how to compute the dense expm" an argument
     def parametrize(p_init, p_rhs):
         def operator(t, x):
@@ -52,10 +53,21 @@ def solution_terminal(*, init, rhs, expm):
     return parametrize
 
 
+def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
+    def expm(matvec):
+        return arnoldi.hessenberg(
+            matvec, krylov_depth, reortho=reortho, custom_vjp=custom_vjp
+        )
+
+    return expm
+
+
 # todo: other initial conditions
 
 
-def pde_2d_init_bell():
+def pde_init_bell(intensity_sqrt, /):
+    intensity = intensity_sqrt**2
+
     def parametrize(*, center_logits):
         center = _sigmoid(center_logits)
 
@@ -66,8 +78,7 @@ def pde_2d_init_bell():
             diff = x - center[:, None, None]
 
             def bell(d):
-                # todo: make the "50" a parameter?
-                return jnp.exp(-50 * jnp.dot(d, d))
+                return jnp.exp(-intensity * jnp.dot(d, d))
 
             bell = jax.vmap(bell, in_axes=-1, out_axes=-1)
             bell = jax.vmap(bell, in_axes=-1, out_axes=-1)
@@ -79,42 +90,57 @@ def pde_2d_init_bell():
     return parametrize, params
 
 
+def pde_init_sine():
+    def parametrize(*, scale_sin, scale_cos):
+        def fun(x, /):
+            assert x.ndim == 3, jnp.shape(x)
+            assert x.shape[0] == 2
+
+            term_sin = jnp.sin(scale_sin * x[0])
+            term_cos = jnp.cos(scale_cos * x[1])
+            return term_sin * term_cos
+
+        return fun
+
+    params = {"scale_sin": 5.0, "scale_cos": 3.0}
+    return parametrize, params
+
+
 def _sigmoid(x):
     return 1 / (1 + jnp.exp(-x))
 
 
-def boundary_dirichlet():
-    def pad(x, /):
-        return jnp.pad(x, 1, mode="constant", constant_values=0.0)
-
-    return pad
-
-
-def boundary_neumann():
-    def pad(x, /):
-        return jnp.pad(x, 1, mode="edge")
-
-    return pad
-
-
 # todo: other rhs (e.g. Laplace + NN drift)?
-def pde_2d_rhs_laplacian(stencil, *, boundary: Callable):
-    def parametrize(*, intensity_raw):
-        # todo: remove the stop_gradient
-        intensity = _softplus(intensity_raw)
-
+def pde_rhs_heat(intensity_sqrt: float, /, stencil, *, boundary: Callable):
+    def parametrize():
         def rhs(x, /):
             assert x.ndim == 2, jnp.shape(x)
             assert x.shape[0] == x.shape[-1]
 
             x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
-            fx *= -intensity  # todo: other positivity transforms?
+            fx *= intensity_sqrt**2
             return fx
 
         return rhs
 
-    return parametrize, {"intensity_raw": jnp.empty(())}
+    return parametrize, {}
+
+
+def pde_rhs_heat_affine(c_sqrt: float, drift_like, /, stencil, *, boundary: Callable):
+    def parametrize(*, drift):
+        def rhs(x, /):
+            assert x.ndim == 2, jnp.shape(x)
+            assert x.shape[0] == x.shape[-1]
+
+            x_padded = boundary(x)
+            fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
+            fx *= -(c_sqrt**2)
+            return fx + drift
+
+        return rhs
+
+    return parametrize, {"drift": jnp.empty_like(drift_like)}
 
 
 def _softplus(x, beta=1.0, threshold=20.0):
@@ -131,20 +157,25 @@ def _softplus(x, beta=1.0, threshold=20.0):
     )
 
 
+def boundary_dirichlet():
+    def pad(x, /):
+        return jnp.pad(x, 1, mode="constant", constant_values=0.0)
+
+    return pad
+
+
+def boundary_neumann():
+    def pad(x, /):
+        return jnp.pad(x, 1, mode="edge")
+
+    return pad
+
+
 def loss_mse():
     def loss(sol, /, *, targets):
         return jnp.sqrt(jnp.mean((sol - targets) ** 2))
 
     return loss
-
-
-def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
-    def expm(matvec):
-        return arnoldi.hessenberg(
-            matvec, krylov_depth, reortho=reortho, custom_vjp=custom_vjp
-        )
-
-    return expm
 
 
 # Below here is proper tested
@@ -164,9 +195,12 @@ def solver_euler_fixed_step(ts, vector_field, /):
 
 
 def model_pde(*, unflatten, init, solve):
+    unflatten_p, unflatten_x = unflatten
+
     def model(p, x):
-        p_init, p_solve = unflatten(p)
-        y0 = init(x, p_init)
+        mesh = unflatten_x(x)
+        p_init, p_solve = unflatten_p(p)
+        y0 = init(mesh, p_init)
         y1, y_all = solve(y0, p_solve)
         return y1, y_all
 
