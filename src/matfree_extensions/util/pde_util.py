@@ -25,6 +25,14 @@ def stencil_laplacian(dx):
     return stencil / dx**2
 
 
+def stencil_advection_diffusion(dx):
+    diffusion = jnp.asarray([[0.0, 1.0, 0.0], [1.0, -2.0, 1.0], [0.0, 1.0, 0.0]])
+    diffusion = diffusion / dx**2
+    advection = jnp.asarray([[0.0, 1.0, 0.0], [1.0, 0.0, -1.0], [0.0, -1.0, 0.0]])
+    advection = advection / (2 * dx)
+    return diffusion + advection
+
+
 def solution_terminal(*, init, rhs, expm):
     # todo: turn into a solver
     # todo: make "how to compute the dense expm" an argument
@@ -135,11 +143,37 @@ def pde_heat_affine(c: float, drift_like, /, stencil, *, boundary: Callable):
             x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
             fx *= c
-            return fx + drift
+            return fx + x * drift
 
         return rhs
 
     return parametrize, {"drift": jnp.empty_like(drift_like)}
+
+
+def pde_wave_affine(drift_like, /, stencil, *, boundary: Callable):
+    def parametrize(*, drift):
+        def rhs(x, /):
+            assert x.ndim == 3, jnp.shape(x)
+            assert x.shape[1] == x.shape[2]
+            assert x.shape[0] == 2
+
+            u, du = x
+            x_padded = boundary(u)
+            fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
+            u_new = fx * (0.001 + _square(drift))
+            return jnp.stack([du, u_new])
+
+        return rhs
+
+    return parametrize, {"drift": jnp.empty_like(drift_like)}
+
+
+def _square(x):
+    return x**2
+
+
+def _softmax(x):
+    return 1 / (1 + jnp.exp(-x))
 
 
 def _softplus(x, beta=1.0, threshold=20.0):
@@ -172,7 +206,7 @@ def boundary_neumann():
 
 def loss_mse():
     def loss(sol, /, *, targets):
-        return jnp.sqrt(jnp.mean((sol - targets) ** 2))
+        return jnp.mean((sol - targets) ** 2)
 
     return loss
 
