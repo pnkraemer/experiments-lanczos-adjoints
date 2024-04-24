@@ -94,10 +94,17 @@ approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
 approx_model = pde_util.model_pde(
     unflatten=(unflatten_p, unflatten_x), init=init, solve=approx_solve
 )
-loss = pde_util.loss_mse()
-(_, approx_y1), approx_all = approx_model(approx_params, mesh)
-print(loss(approx_y1, targets=target_y1))
 
+
+@jax.jit
+@jax.value_and_grad
+def loss_function(p, x, y):
+    loss = pde_util.loss_mse()
+    (_, approx), _ = approx_model(p, x)
+    return loss(approx, targets=y)
+
+
+print(loss_function(approx_params, mesh, target_y1))
 
 # Print the solution
 
@@ -119,8 +126,9 @@ axes["truth_t0"].contourf(mesh[0], mesh[1], targets_all[0])
 axes["truth_t1"].contourf(mesh[0], mesh[1], targets_all[-1])
 axes["truth_drift"].contourf(mesh[0], mesh[1], grf_drift)
 
-axes["before_t0"].set_ylabel("Before optim.")
+axes["before_t0"].set_ylabel("Before optimisation")
 mlp_drift = mlp_apply(mlp_unflatten(mlp_params), mesh)
+_, approx_all = approx_model(approx_params, mesh)
 axes["before_t0"].contourf(mesh[0], mesh[1], approx_all[0])
 axes["before_t1"].contourf(mesh[0], mesh[1], approx_all[-1])
 axes["before_drift"].contourf(mesh[0], mesh[1], mlp_drift)
