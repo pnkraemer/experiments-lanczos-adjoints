@@ -11,12 +11,6 @@ import jax.numpy as jnp
 from matfree_extensions import arnoldi
 
 
-# todo: write code for discretisation, and code for solving ODEs
-#  build different solvers (the one-step thing below does not work)
-#  start small (by comparing euler to chunk-euler+lanczos), and then slowly
-#  move to crank-nicholson
-#  maybe even start by implementing euler or even diffrax version or whatnot?
-#  to get a feeling for api and then build the cool arnoldi-solvers
 def mesh_tensorproduct(x, y, /):
     return jnp.stack(jnp.meshgrid(x, y))
 
@@ -32,9 +26,6 @@ def stencil_advection_diffusion(dx):
     advection = jnp.asarray([[0.0, 1.0, 0.0], [1.0, 0.0, -1.0], [0.0, -1.0, 0.0]])
     advection = advection / (2 * dx)
     return diffusion + advection
-
-
-# todo: other initial conditions
 
 
 def pde_init_bell(c, /):
@@ -80,7 +71,6 @@ def _sigmoid(x):
     return 1 / (1 + jnp.exp(-x))
 
 
-# todo: other rhs (e.g. Laplace + NN drift)?
 def pde_heat(c: float, /, stencil, *, boundary: Callable):
     def parametrize():
         def rhs(x, /):
@@ -106,7 +96,7 @@ def pde_heat_affine(c: float, drift_like, /, stencil, *, boundary: Callable):
             x_padded = boundary(x)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
             fx *= c
-            return fx + x * drift
+            return fx + drift
 
         return rhs
 
@@ -131,14 +121,6 @@ def pde_wave_anisotropic(scale_like, /, stencil, *, constrain, boundary: Callabl
         return rhs
 
     return parametrize, {"scale": jnp.empty_like(scale_like)}
-
-
-def _square(x):
-    return x**2
-
-
-def _softmax(x):
-    return 1 / (1 + jnp.exp(-x))
 
 
 def _softplus(x, beta=1.0, threshold=20.0):
