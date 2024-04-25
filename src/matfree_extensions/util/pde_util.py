@@ -187,7 +187,8 @@ def solver_euler_fixed_step(ts, vector_field, /):
     def solve(y0, *p):
         t0, dts = ts[0], jnp.diff(ts)
         step = functools.partial(step_fun, p=p)
-        return jax.lax.scan(step, xs=dts, init=(t0, y0))
+        (_t1, y1), _y_all = jax.lax.scan(step, xs=dts, init=(t0, y0))
+        return y1
 
     return solve
 
@@ -207,15 +208,14 @@ def solver_arnoldi(t0, t1, vector_field, /, expm):
         Q, H, _r, c = algorithm(y0_flat, p)
         e1 = jnp.eye(len(H))[0, :]
         expmat = jax.scipy.linalg.expm((t1 - t0) * H)
-        y1 = unflatten_y(c * Q @ expmat @ e1)
-        return (t1, y1), None
+        return unflatten_y(c * Q @ expmat @ e1)
 
     return solve
 
 
 def solver_diffrax(t0, t1, vector_field, /, *, method: str):
     @diffrax.ODETerm
-    def term(t, y, args):
+    def term(t, y, args):  # noqa: ARG001
         return vector_field(y, args)
 
     if method == "dopri5":
@@ -223,7 +223,8 @@ def solver_diffrax(t0, t1, vector_field, /, *, method: str):
     elif method == "euler":
         solver = diffrax.Euler()
     else:
-        raise ValueError("Method not supported (yet).")
+        msg = "Method not supported (yet)."
+        raise ValueError(msg)
     stepsize_controller = diffrax.PIDController(rtol=1e-5, atol=1e-5)
 
     def solve(y0, p):
@@ -237,7 +238,7 @@ def solver_diffrax(t0, t1, vector_field, /, *, method: str):
             y0=y0,
             stepsize_controller=stepsize_controller,
         )
-        return (sol.ts[-1], sol.ys[-1]), sol.ys[1:]
+        return sol.ys[-1]
 
     return solve
 
@@ -248,19 +249,6 @@ def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
         return arnoldi.hessenberg(matvec, krylov_depth, **kwargs)
 
     return expm
-
-
-def model_pde(*, unflatten, init, solve):
-    unflatten_p, unflatten_x = unflatten
-
-    def model(p, x):
-        mesh = unflatten_x(x)
-        p_init, p_solve = unflatten_p(p)
-        y0 = init(mesh, p_init)
-        y1, y_all = solve(y0, p_solve)
-        return y1, y_all
-
-    return model
 
 
 def model_mlp(mesh_like, features, /, activation: Callable):

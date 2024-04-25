@@ -9,7 +9,6 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 
 # todo: add a "naive" matrix exponential solver
 # todo: expose some of the solver options via argparse
-# todo: simplify this script a little bit
 # todo: quantify the reconstruction errors a little bit
 # todo: run for different solvers
 # todo: figure out what to plot...
@@ -18,13 +17,12 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 pde_t0, pde_t1 = 0.0, 0.05
 dx_time, dx_space = 0.005, 0.02
 seed = 1
-train_num_epochs = 1000
+train_num_epochs = 1500
 train_display_every = 10
 mlp_features = [20, 20, 1]
 mlp_activation = jax.nn.tanh
 optimizer = optax.adam(1e-2)
 arnoldi_depth = 20
-print(arnoldi_depth)
 
 # Process the parameters
 key = jax.random.PRNGKey(seed)
@@ -55,20 +53,12 @@ key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
 grf_scale = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
 
+
+# Initial condition
 key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
 grf_init = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
-
-# Initial condition
-pde_init, params_init = pde_util.pde_init_bell(7.5)
-
-
-def init(x, _p):
-    u0 = grf_init
-    return jnp.stack([u0, u0])
-
-
-y0 = init(mesh, ())
+y0 = jnp.stack([grf_init, grf_init])
 
 
 # Discretise the PDE dynamics with method of lines (MOL)
@@ -79,82 +69,56 @@ pde_rhs, _params_rhs = pde_util.pde_wave_anisotropic(
 )
 
 
-def vector_field(x, p):
-    return pde_rhs(**p)(x)
-
-
-# Prepare the solver
-_mesh, unflatten_x = jax.flatten_util.ravel_pytree(mesh)
-
-
 # Create the data/targets
-target_p_init = {}
-target_p_rhs = {"scale": grf_scale}
-target_params, unflatten_p = jax.flatten_util.ravel_pytree(
-    (target_p_init, target_p_rhs)
-)
+
+
+def vector_field(x):
+    """Evaluate the PDE dynamics."""
+    return pde_rhs(scale=grf_scale)(x)
+
+
 target_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
-target_model = pde_util.model_pde(
-    unflatten=(unflatten_p, unflatten_x), init=init, solve=target_solve
-)
-(_, target_y1), targets_all = target_model(target_params, mesh)
+target_y1 = target_solve(y0)
 
-
-# Sample initial parameters
-
-
+# Build an approximate model
 mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
 key, subkey = jax.random.split(key, num=2)
-mlp_params, mlp_unflatten = mlp_init(subkey)
+variables_before, mlp_unflatten = mlp_init(subkey)
 
 
 def vector_field_mlp(x, p):
-    """Evaluate parametrised PDE dynamics."""
-    scale_predicted = mlp_apply(mlp_unflatten(p), mesh)
-    scale = scale_predicted
+    """Evaluate the MLP-parametrised PDE dynamics."""
+    scale = mlp_apply(mlp_unflatten(p), mesh)
     return pde_rhs(scale=scale)(x)
 
 
-key, subkey = jax.random.split(key, num=2)
-approx_p_init = exp_util.tree_random_like(subkey, target_p_init)
-approx_p_rhs = mlp_params
-approx_p_tree = (approx_p_init, approx_p_rhs)
-approx_params, unflatten_p = jax.flatten_util.ravel_pytree(approx_p_tree)
+# Create a loss function
 
-# Build a model
-# expm = pde_util.expm_arnoldi(arnoldi_depth)
-# approx_solve = pde_util.solver_arnoldi(pde_t0, pde_t1, vector_field_mlp, expm=expm)
-# approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
-approx_solve = pde_util.solver_diffrax(
-    pde_t0, pde_t1, vector_field_mlp, method="dopri5"
-)
-approx_model = pde_util.model_pde(
-    unflatten=(unflatten_p, unflatten_x), init=init, solve=approx_solve
-)
+approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
 loss = pde_util.loss_mse()
 
 
 @jax.jit
 @jax.value_and_grad
-def loss_value_and_grad(p, x, y):
-    (_, approx), _ = approx_model(p, x)
+def loss_value_and_grad(p, y):
+    approx = approx_solve(y0, p)
     return loss(approx, targets=y)
 
 
 # Optimize
+variables_after = variables_before
+opt_state = optimizer.init(variables_after)
 
-variables = approx_params
-opt_state = optimizer.init(variables)
 
 for epoch in range(train_num_epochs):
-    loss, grad = loss_value_and_grad(variables, mesh, target_y1)
+    loss, grad = loss_value_and_grad(variables_after, target_y1)
     updates, opt_state = optimizer.update(grad, opt_state)
-    variables = optax.apply_updates(variables, updates)
+    variables_after = optax.apply_updates(variables_after, updates)
     if epoch % train_display_every == 0:
         print(epoch, loss)
 
 
-# Print the solution
+# Plot the solution
 
 layout = onp.asarray(
     [
@@ -170,16 +134,17 @@ fig, axes = plt.subplot_mosaic(layout, figsize=figsize, sharex=True, sharey=True
 def plot_t0(ax, args, /):
     kwargs_t0 = {"cmap": "Greys_r"}
     args_plot = args
-    clr = ax.contourf(mesh[0], mesh[1], args_plot[0], **kwargs_t0)
+
+    clr = ax.contourf(mesh[0], mesh[1], args_plot, **kwargs_t0)
     fig.colorbar(clr, ax=ax)
     return ax
 
 
 def plot_t1(ax, args, /):
     kwargs_t1 = {"cmap": "Oranges_r"}
-
     args_plot = args
-    clr = ax.contourf(mesh[0], mesh[1], args_plot[0], **kwargs_t1)
+
+    clr = ax.contourf(mesh[0], mesh[1], args_plot, **kwargs_t1)
     fig.colorbar(clr, ax=ax)
     return ax
 
@@ -197,25 +162,24 @@ axes["truth_t1"].set_title("$y(t=1)$ (target)", fontsize="medium")
 axes["truth_scale"].set_title("GRF / MLP (unknown)", fontsize="medium")
 
 axes["truth_scale"].set_ylabel("Truth (GRF)")
-plot_t0(axes["truth_t0"], y0)
-plot_t1(axes["truth_t1"], targets_all[-1])
+plot_t0(axes["truth_t0"], y0[0])
+plot_t1(axes["truth_t1"], target_y1[0])
 plot_scale(axes["truth_scale"], grf_scale)
 
 
 axes["before_scale"].set_ylabel("Before optim. (MLP)")
-mlp_scale = mlp_apply(mlp_unflatten(mlp_params), mesh)
-(_, approx_y1), _approx_all = approx_model(approx_params, mesh)
-plot_t0(axes["before_t0"], y0)
-plot_t1(axes["before_t1"], approx_y1)
+mlp_scale = mlp_apply(mlp_unflatten(variables_before), mesh)
+approx_y1 = approx_solve(y0, variables_before)
+plot_t0(axes["before_t0"], y0[0])
+plot_t1(axes["before_t1"], approx_y1[0])
 plot_scale(axes["before_scale"], mlp_scale)
 
 
 axes["after_scale"].set_ylabel("After optim. (MLP)")
-mlp_params = unflatten_p(variables)[1]
-mlp_scale = mlp_apply(mlp_unflatten(mlp_params), mesh)
-(_, approx_y1), _approx_all = approx_model(variables, mesh)
-plot_t0(axes["after_t0"], y0)
-plot_t1(axes["after_t1"], approx_y1)
+mlp_scale = mlp_apply(mlp_unflatten(variables_after), mesh)
+approx_y1 = approx_solve(y0, variables_after)
+plot_t0(axes["after_t0"], y0[0])
+plot_t1(axes["after_t1"], approx_y1[0])
 plot_scale(axes["after_scale"], mlp_scale)
 
 
