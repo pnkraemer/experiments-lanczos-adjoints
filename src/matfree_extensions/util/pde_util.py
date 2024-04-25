@@ -150,8 +150,10 @@ def pde_heat_affine(c: float, drift_like, /, stencil, *, boundary: Callable):
     return parametrize, {"drift": jnp.empty_like(drift_like)}
 
 
-def pde_wave_affine(drift_like, /, stencil, *, boundary: Callable):
-    def parametrize(*, drift):
+def pde_wave_anisotropic(scale_like, /, stencil, *, constrain, boundary: Callable):
+    def parametrize(*, scale):
+        scale_constrained = constrain(scale)  # e.g. ensure positivity
+
         def rhs(x, /):
             assert x.ndim == 3, jnp.shape(x)
             assert x.shape[1] == x.shape[2]
@@ -160,12 +162,12 @@ def pde_wave_affine(drift_like, /, stencil, *, boundary: Callable):
             u, du = x
             x_padded = boundary(u)
             fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
-            u_new = fx * (0.001 + _square(drift))
+            u_new = fx * scale_constrained
             return jnp.stack([du, u_new])
 
         return rhs
 
-    return parametrize, {"drift": jnp.empty_like(drift_like)}
+    return parametrize, {"scale": jnp.empty_like(scale_like)}
 
 
 def _square(x):
