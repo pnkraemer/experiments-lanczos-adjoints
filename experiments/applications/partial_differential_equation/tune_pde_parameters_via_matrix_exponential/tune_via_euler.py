@@ -7,7 +7,12 @@ import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
 import optax
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
-# todo: use different solvers
+# todo: add a "naive" matrix exponential solver
+# todo: expose some of the solver options via argparse
+# todo: simplify this script a little bit
+# todo: quantify the reconstruction errors a little bit
+# todo: run for different solvers
+# todo: figure out what to plot...
 
 # Set parameters
 pde_t0, pde_t1 = 0.0, 0.05
