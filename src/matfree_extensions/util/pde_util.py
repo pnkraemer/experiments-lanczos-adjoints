@@ -3,6 +3,7 @@
 import functools
 from typing import Callable, Sequence
 
+import diffrax
 import flax.linen
 import jax
 import jax.numpy as jnp
@@ -31,44 +32,6 @@ def stencil_advection_diffusion(dx):
     advection = jnp.asarray([[0.0, 1.0, 0.0], [1.0, 0.0, -1.0], [0.0, -1.0, 0.0]])
     advection = advection / (2 * dx)
     return diffusion + advection
-
-
-def solution_terminal(*, init, rhs, expm):
-    # todo: turn into a solver
-    # todo: make "how to compute the dense expm" an argument
-    def parametrize(p_init, p_rhs):
-        def operator(t, x):
-            y0 = init(**p_init)(x)
-            y0_flat, unflatten = jax.flatten_util.ravel_pytree(y0)
-
-            def matvec_p(v, p):
-                Av = rhs(**p)(unflatten(v))
-                return jax.flatten_util.ravel_pytree(Av)[0]
-
-            algorithm = expm(matvec_p)
-
-            Q, H, _r, c = algorithm(y0_flat, p_rhs)
-            e1 = jnp.eye(len(H))[0, :]
-
-            H = (H + H.T) / 2
-            eigvals, eigvecs = jnp.linalg.eigh(H)
-            expmat = eigvecs @ jnp.diag(jnp.exp(t * eigvals)) @ eigvecs.T
-            # expmat = jax.scipy.linalg.expm(t * H)
-
-            return unflatten(c * Q @ expmat @ e1)
-
-        return operator
-
-    return parametrize
-
-
-def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
-    def expm(matvec):
-        return arnoldi.hessenberg(
-            matvec, krylov_depth, reortho=reortho, custom_vjp=custom_vjp
-        )
-
-    return expm
 
 
 # todo: other initial conditions
@@ -227,6 +190,64 @@ def solver_euler_fixed_step(ts, vector_field, /):
         return jax.lax.scan(step, xs=dts, init=(t0, y0))
 
     return solve
+
+
+def solver_arnoldi(t0, t1, vector_field, /, expm):
+    # todo: turn into a solver
+    # todo: make "how to compute the dense expm" an argument
+    def solve(y0, *p):
+        y0_flat, unflatten_y = jax.flatten_util.ravel_pytree(y0)
+
+        def matvec_p(v, p_):
+            Av = vector_field(unflatten_y(v), *p_)
+            return jax.flatten_util.ravel_pytree(Av)[0]
+
+        algorithm = expm(matvec_p)
+
+        Q, H, _r, c = algorithm(y0_flat, p)
+        e1 = jnp.eye(len(H))[0, :]
+        expmat = jax.scipy.linalg.expm((t1 - t0) * H)
+        y1 = unflatten_y(c * Q @ expmat @ e1)
+        return (t1, y1), None
+
+    return solve
+
+
+def solver_diffrax(t0, t1, vector_field, /, *, method: str):
+    @diffrax.ODETerm
+    def term(t, y, args):
+        return vector_field(y, args)
+
+    if method == "dopri5":
+        solver = diffrax.Dopri5()
+    elif method == "euler":
+        solver = diffrax.Euler()
+    else:
+        raise ValueError("Method not supported (yet).")
+    stepsize_controller = diffrax.PIDController(rtol=1e-5, atol=1e-5)
+
+    def solve(y0, p):
+        sol = diffrax.diffeqsolve(
+            term,
+            solver,
+            args=p,
+            t0=t0,
+            t1=t1,
+            dt0=0.1,
+            y0=y0,
+            stepsize_controller=stepsize_controller,
+        )
+        return (sol.ts[-1], sol.ys[-1]), sol.ys[1:]
+
+    return solve
+
+
+def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
+    def expm(matvec):
+        kwargs = {"reortho": reortho, "custom_vjp": custom_vjp}
+        return arnoldi.hessenberg(matvec, krylov_depth, **kwargs)
+
+    return expm
 
 
 def model_pde(*, unflatten, init, solve):

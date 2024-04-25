@@ -7,6 +7,8 @@ import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
 import optax
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
+# todo: use different solvers
+
 # Set parameters
 pde_t0, pde_t1 = 0.0, 0.05
 dx_time, dx_space = 0.005, 0.02
@@ -16,7 +18,8 @@ train_display_every = 10
 mlp_features = [20, 20, 1]
 mlp_activation = jax.nn.tanh
 optimizer = optax.adam(1e-2)
-
+arnoldi_depth = 20
+print(arnoldi_depth)
 
 # Process the parameters
 key = jax.random.PRNGKey(seed)
@@ -114,7 +117,12 @@ approx_p_tree = (approx_p_init, approx_p_rhs)
 approx_params, unflatten_p = jax.flatten_util.ravel_pytree(approx_p_tree)
 
 # Build a model
-approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
+# expm = pde_util.expm_arnoldi(arnoldi_depth)
+# approx_solve = pde_util.solver_arnoldi(pde_t0, pde_t1, vector_field_mlp, expm=expm)
+# approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
+approx_solve = pde_util.solver_diffrax(
+    pde_t0, pde_t1, vector_field_mlp, method="dopri5"
+)
 approx_model = pde_util.model_pde(
     unflatten=(unflatten_p, unflatten_x), init=init, solve=approx_solve
 )
@@ -191,18 +199,18 @@ plot_scale(axes["truth_scale"], grf_scale)
 
 axes["before_scale"].set_ylabel("Before optim. (MLP)")
 mlp_scale = mlp_apply(mlp_unflatten(mlp_params), mesh)
-_, approx_all = approx_model(approx_params, mesh)
+(_, approx_y1), _approx_all = approx_model(approx_params, mesh)
 plot_t0(axes["before_t0"], y0)
-plot_t1(axes["before_t1"], approx_all[-1])
+plot_t1(axes["before_t1"], approx_y1)
 plot_scale(axes["before_scale"], mlp_scale)
 
 
 axes["after_scale"].set_ylabel("After optim. (MLP)")
 mlp_params = unflatten_p(variables)[1]
 mlp_scale = mlp_apply(mlp_unflatten(mlp_params), mesh)
-_, approx_all = approx_model(variables, mesh)
+(_, approx_y1), _approx_all = approx_model(variables, mesh)
 plot_t0(axes["after_t0"], y0)
-plot_t1(axes["after_t1"], approx_all[-1])
+plot_t1(axes["after_t1"], approx_y1)
 plot_scale(axes["after_scale"], mlp_scale)
 
 
