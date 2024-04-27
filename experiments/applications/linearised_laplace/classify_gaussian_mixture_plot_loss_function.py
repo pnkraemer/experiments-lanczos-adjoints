@@ -21,12 +21,14 @@ train_num_epochs = 100
 train_batch_size = num_data_in
 train_lrate = 1e-2
 train_print_frequency = 10
-calibrate_log_alpha_min = 1e-3
-numerics_lanczos_rank = 3
-numerics_slq_num_samples = 2
+calibrate_log_alpha_min = 1e-5
+numerics_lanczos_rank = (
+    3  # todo: add num_matvecs = 5, slq_samples=5 into a brother plot
+)
+numerics_slq_num_samples = 5
 numerics_slq_num_batches = 1
 plot_num_linspace = 100
-plot_num_samples_lanczos = 2
+plot_num_samples_lanczos = 3
 
 # Create the data
 key = jax.random.PRNGKey(seed)
@@ -88,9 +90,9 @@ def unconstrain(a):
     return calibrate_log_alpha_min + jnp.exp(a)
 
 
-log_alpha = -2.0
-log_alphas = jnp.linspace(-3, 2, num=plot_num_linspace)
-tangent_ins = jnp.linspace(log_alpha - 0.75, log_alpha + 0.75, num=plot_num_linspace)
+log_alpha = -3.5
+log_alphas = jnp.linspace(-5.0, 1.0, num=plot_num_linspace)
+tangent_ins = jnp.linspace(log_alpha - 0.6, log_alpha + 0.6, num=plot_num_linspace)
 
 
 # First: Full GGN + Lanczos
@@ -129,16 +131,30 @@ value, grad = value_and_grad(log_alpha, subkeys)
 tangent_outs = value[None, :] + grad[None, :] * (tangent_ins[:, None] - log_alpha)
 
 
-plt.figure(figsize=(5, 3))
-
+plt.figure(figsize=(5, 3), dpi=150)
+plt.xlim((jnp.amin(log_alphas), jnp.amax(log_alphas)))
 idx_opt = jnp.argmin(values, axis=0)
 alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
-plt.plot(alpha_opt, values_opt, marker="*", linestyle="None", alpha=0.5, color="C0")
+# plt.plot(
+#     alpha_opt,
+#     values_opt,
+#     marker=".",
+#     color="crimson",
+# )
+annotate_loc = (-4.5, 1.05 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)), subkeys)))
+plt.annotate("SLQ samples", annotate_loc, color="crimson")
+plt.plot(log_alphas, values, linewidth=1, color="crimson")
 
-plt.plot(log_alphas, values, alpha=0.5, label="Lanczos", color="C0")
-plt.plot(tangent_ins, tangent_outs, color="C0", alpha=0.75)
 
+# plt.plot(tangent_ins, tangent_outs- 2, linewidth=1, color="black")
+plt.plot(tangent_ins, tangent_outs[:, 0] - 3, linewidth=2, color="black")
+plt.annotate(
+    "Contrib.",
+    (tangent_ins[0] - 0.7, tangent_outs[0, 0] - 20.0),
+    color="black",
+    weight="bold",
+)
 
 # Second: Full GGN + Cholesky
 
@@ -164,19 +180,11 @@ idx_opt = jnp.argmin(values, axis=0)
 alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
 
-plt.plot(
-    alpha_opt,
-    values_opt,
-    marker="*",
-    markeredgecolor="black",
-    markersize=10,
-    linestyle="None",
-    alpha=0.5,
-    color="C1",
-)
-plt.plot(log_alphas, values, alpha=0.5, label="Cholesky", color="C1")
-plt.plot(tangent_ins, tangent_outs, color="C1")
-
+annotate_loc = (-4.8, 0.3 * jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)))))
+plt.annotate("Truth", annotate_loc, color="grey")
+plt.plot(log_alphas, values, linewidth=3, alpha=0.5, color="grey")
+# plt.plot(tangent_ins, tangent_outs, color="C1")
+plt.xticks([-5, -3.5, -2, alpha_opt, -0.5, 1], [-5, -3.5, -2, r"Opt.", -0.5, 1])
 
 # Third: Diagonal GGN
 
@@ -205,19 +213,26 @@ tangent_outs = value + grad * (tangent_ins - log_alpha)
 idx_opt = jnp.argmin(values, axis=0)
 alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
-plt.plot(alpha_opt, values_opt, marker="*", linestyle="None", alpha=0.5, color="C2")
+# plt.plot(
+#     alpha_opt,
+#     values_opt,
+#     marker=".",
+#     color="grey",
+# )
 
-plt.plot(log_alphas, values, alpha=0.5, label="Diagonal", color="C2")
-plt.plot(tangent_ins, tangent_outs, color="C2")
+annotate_loc = (-4, 1.05 * jnp.amax(loss_vmap(-4 * jnp.ones((1, 1)))))
+plt.annotate("Diagonal approx.", annotate_loc, color="black")
+plt.plot(log_alphas, values, color="black", linestyle="dotted")
+# plt.plot(tangent_ins, tangent_outs, color="C2")
 
 
 # Remove duplicate legend entries
-handles, labels = plt.gca().get_legend_handles_labels()
-by_label = dict(zip(labels, handles))
-plt.legend(by_label.values(), by_label.keys())
+# handles, labels = plt.gca().get_legend_handles_labels()
+# by_label = dict(zip(labels, handles))
+# plt.legend(by_label.values(), by_label.keys())
 
 
-plt.ylabel("Calibration loss")
-plt.xlabel("Parameter")
+plt.ylabel("Lin. Laplace: calibration loss")
+plt.xlabel("Parameter (log)")
 plt.tight_layout()
 plt.show()
