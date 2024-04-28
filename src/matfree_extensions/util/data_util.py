@@ -7,7 +7,12 @@ from typing import Literal, get_args
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+import torch.utils.data as data
+import torchvision
 from scipy.io import loadmat
+from torchvision import datasets
+from torchvision import transforms as T
 
 UCI_DATASET_ARGS = Literal[
     "concrete_compressive_strength",
@@ -24,6 +29,9 @@ def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def uci_preprocessing(inputs, targets, seed, device="cpu", verbose=False):
@@ -131,3 +139,192 @@ def load_uci_data(
 
     X_train, y_train, X_test, y_test = uci_preprocessing(X, y, seed, device, verbose)
     return (X_train, y_train), (X_test, y_test)
+
+
+def numpy_collate_fn(batch):
+    data, target = zip(*batch)
+    data = np.stack(data)
+    target = np.stack(target)
+    return {"image": data, "label": target}
+
+
+def get_cifar10(
+    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
+):
+    n_classes = 10
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=data_path, train=True, download=download
+    )
+    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
+    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
+    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
+    # For training, we add some augmentation.
+    # Networks are too powerful and would overfit.
+    train_transform = T.Compose(
+        [
+            T.RandomHorizontalFlip(),
+            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+            T.ToTensor(),
+            T.Normalize(means, std),
+        ]
+    )
+    train_dataset = torchvision.datasets.CIFAR10(
+        root=data_path, train=True, transform=train_transform, download=download
+    )
+    val_dataset = torchvision.datasets.CIFAR10(
+        root=data_path, train=True, transform=test_transform, download=download
+    )
+    set_seed(seed)
+    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
+    set_seed(seed)
+    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
+    test_set = torchvision.datasets.CIFAR10(
+        root=data_path, train=False, transform=test_transform, download=download
+    )
+    train_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(train_set.dataset.targets), n_classes
+    ).numpy()
+    val_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(val_set.dataset.targets), n_classes
+    ).numpy()
+    test_set.targets = torch.nn.functional.one_hot(
+        torch.tensor(test_set.targets), n_classes
+    ).numpy()
+    train_loader = data.DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        pin_memory=True,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    val_loader = data.DataLoader(
+        val_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    test_loader = data.DataLoader(
+        test_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+
+    return train_loader, val_loader, test_loader
+
+
+def get_cifar100(
+    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
+):
+    n_classes = 100
+    train_dataset = torchvision.datasets.CIFAR100(
+        root=data_path, train=True, download=download
+    )
+    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
+    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
+    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
+    # For training, we add some augmentation.
+    # Networks are too powerful and would overfit.
+    train_transform = T.Compose(
+        [
+            T.RandomHorizontalFlip(),
+            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+            T.ToTensor(),
+            T.Normalize(means, std),
+        ]
+    )
+    train_dataset = torchvision.datasets.CIFAR100(
+        root=data_path, train=True, transform=train_transform, download=download
+    )
+    val_dataset = torchvision.datasets.CIFAR100(
+        root=data_path, train=True, transform=test_transform, download=download
+    )
+    set_seed(seed)
+    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
+    set_seed(seed)
+    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
+    test_set = torchvision.datasets.CIFAR100(
+        root=data_path, train=False, transform=test_transform, download=download
+    )
+    train_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(train_set.dataset.targets), n_classes
+    ).numpy()
+    val_set.dataset.targets = torch.nn.functional.one_hot(
+        torch.tensor(val_set.dataset.targets), n_classes
+    ).numpy()
+    test_set.targets = torch.nn.functional.one_hot(
+        torch.tensor(test_set.targets), n_classes
+    ).numpy()
+    train_loader = data.DataLoader(
+        train_set,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+        pin_memory=True,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    val_loader = data.DataLoader(
+        val_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    test_loader = data.DataLoader(
+        test_set,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+
+    return train_loader, val_loader, test_loader
+
+
+def image_to_numpy(mean, std):
+    def normalize(img):
+        img = np.array(img, dtype=np.float32)
+        # img = (img / 255.0 - mean) / std
+        return (img / 255.0 - mean) / std
+
+    return normalize
+
+
+def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0):
+    set_seed(seed)
+    n_classes = 1000
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+
+    normalize = image_to_numpy(mean, std)
+    train_transform = T.Compose(
+        [T.RandomResizedCrop(224), T.RandomHorizontalFlip(), normalize]
+    )
+
+    # test_transform = T.Compose([T.Resize(256), T.CenterCrop(224), normalize])
+    def target_transform(y):
+        return F.one_hot(torch.tensor(y), n_classes).numpy()
+
+    # target_transform = lambda y: F.one_hot(torch.tensor(y), n_classes).numpy()
+    train_path = "/dtu/imagenet/ILSVRC/Data/CLS-LOC/train/"
+    train_dataset = datasets.ImageFolder(
+        train_path, transform=train_transform, target_transform=target_transform
+    )
+    return data.DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        drop_last=True,
+        pin_memory=True,
+        num_workers=4,
+        collate_fn=numpy_collate_fn,
+    )
+    # return train_loader
