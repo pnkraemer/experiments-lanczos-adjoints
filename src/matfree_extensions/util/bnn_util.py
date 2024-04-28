@@ -1,18 +1,13 @@
 """Utilities for BNNs."""
 
 import functools
-import random
 from typing import Callable
 
 import flax.linen
 import jax
 import jax.numpy as jnp
-import numpy as np
-import torch
-import torch.utils.data as data
-import torchvision
 from matfree import hutchinson
-from torchvision import transforms as T
+from tqdm import tqdm
 
 from matfree_extensions import lanczos
 
@@ -158,6 +153,21 @@ def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     return logdet
 
 
+def solver_logdet_slq_implicit(*, lanczos_rank, slq_num_samples, slq_num_batches):
+    def logdet(Av: Callable, N: int, key: jax.random.PRNGKey):
+        x_like = jnp.ones((N,), dtype=float)
+        sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
+
+        integrand = lanczos.integrand_spd(jnp.log, lanczos_rank, Av)
+        estimate = hutchinson.hutchinson(integrand, sampler)
+
+        keys = jax.random.split(key, num=slq_num_batches)
+        values = jax.lax.map(lambda k: estimate(k), keys)
+        return jnp.mean(values, axis=0)
+
+    return logdet
+
+
 def predictive_cov(*, ggn_fun, model_fun, param_unflatten, hyperparam_unconstrain):
     def evaluate(a, variables, x_train, y_train, x_test):
         alpha = hyperparam_unconstrain(a)
@@ -181,6 +191,83 @@ def ggn_full(*, loss_single, model_fun, param_unflatten):
         return jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
 
     return ggn_fun
+
+
+def ggn_vp_running(*, loss_single, model_fun, param_unflatten):
+    def gvp(v_vec, params_vec, x_batch, y_batch):
+        v_like_params = param_unflatten(v_vec)
+        params = param_unflatten(params_vec)
+
+        def scan_fun(carry, batch):
+            x, y = batch
+            x = x[None, ...]
+            y = y[None, ...]
+
+            def model_pred(p):
+                return model_fun(p, x)[0]
+
+            # Big models(except ConvNext) return a tuple (logits, model_state)
+            preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
+            _, vjp_fn = jax.vjp(model_pred, params)
+            H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
+            HJv = jnp.einsum("boi, bi->bo", H, Jv)
+            JtHJv = vjp_fn(HJv)[0]
+            return jax.tree_map(lambda c, v: c + v, carry, JtHJv), None
+
+        init_value = jax.tree_map(lambda x: jnp.zeros_like(x), params)
+        return jax.lax.scan(scan_fun, init_value, (x_batch, y_batch))[0]
+
+    return gvp
+
+
+def ggn_vp_parallel(*, loss_single, model_fun, param_unflatten):
+    def gvp(v_vec, params_vec, x_batch, y_batch):
+        v_like_params = param_unflatten(v_vec)
+        params = param_unflatten(params_vec)
+
+        def body_fn(x_single, y_single):
+            x = x_single[None, ...]
+            y = y_single[None, ...]
+
+            # model_pred = lambda p: model_fun(p, x)[0]
+            def model_pred(p):
+                return model_fun(p, x)[0]
+
+            preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
+            _, vjp_fn = jax.vjp(model_pred, params)
+            H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
+            HJv = jnp.einsum("boi, bi->bo", H, Jv)
+            return vjp_fn(HJv)[0]
+
+        return jax.tree_map(
+            lambda x: x.sum(axis=0), jax.vmap(body_fn)(x_batch, y_batch)
+        )
+
+    return gvp
+
+
+def ggn_vp_dataloader(
+    param_vec, loss_single, model_fun, param_unflatten, data_loader, sum_type="parallel"
+):
+    def ggn_vec_prod(v_vec):
+        if sum_type == "parallel":
+            ggn_vp = ggn_vp_parallel
+        elif sum_type == "running":
+            ggn_vp = ggn_vp_running
+        ggn_vp_fn = ggn_vp(
+            model_fun=model_fun,
+            loss_single=loss_single,
+            param_unflatten=param_unflatten,
+        )
+        ggn_vp_fn = jax.jit(ggn_vp_fn)
+        gvp = jnp.zeros_like(param_vec)
+        for _, batch in enumerate(tqdm(data_loader)):
+            x_batch, y_batch = batch["image"], batch["label"]
+            gvp_tree = ggn_vp_fn(v_vec, param_vec, x_batch, y_batch)
+            gvp += jax.flatten_util.ravel_pytree(gvp_tree)[0]
+        return gvp
+
+    return ggn_vec_prod
 
 
 def ggn_diag(*, loss_single, model_fun, param_unflatten):
@@ -228,161 +315,3 @@ def sampler_lanczos(*, ggn_fun, num, lanczos_rank):
 
 def _dense_tridiag(diagonal, off_diagonal):
     return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
-
-
-def set_seed(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-
-
-def numpy_collate_fn(batch):
-    data, target = zip(*batch)
-    data = np.stack(data)
-    target = np.stack(target)
-    return {"image": data, "label": target}
-
-
-def get_cifar10(
-    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
-):
-    n_classes = 10
-    train_dataset = torchvision.datasets.CIFAR10(
-        root=data_path, train=True, download=download
-    )
-    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
-    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
-    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
-    # For training, we add some augmentation.
-    # Networks are too powerful and would overfit.
-    train_transform = T.Compose(
-        [
-            T.RandomHorizontalFlip(),
-            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-            T.ToTensor(),
-            T.Normalize(means, std),
-        ]
-    )
-    train_dataset = torchvision.datasets.CIFAR10(
-        root=data_path, train=True, transform=train_transform, download=download
-    )
-    val_dataset = torchvision.datasets.CIFAR10(
-        root=data_path, train=True, transform=test_transform, download=download
-    )
-    set_seed(seed)
-    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
-    set_seed(seed)
-    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
-    test_set = torchvision.datasets.CIFAR10(
-        root=data_path, train=False, transform=test_transform, download=download
-    )
-    train_set.dataset.targets = torch.nn.functional.one_hot(
-        torch.tensor(train_set.dataset.targets), n_classes
-    ).numpy()
-    val_set.dataset.targets = torch.nn.functional.one_hot(
-        torch.tensor(val_set.dataset.targets), n_classes
-    ).numpy()
-    test_set.targets = torch.nn.functional.one_hot(
-        torch.tensor(test_set.targets), n_classes
-    ).numpy()
-    train_loader = data.DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=True,
-        drop_last=True,
-        pin_memory=True,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-    val_loader = data.DataLoader(
-        val_set,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-    test_loader = data.DataLoader(
-        test_set,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-
-    return train_loader, val_loader, test_loader
-
-
-def get_cifar100(
-    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
-):
-    n_classes = 100
-    train_dataset = torchvision.datasets.CIFAR100(
-        root=data_path, train=True, download=download
-    )
-    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
-    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
-    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
-    # For training, we add some augmentation.
-    # Networks are too powerful and would overfit.
-    train_transform = T.Compose(
-        [
-            T.RandomHorizontalFlip(),
-            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-            T.ToTensor(),
-            T.Normalize(means, std),
-        ]
-    )
-    train_dataset = torchvision.datasets.CIFAR100(
-        root=data_path, train=True, transform=train_transform, download=download
-    )
-    val_dataset = torchvision.datasets.CIFAR100(
-        root=data_path, train=True, transform=test_transform, download=download
-    )
-    set_seed(seed)
-    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
-    set_seed(seed)
-    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
-    test_set = torchvision.datasets.CIFAR100(
-        root=data_path, train=False, transform=test_transform, download=download
-    )
-    train_set.dataset.targets = torch.nn.functional.one_hot(
-        torch.tensor(train_set.dataset.targets), n_classes
-    ).numpy()
-    val_set.dataset.targets = torch.nn.functional.one_hot(
-        torch.tensor(val_set.dataset.targets), n_classes
-    ).numpy()
-    test_set.targets = torch.nn.functional.one_hot(
-        torch.tensor(test_set.targets), n_classes
-    ).numpy()
-    train_loader = data.DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=True,
-        drop_last=True,
-        pin_memory=True,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-    val_loader = data.DataLoader(
-        val_set,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-    test_loader = data.DataLoader(
-        test_set,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-
-    return train_loader, val_loader, test_loader
