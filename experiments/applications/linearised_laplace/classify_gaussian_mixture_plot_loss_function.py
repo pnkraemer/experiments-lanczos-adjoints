@@ -1,5 +1,7 @@
 """Classify a Gaussian mixture model and calibrated different GGNs."""
 
+# todo: clean up this script a little bit
+# todo: make the crimson "Pop" more: all others get a lower alpha
 import os
 
 import jax
@@ -7,10 +9,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
 from matfree_extensions.util import bnn_util, exp_util
-from tueplots import axes, bundles
-
-plt.rcParams.update(bundles.neurips2024(ncols=2, nrows=1, family="sans-serif"))
-plt.rcParams.update(axes.lines())
 
 # Make directories
 directory_fig = exp_util.matching_directory(__file__, "figures/")
@@ -25,13 +23,13 @@ train_num_epochs = 100
 train_batch_size = num_data_in
 train_lrate = 1e-2
 train_print_frequency = 10
-calibrate_log_alpha_min = 1e-5
+calibrate_log_alpha_min = 1e-10
 numerics_lanczos_rank_bad = 3
 numerics_lanczos_rank_good = 10
 numerics_slq_num_samples_bad = 2
 numerics_slq_num_samples_good = 10
 numerics_slq_num_batches = 1
-plot_num_linspace = 100
+plot_num_linspace = 50
 plot_num_samples_lanczos = 3
 
 # Create the data
@@ -52,6 +50,7 @@ key, subkey = jax.random.split(key, num=2)
 variables_dict = model_init(subkey, x_train)
 variables, unflatten = jax.flatten_util.ravel_pytree(variables_dict)
 
+print("Number of parameters:", variables.size)
 # Train the model
 
 optimizer = optax.adam(train_lrate)
@@ -88,23 +87,32 @@ print()
 
 
 # Set up the linearised Laplace
+loss_function = bnn_util.loss_calibration
 
 
 def unconstrain(a):
     return calibrate_log_alpha_min + jnp.exp(a)
+    # return calibrate_log_alpha_min + a**2
 
 
-log_alpha = -3.5
-log_alphas = jnp.linspace(-5.0, 1.0, num=plot_num_linspace)
+log_alpha = -4.0
+log_alphas = jnp.linspace(-5, 0, num=plot_num_linspace)
 tangent_ins = jnp.linspace(log_alpha - 0.8, log_alpha + 0.8, num=plot_num_linspace)
 
 
-fig, axes = plt.subplot_mosaic([["bad", "good"]], sharex=True, sharey=True, dpi=150)
+fig, axes = plt.subplot_mosaic(
+    [["bad"]],
+    figsize=(4, 3),
+    sharex=True,
+    constrained_layout=True,
+    sharey=True,
+    dpi=150,
+)
 axes["bad"].set_xlim((jnp.amin(log_alphas), jnp.amax(log_alphas)))
-axes["bad"].set_ylim((-10, 260))
+# axes["bad"].set_ylim((-10, 260))
 
 
-# First: Full GGN + Lanczos (bad approximation)
+print("Plotting full GGN + Lanczos (bad approximation)")
 
 ggn_fun = bnn_util.ggn_full(
     model_fun=model_apply,
@@ -120,7 +128,7 @@ def calibration_loss(a, k):
         slq_num_batches=numerics_slq_num_batches,
     )
 
-    loss = bnn_util.loss_calibration(
+    loss = loss_function(
         ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
     )
     return loss(a, variables, x_train, y_train, k)
@@ -145,20 +153,20 @@ alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
 annotate_loc = (-4.75, 1.1 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)), subkeys)))
 axes["bad"].annotate(
-    f"{plot_num_samples_lanczos} SLQ seeds",
+    f"{numerics_lanczos_rank_bad} MVs, {numerics_slq_num_samples_bad} samples/seed",
     annotate_loc,
     bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
-    color="crimson",
-    fontsize="small",
+    color="C1",
+    fontsize="x-small",
 )
-axes["bad"].plot(log_alphas, values, linewidth=1, color="crimson")
+axes["bad"].plot(log_alphas, values, linewidth=1.5, color="C1")
 
 axes["bad"].plot(
     tangent_ins,
     tangent_outs[:, 0],
     zorder=10,
     linestyle="dashed",
-    linewidth=2,
+    linewidth=1.5,
     color="black",
 )
 axes["bad"].annotate(
@@ -166,12 +174,12 @@ axes["bad"].annotate(
     (tangent_ins[plot_num_linspace // 2], 3 + tangent_outs[plot_num_linspace // 2, 0]),
     color="black",
     weight="bold",
-    fontsize="small",
+    fontsize="x-small",
     bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
 )
 
 
-# Now the good approximation
+print("Plotting full GGN + Lanczos (good approximation)")
 
 ggn_fun = bnn_util.ggn_full(
     model_fun=model_apply,
@@ -187,7 +195,7 @@ def calibration_loss(a, k):
         slq_num_batches=numerics_slq_num_batches,
     )
 
-    loss = bnn_util.loss_calibration(
+    loss = loss_function(
         ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
     )
     return loss(a, variables, x_train, y_train, k)
@@ -210,19 +218,17 @@ tangent_outs = value[None, :] + grad[None, :] * (tangent_ins[:, None] - log_alph
 idx_opt = jnp.argmin(values, axis=0)
 alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
-annotate_loc = (
-    -4.75,
-    10 + 1.05 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)), subkeys)),
-)
-axes["good"].annotate(
-    f"{plot_num_samples_lanczos} SLQ seeds",
+annotate_loc = (-4.85, 10 + 1.0 * jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)), subkeys)))
+axes["bad"].annotate(
+    f"{numerics_lanczos_rank_good} MVs, {numerics_slq_num_samples_good} samples/seed",
     annotate_loc,
-    color="crimson",
-    fontsize="small",
+    bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
+    color="C0",
+    fontsize="x-small",
 )
-axes["good"].plot(log_alphas, values, linewidth=1, color="crimson")
+axes["bad"].plot(log_alphas, values, linewidth=1.5, color="C0")
 
-axes["good"].plot(
+axes["bad"].plot(
     tangent_ins,
     tangent_outs[:, 0],
     zorder=10,
@@ -239,11 +245,12 @@ axes["good"].plot(
 
 
 # Second: Full GGN + Cholesky
+print("Plotting full GGN + Cholesky")
 
 
 def calibration_loss(a):
     logdet_fun = bnn_util.solver_logdet_dense()
-    loss = bnn_util.loss_calibration(
+    loss = loss_function(
         ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
     )
     return loss(a, variables, x_train, y_train)
@@ -261,15 +268,18 @@ idx_opt = jnp.argmin(values, axis=0)
 alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
 
+axes["bad"].axvline(alpha_opt, linewidth=0.5, color="black")
+axes["bad"].annotate("Optimum", xy=(alpha_opt + 0.1, 150), fontsize="x-small")
 annotate_loc = (-4.8, -30 + jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)))))
-for ax in [axes["bad"], axes["good"]]:
-    ax.annotate("Truth", annotate_loc, color="grey", fontsize="small")
-    ax.plot(log_alphas, values, linewidth=3, alpha=0.5, color="grey")
+for ax in [axes["bad"]]:
+    ax.annotate("Truth", annotate_loc, color="grey", fontsize="x-small")
+    ax.plot(log_alphas, values, linewidth=3, alpha=0.35, zorder=0, color="grey")
 # plt.plot(tangent_ins, tangent_outs, color="C1")
 
 # axes["bad"].set_xticks([-5, -3.5, -2, alpha_opt, -0.5, 1], [-5, -3.5, -2, r"Opt.", -0.5, 1])
 
-# Third: Diagonal GGN
+
+print("Plotting diagonal GGN")
 
 ggn_fun = bnn_util.ggn_diag(
     model_fun=model_apply,
@@ -280,7 +290,7 @@ ggn_fun = bnn_util.ggn_diag(
 
 def calibration_loss(a):
     logdet_fun = bnn_util.solver_logdet_dense()
-    loss = bnn_util.loss_calibration(
+    loss = loss_function(
         ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
     )
     return loss(a, variables, x_train, y_train)
@@ -303,31 +313,24 @@ values_opt = values[idx_opt]
 #     color="grey",
 # )
 
-annotate_loc = (-4, 1.05 * jnp.amax(loss_vmap(-4 * jnp.ones((1, 1)))))
-for ax in [axes["bad"], axes["good"]]:
-    ax.annotate("Diagonal approximation", annotate_loc, color="black", fontsize="small")
-    ax.plot(log_alphas, values, color="black", linestyle="dotted")
-# plt.plot(tangent_ins, tangent_outs, color="C2")
-
-
-# Remove duplicate legend entries
-# handles, labels = plt.gca().get_legend_handles_labels()
-# by_label = dict(zip(labels, handles))
-# plt.legend(by_label.values(), by_label.keys())
+annotate_loc = (-4.5, 1.05 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)))))
+for ax in [axes["bad"]]:
+    ax.annotate("Diagonal approx.", annotate_loc, color="black", fontsize="x-small")
+    ax.plot(log_alphas, values, color="black", alpha=0.7, linestyle="dotted")
 
 
 axes["bad"].set_ylabel("Calibration loss")
 axes["bad"].set_xlabel("Parameter (log)")
-axes["good"].set_xlabel("Parameter (log)")
+# axes["good"].set_xlabel("Parameter (log)")
 
-axes["bad"].set_title(
-    f"SLQ: {numerics_lanczos_rank_bad} matvecs, {numerics_slq_num_samples_bad} samples per seed",
-    fontsize="medium",
-)
-axes["good"].set_title(
-    rf"SLQ: $\geq$ {numerics_lanczos_rank_good} matvecs, $\geq$ {numerics_slq_num_samples_good} samples per seed",
-    fontsize="medium",
-)
+# axes["bad"].set_title(
+#     f"SLQ: {numerics_lanczos_rank_bad} MVs, {numerics_slq_num_samples_bad} samples per seed",
+#     fontsize="medium",
+# )
+# axes["good"].set_title(
+#     rf"SLQ: $\geq$ {numerics_lanczos_rank_good} MVs, $\geq$ {numerics_slq_num_samples_good} samples per seed",
+#     fontsize="medium",
+# )
 
 # Save the plot to a file
 plt.savefig(f"{directory_fig}/slq_versus_diagonal_loss.pdf")

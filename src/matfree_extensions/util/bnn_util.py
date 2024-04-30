@@ -128,6 +128,22 @@ def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
 
 
 # todo: move to gp? (And rename gp.py appropriately, of course)
+#  laplace-torch calls this Laplace.log_prob(normalized=True)
+def loss_log_prob_like_in_redux(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
+    def loss(a, variables, x_train, y_train, *logdet_params):
+        alpha = hyperparam_unconstrain(a)
+
+        M = ggn_fun(alpha, variables, x_train, y_train)
+        logdet = logdet_fun(M, *logdet_params)
+
+        tmp1 = -len(variables) / 2 * jnp.log(2 * jnp.pi) + logdet / 2
+        tmp2 = -jnp.dot(variables, variables) / 2
+        return tmp1 + tmp2
+
+    return loss
+
+
+# todo: move to gp? (And rename gp.py appropriately, of course)
 def solver_logdet_dense():
     def logdet(M: jax.Array):
         _sign, logdet_value = jnp.linalg.slogdet(M)
