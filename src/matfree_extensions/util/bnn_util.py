@@ -479,7 +479,7 @@ def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
         logdet_fun = solver_logdet_slq_implicit(
             lanczos_rank=10, slq_num_samples=10, slq_num_batches=1, N=num_classes
         )
-        
+
         # logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
         logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
         log_prior = jnp.log(alpha) * n_params - alpha * jnp.dot(params_vec, params_vec)
