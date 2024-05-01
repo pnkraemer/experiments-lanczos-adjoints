@@ -148,8 +148,23 @@ def numpy_collate_fn(batch):
     return {"image": data, "label": target}
 
 
+def image_to_numpy(mean, std):
+    def normalize(img):
+        img = np.array(img, dtype=np.float32)
+        # img = (img / 255.0 - mean) / std
+        return (img / 255.0 - mean) / std
+
+    return normalize
+
+
 def get_cifar10(
-    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
+    batch_size=128,
+    return_dataset=False,
+    purp: Literal["train", "sample"] = "train",
+    transform=None,
+    seed=0,
+    download: bool = True,
+    data_path="/dtu/p1/hroy/data",
 ):
     n_classes = 10
     train_dataset = torchvision.datasets.CIFAR10(
@@ -157,17 +172,23 @@ def get_cifar10(
     )
     means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
     std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
-    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
-    # For training, we add some augmentation.
-    # Networks are too powerful and would overfit.
-    train_transform = T.Compose(
-        [
-            T.RandomHorizontalFlip(),
-            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-            T.ToTensor(),
-            T.Normalize(means, std),
-        ]
-    )
+    normalize = image_to_numpy(means, std)
+    test_transform = normalize
+    # For training, we add some augmentation. Networks are too powerful and would overfit.
+    if purp == "train":
+        train_transform = T.Compose(
+            [
+                T.RandomHorizontalFlip(),
+                T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
+                normalize,
+            ]
+        )
+    elif purp == "sample":
+        train_transform = test_transform
+    if transform is not None:
+        train_transform = T.Compose([train_transform, transform])
+        test_transform = T.Compose([test_transform, transform])
+
     train_dataset = torchvision.datasets.CIFAR10(
         root=data_path, train=True, transform=train_transform, download=download
     )
@@ -190,15 +211,26 @@ def get_cifar10(
     test_set.targets = torch.nn.functional.one_hot(
         torch.tensor(test_set.targets), n_classes
     ).numpy()
-    train_loader = data.DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=True,
-        drop_last=True,
-        pin_memory=True,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
+    if purp == "train":
+        train_loader = data.DataLoader(
+            train_set,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            pin_memory=True,
+            num_workers=4,
+            collate_fn=numpy_collate_fn,
+        )
+    elif purp == "sample":
+        train_loader = data.DataLoader(
+            train_set,
+            batch_size=batch_size,
+            drop_last=False,
+            pin_memory=True,
+            num_workers=4,
+            collate_fn=numpy_collate_fn,
+            sampler=data.sampler.SequentialSampler(train_set),
+        )
     val_loader = data.DataLoader(
         val_set,
         batch_size=batch_size,
@@ -215,88 +247,10 @@ def get_cifar10(
         num_workers=4,
         collate_fn=numpy_collate_fn,
     )
-
-    return train_loader, val_loader, test_loader
-
-
-def get_cifar100(
-    batch_size=128, seed=0, download: bool = True, data_path="/dtu/p1/hroy/data"
-):
-    n_classes = 100
-    train_dataset = torchvision.datasets.CIFAR100(
-        root=data_path, train=True, download=download
-    )
-    means = (train_dataset.data / 255.0).mean(axis=(0, 1, 2))
-    std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
-    test_transform = T.Compose([T.ToTensor(), T.Normalize(means, std)])
-    # For training, we add some augmentation.
-    # Networks are too powerful and would overfit.
-    train_transform = T.Compose(
-        [
-            T.RandomHorizontalFlip(),
-            T.RandomResizedCrop((32, 32), scale=(0.8, 1.0), ratio=(0.9, 1.1)),
-            T.ToTensor(),
-            T.Normalize(means, std),
-        ]
-    )
-    train_dataset = torchvision.datasets.CIFAR100(
-        root=data_path, train=True, transform=train_transform, download=download
-    )
-    val_dataset = torchvision.datasets.CIFAR100(
-        root=data_path, train=True, transform=test_transform, download=download
-    )
-    set_seed(seed)
-    train_set, _ = torch.utils.data.random_split(train_dataset, [45000, 5000])
-    set_seed(seed)
-    _, val_set = torch.utils.data.random_split(val_dataset, [45000, 5000])
-    test_set = torchvision.datasets.CIFAR100(
-        root=data_path, train=False, transform=test_transform, download=download
-    )
-    train_set.dataset.targets = torch.nn.functional.one_hot(
-        torch.tensor(train_set.dataset.targets), n_classes
-    ).numpy()
-    val_set.dataset.targets = torch.nn.functional.one_hot(
-        torch.tensor(val_set.dataset.targets), n_classes
-    ).numpy()
-    test_set.targets = torch.nn.functional.one_hot(
-        torch.tensor(test_set.targets), n_classes
-    ).numpy()
-    train_loader = data.DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=True,
-        drop_last=True,
-        pin_memory=True,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-    val_loader = data.DataLoader(
-        val_set,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-    test_loader = data.DataLoader(
-        test_set,
-        batch_size=batch_size,
-        shuffle=False,
-        drop_last=False,
-        num_workers=4,
-        collate_fn=numpy_collate_fn,
-    )
-
-    return train_loader, val_loader, test_loader
-
-
-def image_to_numpy(mean, std):
-    def normalize(img):
-        img = np.array(img, dtype=np.float32)
-        # img = (img / 255.0 - mean) / std
-        return (img / 255.0 - mean) / std
-
-    return normalize
+    if return_dataset:
+        return train_set.dataset, val_set.dataset, test_set.dataset
+    else:
+        return train_loader, val_loader, test_loader
 
 
 def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0):
@@ -324,7 +278,6 @@ def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0):
         batch_size=batch_size,
         drop_last=True,
         pin_memory=True,
-        num_workers=4,
         collate_fn=numpy_collate_fn,
     )
     # return train_loader

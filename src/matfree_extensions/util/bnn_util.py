@@ -6,6 +6,7 @@ from typing import Callable
 import flax.linen
 import jax
 import jax.numpy as jnp
+from flax import linen as nn
 from matfree import hutchinson
 from tqdm import tqdm
 
@@ -153,16 +154,18 @@ def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     return logdet
 
 
-def solver_logdet_slq_implicit(*, lanczos_rank, slq_num_samples, slq_num_batches):
-    def logdet(Av: Callable, N: int, key: jax.random.PRNGKey):
-        x_like = jnp.ones((N,), dtype=float)
-        sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
+def solver_logdet_slq_implicit(
+    *, lanczos_rank, slq_num_samples, slq_num_batches, N: int
+):
+    x_like = jnp.ones((N,), dtype=float)
+    sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
 
+    def logdet(Av: Callable, key: jax.random.PRNGKey, *args):
         integrand = lanczos.integrand_spd(jnp.log, lanczos_rank, Av)
         estimate = hutchinson.hutchinson(integrand, sampler)
 
         keys = jax.random.split(key, num=slq_num_batches)
-        values = jax.lax.map(lambda k: estimate(k), keys)
+        values = jax.lax.map(lambda k: estimate(k, *args), keys)
         return jnp.mean(values, axis=0)
 
     return logdet
@@ -198,23 +201,28 @@ def ggn_vp_running(*, loss_single, model_fun, param_unflatten):
         v_like_params = param_unflatten(v_vec)
         params = param_unflatten(params_vec)
 
+        # def model_flat(p, x):
+        #     return model_fun(param_unflatten(p), x)
         def scan_fun(carry, batch):
             x, y = batch
             x = x[None, ...]
             y = y[None, ...]
 
             def model_pred(p):
-                return model_fun(p, x)[0]
+                return model_fun(p, x)
+                return model_flat(p, x)
 
             # Big models(except ConvNext) return a tuple (logits, model_state)
-            preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
-            _, vjp_fn = jax.vjp(model_pred, params)
+            preds, Jv = jax.jvp(model_pred, (params_vec,), (v_vec,))
+            _, vjp_fn = jax.vjp(model_pred, params_vec)
             H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
             HJv = jnp.einsum("boi, bi->bo", H, Jv)
             JtHJv = vjp_fn(HJv)[0]
+            # return carry + JtHJv, None
             return jax.tree_map(lambda c, v: c + v, carry, JtHJv), None
 
         init_value = jax.tree_map(lambda x: jnp.zeros_like(x), params)
+        # init_value = jnp.zeros_like(params_vec)
         return jax.lax.scan(scan_fun, init_value, (x_batch, y_batch))[0]
 
     return gvp
@@ -229,15 +237,47 @@ def ggn_vp_parallel(*, loss_single, model_fun, param_unflatten):
             x = x_single[None, ...]
             y = y_single[None, ...]
 
-            # model_pred = lambda p: model_fun(p, x)[0]
             def model_pred(p):
-                return model_fun(p, x)[0]
+                return model_fun(p, x)
 
+            # Big models(except ConvNext) return a tuple (logits, model_state)
+            # Hence: model_pred = lambda p: model_fun(p, x)[0]
             preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
             _, vjp_fn = jax.vjp(model_pred, params)
+
             H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
             HJv = jnp.einsum("boi, bi->bo", H, Jv)
             return vjp_fn(HJv)[0]
+
+        return jax.tree_map(
+            lambda x: x.sum(axis=0), jax.vmap(body_fn)(x_batch, y_batch)
+        )
+
+    return gvp
+
+
+def kernel_vp_parallel(*, loss_single, model_fun, param_unflatten):
+    def gvp(v_like_outs, params_vec, x_batch, y_batch):
+        v_like_outs = v_like_outs[None, ...]
+        params = param_unflatten(params_vec)
+
+        def body_fn(x_single, y_single):
+            x = x_single[None, ...]
+            y = y_single[None, ...]
+
+            def model_pred(p):
+                return model_fun(p, x)
+
+            # Big models(except ConvNext) return a tuple (logits, model_state)
+            # Hence: model_pred = lambda p: model_fun(p, x)[0]
+            preds, vjp_fn = jax.vjp(model_pred, params)
+            H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
+            H_sqrt = jnp.linalg.cholesky(H)
+            Hv = jnp.einsum("boi, bi->bo", H_sqrt, v_like_outs)
+            JtHv = vjp_fn(Hv)[0]
+            _, JJtHv = jax.jvp(model_pred, (params,), (JtHv,))
+            HJJtHv = jnp.einsum("boi, bi->bo", H, JJtHv)
+            return HJJtHv
 
         return jax.tree_map(
             lambda x: x.sum(axis=0), jax.vmap(body_fn)(x_batch, y_batch)
@@ -315,3 +355,178 @@ def sampler_lanczos(*, ggn_fun, num, lanczos_rank):
 
 def _dense_tridiag(diagonal, off_diagonal):
     return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
+
+
+def img_to_patch(x, patch_size, flatten_channels=True):
+    """
+    Inputs:
+        x - torch.Tensor representing the image of shape [B, H, W, C]
+        patch_size - Number of pixels per dimension of the patches (integer)
+        flatten_channels - If True, the patches will be returned in a flattened format
+                           as a feature vector instead of a image grid.
+    """
+    B, H, W, C = x.shape
+    x = x.reshape(B, H // patch_size, patch_size, W // patch_size, patch_size, C)
+    x = x.transpose(0, 1, 3, 2, 4, 5)  # [B, H', W', p_H, p_W, C]
+    x = x.reshape(B, -1, *x.shape[3:])  # [B, H'*W', p_H, p_W, C]
+    if flatten_channels:
+        x = x.reshape(B, x.shape[1], -1)  # [B, H'*W', p_H*p_W*C]
+    return x
+
+
+class AttentionBlock(nn.Module):
+    embed_dim: int  # Dimensionality of input and attention feature vectors
+    hidden_dim: int  # Dimensionality of hidden layer in feed-forward network
+    num_heads: int  # Number of heads to use in the Multi-Head Attention block
+    dropout_prob: float = 0.0  # Amount of dropout to apply in the feed-forward network
+
+    def setup(self):
+        self.attn = nn.MultiHeadDotProductAttention(num_heads=self.num_heads)
+        self.linear = [
+            nn.Dense(self.hidden_dim),
+            nn.gelu,
+            nn.Dropout(self.dropout_prob),
+            nn.Dense(self.embed_dim),
+        ]
+        self.layer_norm_1 = nn.LayerNorm()
+        self.layer_norm_2 = nn.LayerNorm()
+        self.dropout = nn.Dropout(self.dropout_prob)
+
+    def __call__(self, x, train=True):
+        inp_x = self.layer_norm_1(x)
+        attn_out = self.attn(inputs_q=inp_x, inputs_kv=inp_x)
+        x = x + self.dropout(attn_out, deterministic=not train)
+
+        linear_out = self.layer_norm_2(x)
+        for l in self.linear:
+            linear_out = (
+                l(linear_out)
+                if not isinstance(l, nn.Dropout)
+                else l(linear_out, deterministic=not train)
+            )
+        x = x + self.dropout(linear_out, deterministic=not train)
+        return x
+
+
+class VisionTransformer(nn.Module):
+    embed_dim: int  # Dimensionality of input and attention feature vectors
+    hidden_dim: int  # Dimensionality of hidden layer in feed-forward network
+    num_heads: int  # Number of heads to use in the Multi-Head Attention block
+    num_channels: int  # Number of channels of the input (3 for RGB)
+    num_layers: int  # Number of layers to use in the Transformer
+    num_classes: int  # Number of classes to predict
+    patch_size: int  # Number of pixels that the patches have per dimension
+    num_patches: int  # Maximum number of patches an image can have
+    dropout_prob: float = 0.0  # Amount of dropout to apply in the feed-forward network
+
+    def setup(self):
+        # Layers/Networks
+        self.input_layer = nn.Dense(self.embed_dim)
+        self.transformer = [
+            AttentionBlock(
+                self.embed_dim, self.hidden_dim, self.num_heads, self.dropout_prob
+            )
+            for _ in range(self.num_layers)
+        ]
+        self.mlp_head = nn.Sequential([nn.LayerNorm(), nn.Dense(self.num_classes)])
+        self.dropout = nn.Dropout(self.dropout_prob)
+
+        # Parameters/Embeddings
+        self.cls_token = self.param(
+            "cls_token", nn.initializers.normal(stddev=1.0), (1, 1, self.embed_dim)
+        )
+        self.pos_embedding = self.param(
+            "pos_embedding",
+            nn.initializers.normal(stddev=1.0),
+            (1, 1 + self.num_patches, self.embed_dim),
+        )
+
+    def __call__(self, x, train=True):
+        # Preprocess input
+        x = img_to_patch(x, self.patch_size)
+        B, T, _ = x.shape
+        x = self.input_layer(x)
+
+        # Add CLS token and positional encoding
+        cls_token = self.cls_token.repeat(B, axis=0)
+        x = jnp.concatenate([cls_token, x], axis=1)
+        x = x + self.pos_embedding[:, : T + 1]
+
+        # Apply Transforrmer
+        x = self.dropout(x, deterministic=not train)
+        for attn_block in self.transformer:
+            x = attn_block(x, train=train)
+
+        # Perform classification prediction
+        cls = x[:, 0]
+        out = self.mlp_head(cls)
+        return out
+
+
+def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
+    ggn_fun = kernel_vp_parallel(
+        loss_single=loss_training_cross_entropy_single,
+        model_fun=model_apply,
+        param_unflatten=unflatten,
+    )
+
+    def ggn_mat(v_vec, alpha, *params):
+        Gv_tree = ggn_fun(v_vec, *params)
+        return jax.flatten_util.ravel_pytree(Gv_tree)[0] + alpha * v_vec
+
+    def loss(log_alpha, params_vec, img, label, key, num_classes=1000):
+        alpha = hyperparam_unconstrain(log_alpha)
+        logdet_fun = solver_logdet_slq_implicit(
+            lanczos_rank=10, slq_num_samples=10, slq_num_batches=1, N=num_classes
+        )
+        
+        # logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
+        logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
+        log_prior = jnp.log(alpha) * n_params - alpha * jnp.dot(params_vec, params_vec)
+        log_marginal = log_prior - logdet
+        return -log_marginal
+
+    return loss
+
+
+def vectorize_nn(model_fn, params):
+    """Vectorize the Neural Network
+    Inputs:
+    parameters: Pytree of parameters
+    model_fn: A function that takes in pytree parameters and data
+
+    Outputs:
+    params_vec: Vectorized parameters
+    unflatten_fn: Unflatten function
+    model_apply_vec: A function that takes in vectorized parameters and data
+    """
+    params_vec, unflatten_fn = jax.flatten_util.ravel_pytree(params)
+
+    def model_apply_vec(params_vectorized, x):
+        return model_fn(unflatten_fn(params_vectorized), x)
+
+    return params_vec, unflatten_fn, model_apply_vec
+
+
+def get_model_apply_fn(model_name, model_apply, batch_stats=None, rng=None):
+    if model_name in ["ResNet_small", "ResNet18", "DenseNet", "GoogleNet"]:
+        assert (
+            batch_stats is not None
+        ), "Batch statistics must be provided for ResNet and DenseNet models."
+        model_fn = lambda params, imgs: model_apply(
+            {"params": params, "batch_stats": batch_stats},
+            imgs,
+            train=False,
+            mutable=False,
+        )
+    elif model_name in ["LeNet", "MLP"]:
+        model_fn = model_apply
+    elif model_name == "VisionTransformer":
+        assert rng is not None, "RNG key must be provided for Vision Transformer model."
+        model_fn = lambda params, imgs: model_apply(
+            {"params": params}, imgs, train=False, rngs={"dropout": rng}
+        )
+    else:
+        raise ValueError(f"Configs for Model {model_name} not implemented yet.")
+
+    return model_fn
