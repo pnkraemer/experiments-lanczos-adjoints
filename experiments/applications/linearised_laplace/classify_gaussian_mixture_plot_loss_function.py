@@ -102,14 +102,14 @@ tangent_ins = jnp.linspace(log_alpha - 0.8, log_alpha + 0.8, num=plot_num_linspa
 
 fig, axes = plt.subplot_mosaic(
     [["bad"]],
-    figsize=(4, 3),
+    figsize=(3, 3),
     sharex=True,
     constrained_layout=True,
     sharey=True,
     dpi=150,
 )
 axes["bad"].set_xlim((jnp.amin(log_alphas), jnp.amax(log_alphas)))
-# axes["bad"].set_ylim((-10, 260))
+axes["bad"].set_ylim((-1, 245))
 
 
 print("Plotting full GGN + Lanczos (bad approximation)")
@@ -153,7 +153,7 @@ alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
 annotate_loc = (-4.75, 1.1 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)), subkeys)))
 axes["bad"].annotate(
-    f"{numerics_lanczos_rank_bad} MVs, {numerics_slq_num_samples_bad} samples/seed",
+    f"{numerics_lanczos_rank_bad} matvecs, {numerics_slq_num_samples_bad} samples/seed",
     annotate_loc,
     bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
     color="C1",
@@ -220,7 +220,7 @@ alpha_opt = log_alphas[idx_opt]
 values_opt = values[idx_opt]
 annotate_loc = (-4.85, 10 + 1.0 * jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)), subkeys)))
 axes["bad"].annotate(
-    f"{numerics_lanczos_rank_good} MVs, {numerics_slq_num_samples_good} samples/seed",
+    f"{numerics_lanczos_rank_good} matvecs, {numerics_slq_num_samples_good} samples/seed",
     annotate_loc,
     bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
     color="C0",
@@ -270,10 +270,10 @@ values_opt = values[idx_opt]
 
 axes["bad"].axvline(alpha_opt, linewidth=0.5, color="black")
 axes["bad"].annotate("Optimum", xy=(alpha_opt + 0.1, 150), fontsize="x-small")
-annotate_loc = (-4.8, -30 + jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)))))
+annotate_loc = (-4.8, -20 + jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)))))
 for ax in [axes["bad"]]:
     ax.annotate("Truth", annotate_loc, color="grey", fontsize="x-small")
-    ax.plot(log_alphas, values, linewidth=3, alpha=0.35, zorder=0, color="grey")
+    ax.plot(log_alphas, values, linewidth=3, alpha=0.7, zorder=0, color="grey")
 # plt.plot(tangent_ins, tangent_outs, color="C1")
 
 # axes["bad"].set_xticks([-5, -3.5, -2, alpha_opt, -0.5, 1], [-5, -3.5, -2, r"Opt.", -0.5, 1])
@@ -320,15 +320,15 @@ for ax in [axes["bad"]]:
 
 
 axes["bad"].set_ylabel("Calibration loss")
-axes["bad"].set_xlabel("Parameter (log)")
+axes["bad"].set_xlabel("Hyperparameter (log)")
 # axes["good"].set_xlabel("Parameter (log)")
 
 # axes["bad"].set_title(
-#     f"SLQ: {numerics_lanczos_rank_bad} MVs, {numerics_slq_num_samples_bad} samples per seed",
+#     f"SLQ: {numerics_lanczos_rank_bad} matvecs, {numerics_slq_num_samples_bad} samples per seed",
 #     fontsize="medium",
 # )
 # axes["good"].set_title(
-#     rf"SLQ: $\geq$ {numerics_lanczos_rank_good} MVs, $\geq$ {numerics_slq_num_samples_good} samples per seed",
+#     rf"SLQ: $\geq$ {numerics_lanczos_rank_good} matvecs, $\geq$ {numerics_slq_num_samples_good} samples per seed",
 #     fontsize="medium",
 # )
 
