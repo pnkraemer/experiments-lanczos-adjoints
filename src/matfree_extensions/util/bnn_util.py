@@ -111,10 +111,13 @@ def loss_training_cross_entropy_single(logits, labels_hot):
 
 # todo: move to gp? (And rename gp.py appropriately, of course)
 #  laplace-torch calls this Laplace.log_prob(normalized=True)
+# todo: rename unconstrain() to constrain()
 def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
     def loss(a, variables, x_train, y_train, *logdet_params):
         alpha = hyperparam_unconstrain(a)
-        tmp1 = len(variables) / 2 * a
+
+        tmp1 = len(variables) / 2 * jnp.log(alpha)
+
         tmp2 = -0.5 * alpha * jnp.dot(variables, variables)
         log_prior = tmp1 + tmp2
 

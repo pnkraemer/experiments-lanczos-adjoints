@@ -1,7 +1,6 @@
 """Classify a Gaussian mixture model and calibrated different GGNs."""
 
-# todo: clean up this script a little bit
-# todo: make the crimson "Pop" more: all others get a lower alpha
+import functools
 import os
 
 import jax
@@ -9,12 +8,120 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
 from matfree_extensions.util import bnn_util, exp_util
+from tueplots import axes, figsizes, fontsizes
+
+plt.rcParams.update(fontsizes.neurips2024(default_smaller=2))
+plt.rcParams.update(axes.lines())
+plt.rcParams.update(axes.legend())
+plt.rcParams.update(axes.spines(left=True, right=False, bottom=True, top=False))
+plt.rcParams.update(
+    figsizes.neurips2024(nrows=1, ncols=1, rel_width=0.4, height_to_width_ratio=0.8)
+)
 
 # Make directories
 directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
 directory_results = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory_results, exist_ok=True)
+
+
+def loss_slq(*, num_matvecs, num_samples):
+    ggn_function = bnn_util.ggn_full(
+        model_fun=model_apply,
+        loss_single=bnn_util.loss_training_cross_entropy_single,
+        param_unflatten=unflatten,
+    )
+    logdet_fun = bnn_util.solver_logdet_slq(
+        lanczos_rank=num_matvecs, slq_num_samples=num_samples, slq_num_batches=1
+    )
+    loss_ = loss_function(
+        ggn_fun=ggn_function, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
+    )
+
+    @jax.jit
+    def lossfun(key_, a):
+        return loss_(a, variables, x_train, y_train, key_)
+
+    return lossfun
+
+
+def loss_diagonal():
+    ggn_function = bnn_util.ggn_diag(
+        model_fun=model_apply,
+        loss_single=bnn_util.loss_training_cross_entropy_single,
+        param_unflatten=unflatten,
+    )
+    logdet_fun = bnn_util.solver_logdet_dense()
+    loss_ = loss_function(
+        ggn_fun=ggn_function, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
+    )
+
+    @jax.jit
+    def lossfun(a):
+        return loss_(a, variables, x_train, y_train)
+
+    return lossfun
+
+
+def loss_cholesky():
+    ggn_function = bnn_util.ggn_full(
+        model_fun=model_apply,
+        loss_single=bnn_util.loss_training_cross_entropy_single,
+        param_unflatten=unflatten,
+    )
+
+    logdet_fun = bnn_util.solver_logdet_dense()
+    loss_ = loss_function(
+        ggn_fun=ggn_function, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
+    )
+
+    @jax.jit
+    def lossfun(a):
+        return loss_(a, variables, x_train, y_train)
+
+    return lossfun
+
+
+def plot_function(axis, fun, xs, *, color, linewidth, marker, **linestyle):
+    axis.plot(
+        xs,
+        jax.vmap(fun)(xs),
+        marker="None",
+        color=color,
+        linewidth=linewidth,
+        **linestyle,
+    )
+
+    markerstyle = {
+        "marker": marker,
+        "linestyle": "None",
+        "color": "white",
+        "markeredgecolor": color,
+        "markeredgewidth": linewidth / 2,
+        "markersize": 4,
+    }
+    i = jnp.argmin(jax.vmap(fun)(xs))
+    axis.plot(xs[i], (jax.vmap(fun)(xs))[i], **markerstyle, zorder=150)
+
+
+def plot_gradient(axis, x, f, df, *, color):
+    xs = jnp.linspace(x - 0.1, x + 0.1)
+
+    def linear(z):
+        return f + df * (z - x)
+
+    arrow_begin = (xs[-1], linear(xs[-1]))
+    arrow_end = (xs[0], linear(xs[0]))
+    props = {"facecolor": color, "arrowstyle": "->", "alpha": 0.9}
+    axis.annotate(
+        "",
+        xy=arrow_begin,
+        xytext=arrow_end,
+        arrowprops=props,
+        annotation_clip=True,
+        zorder=100,
+    )
+
 
 # A bunch of hyperparameters
 seed = 1
@@ -24,13 +131,13 @@ train_batch_size = num_data_in
 train_lrate = 1e-2
 train_print_frequency = 10
 calibrate_log_alpha_min = 1e-10
-numerics_lanczos_rank_bad = 3
-numerics_lanczos_rank_good = 10
-numerics_slq_num_samples_bad = 2
-numerics_slq_num_samples_good = 10
-numerics_slq_num_batches = 1
-plot_num_linspace = 50
+lanczos_rank_bad = 3
+lanczos_rank_good = 10
+slq_num_samples_bad = 2
+slq_num_samples_good = 10
 plot_num_samples_lanczos = 3
+plot_lw_bg, plot_alpha_bg = 1.2, 0.4
+plot_lw_fg, plot_alpha_fg = 1.2, 0.75
 
 # Create the data
 key = jax.random.PRNGKey(seed)
@@ -91,246 +198,116 @@ loss_function = bnn_util.loss_calibration
 
 
 def unconstrain(a):
-    return calibrate_log_alpha_min + jnp.exp(a)
-    # return calibrate_log_alpha_min + a**2
+    # return calibrate_log_alpha_min + jnp.exp(a)
+    return calibrate_log_alpha_min + a**2
 
 
-log_alpha = -4.0
-log_alphas = jnp.linspace(-5, 0, num=plot_num_linspace)
-tangent_ins = jnp.linspace(log_alpha - 0.8, log_alpha + 0.8, num=plot_num_linspace)
+alpha0 = 0.3
+log_alphas = jnp.linspace(0.1, 1.1)
+
+fig, ax = plt.subplots(dpi=200)
+ax.set_xlim((jnp.amin(log_alphas), jnp.amax(log_alphas)))
 
 
-fig, axes = plt.subplot_mosaic(
-    [["bad"]],
-    figsize=(3, 3),
-    sharex=True,
-    constrained_layout=True,
-    sharey=True,
-    dpi=150,
-)
-axes["bad"].set_xlim((jnp.amin(log_alphas), jnp.amax(log_alphas)))
-axes["bad"].set_ylim((-1, 245))
+# axes["bad"].set_ylim((-1, 245))
 
 
 print("Plotting full GGN + Lanczos (bad approximation)")
-
-ggn_fun = bnn_util.ggn_full(
-    model_fun=model_apply,
-    loss_single=bnn_util.loss_training_cross_entropy_single,
-    param_unflatten=unflatten,
-)
-
-
-def calibration_loss(a, k):
-    logdet_fun = bnn_util.solver_logdet_slq(
-        lanczos_rank=numerics_lanczos_rank_bad,
-        slq_num_samples=numerics_slq_num_samples_bad,
-        slq_num_batches=numerics_slq_num_batches,
-    )
-
-    loss = loss_function(
-        ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
-    )
-    return loss(a, variables, x_train, y_train, k)
-
-
-loss_vmap = jax.vmap(calibration_loss, in_axes=(0, None))
-value_and_grad = jax.value_and_grad(calibration_loss, argnums=0)
-
-loss_vmap = jax.vmap(loss_vmap, in_axes=(None, 0), out_axes=-1)
-value_and_grad = jax.vmap(value_and_grad, in_axes=(None, 0), out_axes=-1)
-
 key, subkey = jax.random.split(key, num=2)
 subkeys = jax.random.split(subkey, num=plot_num_samples_lanczos)
+slq_bad_fun = loss_slq(num_matvecs=lanczos_rank_bad, num_samples=slq_num_samples_bad)
+slq_bad_label = f"{lanczos_rank_bad} MVs, {slq_num_samples_bad} samples"
+slq_bad_style = {"linewidth": plot_lw_fg, "alpha": plot_alpha_fg}
+for k in subkeys:
+    k0, k1 = jax.random.split(k, num=2)
 
-values = loss_vmap(log_alphas, subkeys)
-value, grad = value_and_grad(log_alpha, subkeys)
-tangent_outs = value[None, :] + grad[None, :] * (tangent_ins[:, None] - log_alpha)
+    fun_bad = functools.partial(slq_bad_fun, k0)
+    plot_function(
+        ax,
+        fun_bad,
+        log_alphas,
+        color="steelblue",
+        label=slq_bad_label,
+        marker="X",
+        **slq_bad_style,
+    )
+
+    x0 = alpha0 + 0.1 * jax.random.normal(k1, shape=())
+    f0, df0 = fun_bad(x0), jax.grad(fun_bad)(x0)
+    plot_gradient(ax, x0, f0, df0, color="black")
 
 
-idx_opt = jnp.argmin(values, axis=0)
-alpha_opt = log_alphas[idx_opt]
-values_opt = values[idx_opt]
-annotate_loc = (-4.75, 1.1 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)), subkeys)))
-axes["bad"].annotate(
-    f"{numerics_lanczos_rank_bad} matvecs, {numerics_slq_num_samples_bad} samples/seed",
-    annotate_loc,
-    bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
-    color="C1",
-    fontsize="x-small",
-)
-axes["bad"].plot(log_alphas, values, linewidth=1.5, color="C1")
-
-axes["bad"].plot(
-    tangent_ins,
-    tangent_outs[:, 0],
-    zorder=10,
-    linestyle="dashed",
-    linewidth=1.5,
-    color="black",
-)
-axes["bad"].annotate(
-    "Gradient (new)",
-    (tangent_ins[plot_num_linspace // 2], 3 + tangent_outs[plot_num_linspace // 2, 0]),
-    color="black",
-    weight="bold",
-    fontsize="x-small",
-    bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
-)
-
+bbox = {"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"}
+annotate_kwargs = {
+    "bbox": bbox,
+    "arrowprops": {"arrowstyle": "->"},
+    "color": "black",
+    "fontsize": "x-small",
+}
+ax.annotate("New gradients!", xy=(x0, f0), xytext=(0.15, 170), **annotate_kwargs)
 
 print("Plotting full GGN + Lanczos (good approximation)")
-
-ggn_fun = bnn_util.ggn_full(
-    model_fun=model_apply,
-    loss_single=bnn_util.loss_training_cross_entropy_single,
-    param_unflatten=unflatten,
-)
-
-
-def calibration_loss(a, k):
-    logdet_fun = bnn_util.solver_logdet_slq(
-        lanczos_rank=numerics_lanczos_rank_good,
-        slq_num_samples=numerics_slq_num_samples_good,
-        slq_num_batches=numerics_slq_num_batches,
-    )
-
-    loss = loss_function(
-        ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
-    )
-    return loss(a, variables, x_train, y_train, k)
-
-
-loss_vmap = jax.vmap(calibration_loss, in_axes=(0, None))
-value_and_grad = jax.value_and_grad(calibration_loss, argnums=0)
-
-loss_vmap = jax.vmap(loss_vmap, in_axes=(None, 0), out_axes=-1)
-value_and_grad = jax.vmap(value_and_grad, in_axes=(None, 0), out_axes=-1)
-
 key, subkey = jax.random.split(key, num=2)
 subkeys = jax.random.split(subkey, num=plot_num_samples_lanczos)
+slq_good_fun = loss_slq(num_matvecs=lanczos_rank_good, num_samples=slq_num_samples_good)
+slq_good_label = f"{lanczos_rank_good} MVs, {slq_num_samples_good} samples"
+slq_good_style = {"linewidth": plot_lw_fg, "alpha": plot_alpha_fg}
+for k in subkeys:
+    k0, k1 = jax.random.split(k, num=2)
 
-values = loss_vmap(log_alphas, subkeys)
-value, grad = value_and_grad(log_alpha, subkeys)
-tangent_outs = value[None, :] + grad[None, :] * (tangent_ins[:, None] - log_alpha)
+    fun_good = functools.partial(slq_good_fun, k0)
+    plot_function(
+        ax,
+        fun_good,
+        log_alphas,
+        color="firebrick",
+        label=slq_good_label,
+        marker="^",
+        **slq_good_style,
+    )
+
+    x0 = alpha0 + 0.1 * jax.random.normal(k1, shape=())
+    f0, df0 = fun_good(x0), jax.grad(fun_good)(x0)
+    plot_gradient(ax, x0, f0, df0, color="black")
 
 
-idx_opt = jnp.argmin(values, axis=0)
-alpha_opt = log_alphas[idx_opt]
-values_opt = values[idx_opt]
-annotate_loc = (-4.85, 10 + 1.0 * jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)), subkeys)))
-axes["bad"].annotate(
-    f"{numerics_lanczos_rank_good} matvecs, {numerics_slq_num_samples_good} samples/seed",
-    annotate_loc,
-    bbox={"boxstyle": "round, pad=0.05", "facecolor": "white", "edgecolor": "None"},
-    color="C0",
+print("Plotting diagonal approximation")
+diagonal_fun = loss_diagonal()
+diagonal_style = {
+    "color": "gray",
+    "linestyle": "dotted",
+    "linewidth": plot_lw_bg,
+    "alpha": plot_alpha_bg,
+    "marker": "P",
+}
+plot_function(ax, diagonal_fun, log_alphas, **diagonal_style)
+ax.annotate(
+    "Diagonal approximation",
+    (0.5, diagonal_fun(0.5)),
+    bbox=bbox,
+    color="gray",
     fontsize="x-small",
 )
-axes["bad"].plot(log_alphas, values, linewidth=1.5, color="C0")
 
-axes["bad"].plot(
-    tangent_ins,
-    tangent_outs[:, 0],
-    zorder=10,
-    linestyle="dashed",
-    linewidth=2,
-    color="black",
-)
-# axes["good"].annotate(
-#     "Contrib.",
-#     (tangent_ins[0] - 0.7, tangent_outs[0, 0] - 20.0),
-#     color="black",
-#     weight="bold",
-# )
+print("Plotting the truth")
+true_fun = loss_cholesky()
+
+print("Plotting the vertical line for the true optimum")
+inputs, targets = log_alphas, jax.vmap(true_fun)(log_alphas)
+idx = jnp.argmin(targets, axis=0)
+ax.axvline(inputs[idx], linewidth=0.5, color="black")
+ax.annotate("Optimum", xy=(inputs[idx] + 0.01, 130), fontsize="x-small", color="black")
 
 
-# Second: Full GGN + Cholesky
-print("Plotting full GGN + Cholesky")
+print("Setting the legend")
+handles, labels = plt.gca().get_legend_handles_labels()
+by_label = dict(zip(labels, handles))
+ax.legend(by_label.values(), by_label.keys(), fontsize="xx-small")
 
 
-def calibration_loss(a):
-    logdet_fun = bnn_util.solver_logdet_dense()
-    loss = loss_function(
-        ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
-    )
-    return loss(a, variables, x_train, y_train)
+ax.set_xlabel("Hyperparameter", fontsize="medium")
+ax.set_ylabel("Calibration loss", fontsize="medium")
 
-
-loss_vmap = jax.vmap(calibration_loss)
-value_and_grad = jax.value_and_grad(calibration_loss, argnums=0)
-
-values = loss_vmap(log_alphas)
-value, grad = value_and_grad(log_alpha)
-tangent_outs = value + grad * (tangent_ins - log_alpha)
-
-
-idx_opt = jnp.argmin(values, axis=0)
-alpha_opt = log_alphas[idx_opt]
-values_opt = values[idx_opt]
-
-axes["bad"].axvline(alpha_opt, linewidth=0.5, color="black")
-axes["bad"].annotate("Optimum", xy=(alpha_opt + 0.1, 150), fontsize="x-small")
-annotate_loc = (-4.8, -20 + jnp.amax(loss_vmap(-4.8 * jnp.ones((1, 1)))))
-for ax in [axes["bad"]]:
-    ax.annotate("Truth", annotate_loc, color="grey", fontsize="x-small")
-    ax.plot(log_alphas, values, linewidth=3, alpha=0.7, zorder=0, color="grey")
-# plt.plot(tangent_ins, tangent_outs, color="C1")
-
-# axes["bad"].set_xticks([-5, -3.5, -2, alpha_opt, -0.5, 1], [-5, -3.5, -2, r"Opt.", -0.5, 1])
-
-
-print("Plotting diagonal GGN")
-
-ggn_fun = bnn_util.ggn_diag(
-    model_fun=model_apply,
-    loss_single=bnn_util.loss_training_cross_entropy_single,
-    param_unflatten=unflatten,
-)
-
-
-def calibration_loss(a):
-    logdet_fun = bnn_util.solver_logdet_dense()
-    loss = loss_function(
-        ggn_fun=ggn_fun, hyperparam_unconstrain=unconstrain, logdet_fun=logdet_fun
-    )
-    return loss(a, variables, x_train, y_train)
-
-
-loss_vmap = jax.vmap(calibration_loss)
-value_and_grad = jax.value_and_grad(calibration_loss, argnums=0)
-
-values = loss_vmap(log_alphas)
-value, grad = value_and_grad(log_alpha)
-tangent_outs = value + grad * (tangent_ins - log_alpha)
-
-idx_opt = jnp.argmin(values, axis=0)
-alpha_opt = log_alphas[idx_opt]
-values_opt = values[idx_opt]
-# plt.plot(
-#     alpha_opt,
-#     values_opt,
-#     marker=".",
-#     color="grey",
-# )
-
-annotate_loc = (-4.5, 1.05 * jnp.amax(loss_vmap(-4.5 * jnp.ones((1, 1)))))
-for ax in [axes["bad"]]:
-    ax.annotate("Diagonal approx.", annotate_loc, color="black", fontsize="x-small")
-    ax.plot(log_alphas, values, color="black", alpha=0.7, linestyle="dotted")
-
-
-axes["bad"].set_ylabel("Calibration loss")
-axes["bad"].set_xlabel("Hyperparameter (log)")
-# axes["good"].set_xlabel("Parameter (log)")
-
-# axes["bad"].set_title(
-#     f"SLQ: {numerics_lanczos_rank_bad} matvecs, {numerics_slq_num_samples_bad} samples per seed",
-#     fontsize="medium",
-# )
-# axes["good"].set_title(
-#     rf"SLQ: $\geq$ {numerics_lanczos_rank_good} matvecs, $\geq$ {numerics_slq_num_samples_good} samples per seed",
-#     fontsize="medium",
-# )
 
 # Save the plot to a file
 plt.savefig(f"{directory_fig}/slq_versus_diagonal_loss.pdf")
