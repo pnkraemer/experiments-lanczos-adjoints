@@ -6,7 +6,6 @@ from typing import Callable
 import flax.linen
 import jax
 import jax.numpy as jnp
-from flax import linen as nn
 from matfree import hutchinson
 from tqdm import tqdm
 
@@ -130,6 +129,22 @@ def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
 
 
 # todo: move to gp? (And rename gp.py appropriately, of course)
+#  laplace-torch calls this Laplace.log_prob(normalized=True)
+def loss_log_prob_like_in_redux(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
+    def loss(a, variables, x_train, y_train, *logdet_params):
+        alpha = hyperparam_unconstrain(a)
+
+        M = ggn_fun(alpha, variables, x_train, y_train)
+        logdet = logdet_fun(M, *logdet_params)
+
+        tmp1 = -len(variables) / 2 * jnp.log(2 * jnp.pi) + logdet / 2
+        tmp2 = -jnp.dot(variables, variables) / 2
+        return tmp1 + tmp2
+
+    return loss
+
+
+# todo: move to gp? (And rename gp.py appropriately, of course)
 def solver_logdet_dense():
     def logdet(M: jax.Array):
         _sign, logdet_value = jnp.linalg.slogdet(M)
@@ -198,7 +213,7 @@ def ggn_full(*, loss_single, model_fun, param_unflatten):
 
 def ggn_vp_running(*, loss_single, model_fun, param_unflatten):
     def gvp(v_vec, params_vec, x_batch, y_batch):
-        v_like_params = param_unflatten(v_vec)
+        # v_like_params = param_unflatten(v_vec)
         params = param_unflatten(params_vec)
 
         # def model_flat(p, x):
@@ -210,7 +225,7 @@ def ggn_vp_running(*, loss_single, model_fun, param_unflatten):
 
             def model_pred(p):
                 return model_fun(p, x)
-                return model_flat(p, x)
+                # return model_flat(p, x)
 
             # Big models(except ConvNext) return a tuple (logits, model_state)
             preds, Jv = jax.jvp(model_pred, (params_vec,), (v_vec,))
@@ -276,8 +291,7 @@ def kernel_vp_parallel(*, loss_single, model_fun, param_unflatten):
             Hv = jnp.einsum("boi, bi->bo", H_sqrt, v_like_outs)
             JtHv = vjp_fn(Hv)[0]
             _, JJtHv = jax.jvp(model_pred, (params,), (JtHv,))
-            HJJtHv = jnp.einsum("boi, bi->bo", H, JJtHv)
-            return HJJtHv
+            return jnp.einsum("boi, bi->bo", H, JJtHv)
 
         return jax.tree_map(
             lambda x: x.sum(axis=0), jax.vmap(body_fn)(x_batch, y_batch)
@@ -374,95 +388,6 @@ def img_to_patch(x, patch_size, flatten_channels=True):
     return x
 
 
-class AttentionBlock(nn.Module):
-    embed_dim: int  # Dimensionality of input and attention feature vectors
-    hidden_dim: int  # Dimensionality of hidden layer in feed-forward network
-    num_heads: int  # Number of heads to use in the Multi-Head Attention block
-    dropout_prob: float = 0.0  # Amount of dropout to apply in the feed-forward network
-
-    def setup(self):
-        self.attn = nn.MultiHeadDotProductAttention(num_heads=self.num_heads)
-        self.linear = [
-            nn.Dense(self.hidden_dim),
-            nn.gelu,
-            nn.Dropout(self.dropout_prob),
-            nn.Dense(self.embed_dim),
-        ]
-        self.layer_norm_1 = nn.LayerNorm()
-        self.layer_norm_2 = nn.LayerNorm()
-        self.dropout = nn.Dropout(self.dropout_prob)
-
-    def __call__(self, x, train=True):
-        inp_x = self.layer_norm_1(x)
-        attn_out = self.attn(inputs_q=inp_x, inputs_kv=inp_x)
-        x = x + self.dropout(attn_out, deterministic=not train)
-
-        linear_out = self.layer_norm_2(x)
-        for l in self.linear:
-            linear_out = (
-                l(linear_out)
-                if not isinstance(l, nn.Dropout)
-                else l(linear_out, deterministic=not train)
-            )
-        x = x + self.dropout(linear_out, deterministic=not train)
-        return x
-
-
-class VisionTransformer(nn.Module):
-    embed_dim: int  # Dimensionality of input and attention feature vectors
-    hidden_dim: int  # Dimensionality of hidden layer in feed-forward network
-    num_heads: int  # Number of heads to use in the Multi-Head Attention block
-    num_channels: int  # Number of channels of the input (3 for RGB)
-    num_layers: int  # Number of layers to use in the Transformer
-    num_classes: int  # Number of classes to predict
-    patch_size: int  # Number of pixels that the patches have per dimension
-    num_patches: int  # Maximum number of patches an image can have
-    dropout_prob: float = 0.0  # Amount of dropout to apply in the feed-forward network
-
-    def setup(self):
-        # Layers/Networks
-        self.input_layer = nn.Dense(self.embed_dim)
-        self.transformer = [
-            AttentionBlock(
-                self.embed_dim, self.hidden_dim, self.num_heads, self.dropout_prob
-            )
-            for _ in range(self.num_layers)
-        ]
-        self.mlp_head = nn.Sequential([nn.LayerNorm(), nn.Dense(self.num_classes)])
-        self.dropout = nn.Dropout(self.dropout_prob)
-
-        # Parameters/Embeddings
-        self.cls_token = self.param(
-            "cls_token", nn.initializers.normal(stddev=1.0), (1, 1, self.embed_dim)
-        )
-        self.pos_embedding = self.param(
-            "pos_embedding",
-            nn.initializers.normal(stddev=1.0),
-            (1, 1 + self.num_patches, self.embed_dim),
-        )
-
-    def __call__(self, x, train=True):
-        # Preprocess input
-        x = img_to_patch(x, self.patch_size)
-        B, T, _ = x.shape
-        x = self.input_layer(x)
-
-        # Add CLS token and positional encoding
-        cls_token = self.cls_token.repeat(B, axis=0)
-        x = jnp.concatenate([cls_token, x], axis=1)
-        x = x + self.pos_embedding[:, : T + 1]
-
-        # Apply Transforrmer
-        x = self.dropout(x, deterministic=not train)
-        for attn_block in self.transformer:
-            x = attn_block(x, train=train)
-
-        # Perform classification prediction
-        cls = x[:, 0]
-        out = self.mlp_head(cls)
-        return out
-
-
 def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
     ggn_fun = kernel_vp_parallel(
         loss_single=loss_training_cross_entropy_single,
@@ -513,20 +438,24 @@ def get_model_apply_fn(model_name, model_apply, batch_stats=None, rng=None):
         assert (
             batch_stats is not None
         ), "Batch statistics must be provided for ResNet and DenseNet models."
-        model_fn = lambda params, imgs: model_apply(
-            {"params": params, "batch_stats": batch_stats},
-            imgs,
-            train=False,
-            mutable=False,
-        )
+
+        def model_fn(params, imgs):
+            return model_apply(
+                {"params": params, "batch_stats": batch_stats},
+                imgs,
+                train=False,
+                mutable=False,
+            )
     elif model_name in ["LeNet", "MLP"]:
         model_fn = model_apply
     elif model_name == "VisionTransformer":
         assert rng is not None, "RNG key must be provided for Vision Transformer model."
-        model_fn = lambda params, imgs: model_apply(
-            {"params": params}, imgs, train=False, rngs={"dropout": rng}
-        )
+
+        def model_fn(params, imgs):
+            return model_apply(
+                {"params": params}, imgs, train=False, rngs={"dropout": rng}
+            )
     else:
-        raise ValueError(f"Configs for Model {model_name} not implemented yet.")
+        raise ValueError
 
     return model_fn
