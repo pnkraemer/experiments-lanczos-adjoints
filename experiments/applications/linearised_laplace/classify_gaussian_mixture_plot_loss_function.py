@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
 from matfree_extensions.util import bnn_util, exp_util
+from matplotlib.legend_handler import HandlerTuple
 from tueplots import axes, figsizes, fontsizes
 
 plt.rcParams.update(fontsizes.neurips2024(default_smaller=2))
@@ -98,10 +99,16 @@ def plot_function(axis, fun, xs, *, color, linewidth, marker, **linestyle):
         "color": "white",
         "markeredgecolor": color,
         "markeredgewidth": linewidth / 2,
-        "markersize": 4,
+        "markersize": 3.5,
     }
     i = jnp.argmin(jax.vmap(fun)(xs))
-    axis.plot(xs[i], (jax.vmap(fun)(xs))[i], **markerstyle, zorder=150)
+    axis.plot(
+        xs[i],
+        (jax.vmap(fun)(xs))[i],
+        **markerstyle,
+        label=f"Minimum+{color}",
+        zorder=150,
+    )
 
 
 def plot_gradient(axis, x, f, df, *, color):
@@ -302,11 +309,23 @@ ax.annotate("Optimum", xy=(inputs[idx] + 0.01, 130), fontsize="x-small", color="
 print("Setting the legend")
 handles, labels = plt.gca().get_legend_handles_labels()
 by_label = dict(zip(labels, handles))
-ax.legend(by_label.values(), by_label.keys(), fontsize="xx-small")
+
+# Put the "Minimum" markers together
+handles = list(by_label.values())
+labels = list(by_label.keys())
+x = [handles[0], handles[2], (handles[1], handles[3], handles[4])]
+y = [labels[0], labels[2], "Estimated optimum"]
+ax.legend(
+    x,
+    y,
+    fontsize="xx-small",
+    handler_map={tuple: HandlerTuple(ndivide=None, pad=0.5)},
+    borderpad=0.5,
+)
 
 
-ax.set_xlabel("Hyperparameter", fontsize="medium")
-ax.set_ylabel("Calibration loss", fontsize="medium")
+ax.set_xlabel("Hyperparameter", fontsize="small")
+ax.set_ylabel("Calibration loss", fontsize="small")
 
 
 # Save the plot to a file
