@@ -209,7 +209,14 @@ def logpdf_cholesky() -> Callable:
     return logpdf
 
 
-def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Callable:
+def logpdf_lanczos(
+    krylov_depth,
+    /,
+    slq_sampler: Callable,
+    slq_batch_num: int,
+    cg_tol: float,
+    cg_maxiter: int,
+) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
 
     If this logpdf is plugged into mll_exact(), the returned mll function
@@ -222,7 +229,7 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
     """
 
     def solve(A: Callable, /, b):
-        result, _info = jax.scipy.sparse.linalg.cg(A, b)
+        result, _info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
         return result
 
     def logdet(A: Callable, /, key):

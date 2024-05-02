@@ -234,9 +234,7 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                     value, grads = value_and_grad_gp(p_opt, inputs=X, targets=y)
                 elif which == "adjoints":
                     key, subkey = jax.random.split(key, num=2)
-                    value, grads = value_and_grad_gp(
-                        p_opt, subkey, inputs=X, targets=y
-                    )
+                    value, grads = value_and_grad_gp(p_opt, subkey, inputs=X, targets=y)
 
                 updates, state = optimizer.update(grads, state)
                 p_opt = optax.apply_updates(p_opt, updates)
@@ -327,12 +325,32 @@ if __name__ == "__main__":
     reference = gp_select(args.gp_method, X_train, y_train, key_solver, args_solver)
 
     # Training the GP with different methods/matrix-solvers
-    start = time.perf_counter()
-    train_time, (conv, tstamp), params = gp_train(
-        args.gp_method, reference, args.num_epochs
-    )
+    cg_tol = 1e-2  # include in logpdf_lanczos (play around with this value)
+    cg_maxiter = 1_000  # include in logpdf_lanczos
+    lanczos_maxiter = 20  # krylov_depth
+    trace_samples = 10  # slq_num_batches (set slq_num_samples to 1)
 
-    print(f"(epochs={args.num_epochs:.0f},", f"training time={train_time:.3f})")
+    # https://docs.gpytorch.ai/en/stable/settings.html
+    with (
+        gpytorch.settings.cg_tolerance(cg_tol),
+        gpytorch.settings.deterministic_probes(False),
+        gpytorch.settings.eval_cg_tolerance(cg_tol),
+        gpytorch.settings.fast_computation(
+            log_prob=True, covar_root_decomposition=True, fast_solves=True
+        ),
+        gpytorch.settings.lazily_evaluate_kernels(state=True),
+        gpytorch.settings.linalg_dtypes(default=torch.float32),
+        gpytorch.settings.max_cg_iterations(cg_maxiter),
+        gpytorch.settings.max_lanczos_quadrature_iterations(lanczos_maxiter),
+        gpytorch.settings.max_preconditioner_size(15),
+        gpytorch.settings.num_trace_samples(trace_samples),
+        gpytorch.settings.skip_logdet_forward(True),
+    ):
+        start = time.perf_counter()
+        train_time, (conv, tstamp), params = gp_train(
+            args.gp_method, reference, args.num_epochs
+        )
+        print(f"(epochs={args.num_epochs:.0f},", f"training time={train_time:.3f})")
 
     # Create a directory for the results
     dir_local = exp_util.matching_directory(__file__, "results/")
