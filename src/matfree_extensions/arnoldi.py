@@ -97,7 +97,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # todo: implement simplifications for symmetric problems
 
     # Extract the matrix shapes from Q
-    nrows, krylov_depth = jnp.shape(Q)
+    _, krylov_depth = jnp.shape(Q)
 
     # Transpose matvec
     def vecmat(x, *p):
@@ -113,10 +113,10 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         #  over linear functions, linear_transpose() is not defined.
         #  See: https://github.com/google/jax/issues/6619
         #  VJP is a little bit slower, but more robust here.
-        _, vecmat = jax.vjp(lambda s: matvec(s, *p), x_like)
+        _, vm = jax.vjp(lambda s: matvec(s, *p), x_like)
 
         # The output of the transpose is a tuple of length 1
-        (a,) = vecmat(x)
+        (a,) = vm(x)
         return a.conj()
 
     # Prepare a bunch of auxiliary matrices
@@ -129,36 +129,26 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     lower_mask = lower(jnp.ones((krylov_depth, krylov_depth)))
 
     # Initialise
-    eta = dH @ e_K - Q.T.conj() @ dr
+    eta = dH @ e_K - Q.T @ dr
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
-    Sigma = jnp.zeros_like(dQ.T @ Q)
     dp = jax.tree_util.tree_map(jnp.zeros_like, params)
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
-    Pi_gamma = (
-        -dc * c.conj() * jnp.outer(e_1, e_1) + H.conj() @ dH.T - (dQ.T.conj() @ Q)
-    )
+    Pi_gamma = -dc * c * jnp.outer(e_1, e_1) + H @ dH.T - (dQ.T @ Q)
 
     # Prepare reorthogonalisation:
     P = Q.T
     ps = dH.T
     ps_mask = jnp.tril(jnp.ones((krylov_depth, krylov_depth)), 1)
 
-    # Prepare fancy reorthogonalisation
-    Pi_sigma = dQ.T @ Q - H @ dH.T
-    Pi_sigma_mask = jnp.triu(jnp.ones((krylov_depth, krylov_depth)), 1)
-    H_padded = jnp.eye(len(Sigma), dtype=H.dtype)
-    H_padded = H_padded.at[1:-1, 1:-1].set(H[1:-1, :-2])
-
     # Loop over those values
     indices = jnp.arange(0, len(H), step=1)
     beta_minuses = jnp.concatenate([jnp.ones((1,)), jnp.diag(H, -1)])
     alphas = jnp.diag(H)
     beta_pluses = H - jnp.diag(jnp.diag(H)) - jnp.diag(jnp.diag(H, -1), -1)
-    # todo: the number of loop-variables is getting out of hand...
     scan_over = {
         "beta_minus": beta_minuses,
         "alpha": alphas,
@@ -167,12 +157,9 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         "lower_mask": lower_mask,
         "Pi_gamma": Pi_gamma,
         "Pi_xi": Pi_xi,
-        "Pi_sigma": Pi_sigma,
-        "Pi_sigma_mask": Pi_sigma_mask,
-        "h_padded": H_padded,
         "p": ps,
         "p_mask": ps_mask,
-        "q": Q.T.conj(),
+        "q": Q.T,
     }
 
     # Fix the step function
@@ -183,16 +170,12 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
         return output, ()
 
     # Scan
-    sigma_init = jnp.zeros((krylov_depth,), dtype=lambda_k.dtype)
-    init = (lambda_k, Lambda, Gamma, Sigma, P, dp, sigma_init)
+    init = (lambda_k, Lambda, Gamma, P, dp)
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
-    (lambda_k, Lambda, Gamma, Sigma_t, _P, dp, _sigma) = result
+    (lambda_k, Lambda, Gamma, _P, dp) = result
 
     # Finalise Sigma
-    if reortho == "full_with_sigma":  # not happening anymore
-        Sigma_t = jnp.roll(Sigma_t, -1, axis=0)
-    else:
-        Sigma_t = Lambda.T @ Q - dH.T
+    Sigma_t = Lambda.T @ Q - dH.T
 
     # Solve for the input gradient
     dv = lambda_k * c
@@ -213,10 +196,8 @@ def _adjoint_step(
     lambda_k,
     Lambda,
     Gamma,
-    Sigma,
     P,
     dp,
-    sigma,
     *,
     # Matrix-vector product
     vecmat,
@@ -231,9 +212,6 @@ def _adjoint_step(
     lower_mask,
     Pi_gamma,
     Pi_xi,
-    Pi_sigma,
-    Pi_sigma_mask,
-    h_padded,
     q,
     # Loop over: reorthogonalisation
     p,
@@ -244,13 +222,8 @@ def _adjoint_step(
 ):
     # Reorthogonalise
     if reortho != "none":
-        if reortho == "full_with_sigma":  # not happening anymore
-            p = p + sigma
-        elif reortho == "full":
-            P = p_mask[:, None] * P
-            p = p_mask * p
-        else:
-            raise ValueError
+        P = p_mask[:, None] * P
+        p = p_mask * p
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # A single vector-matrix product
@@ -259,22 +232,16 @@ def _adjoint_step(
     # Update the parameter-gradients
     dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, vjp(q))
 
-    # Solve or (Gamma + Gamma.T) e_K
-    tmp = lower_mask * (Pi_gamma - l_At @ Q.conj())
+    # Solve for (Gamma + Gamma.T) e_K
+    tmp = lower_mask * (Pi_gamma - l_At @ Q)
     Gamma = Gamma.at[idx, :].set(tmp)
-
-    # Solve for the next Sigma
-    sigma_ = Pi_sigma_mask * (Pi_sigma + l_At @ Q + (Gamma + Gamma.T)[idx, :])
-    sigma = sigma_ - h_padded @ Sigma
-    sigma /= beta_minus
 
     # Save Lambda and Sigma
     Lambda = Lambda.at[:, idx].set(lambda_k)
-    Sigma = Sigma.at[idx, :].set(sigma)
 
     # Solve for the next lambda
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = xi - (alpha * lambda_k - l_At) - asd
     lambda_k /= beta_minus
-    return lambda_k, Lambda, Gamma, Sigma, P, dp, sigma
+    return lambda_k, Lambda, Gamma, P, dp

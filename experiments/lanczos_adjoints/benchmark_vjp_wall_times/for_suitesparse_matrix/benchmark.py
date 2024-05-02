@@ -1,5 +1,6 @@
 """Measure the vjp-wall-time for a sparse matrix."""
 
+import argparse
 import functools
 import os
 import time
@@ -7,7 +8,12 @@ import time
 import jax.experimental.sparse
 import jax.flatten_util
 import jax.numpy as jnp
-from matfree_extensions import exp_util, lanczos
+from matfree_extensions import lanczos
+from matfree_extensions.util import exp_util
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--reortho", required=True)
+args = parser.parse_args()
 
 
 def _rmse_relative(x, y, /, *, nugget):
@@ -18,6 +24,7 @@ def _rmse_relative(x, y, /, *, nugget):
 
 # n = 10_000
 seed = 1
+num_runs = 1
 
 
 # Set up a test-matrix
@@ -27,15 +34,17 @@ seed = 1
 matrix_which = "t3dl_e"
 path = "./data/matrices/"
 M = exp_util.suite_sparse_load(matrix_which, path=path)
+print(M.shape)
 
 params, params_unflatten = jax.flatten_util.ravel_pytree(M.data)
 
 
 @jax.jit
 def matvec(x, p):
+    # return p * x
     pp = params_unflatten(p)
-    P = jax.experimental.sparse.BCOO((pp, M.indices), shape=M.shape)
-    return P @ x
+    P_ = jax.experimental.sparse.BCOO((pp, M.indices), shape=M.shape)
+    return P_ @ x
 
 
 n = M.shape[0]
@@ -52,9 +61,7 @@ times_custom = []
 times_autodiff = []
 norms_of_differences = []
 
-krylov_depth = 1
-# while (krylov_depth := 2 * krylov_depth) < 64:
-for krylov_depth in jnp.arange(1, 100, step=10):
+for krylov_depth in jnp.arange(10, 100, step=10):
     krylov_depth = int(krylov_depth)
     print("Krylov-depth:", krylov_depth)
     krylov_depths.append(krylov_depth)
@@ -65,7 +72,7 @@ for krylov_depth in jnp.arange(1, 100, step=10):
             matvec,
             krylov_depth,  # noqa: B023
             custom_vjp=custom_vjp,
-            reortho=False,
+            reortho=args.reortho,
         )
         output = algorithm(*unflatten(f))
         return jax.flatten_util.ravel_pytree(output)[0]
@@ -86,34 +93,34 @@ for krylov_depth in jnp.arange(1, 100, step=10):
 
     _ = implementation(flat).block_until_ready()
     t0 = time.perf_counter()
-    for _ in range(2):
+    for _ in range(num_runs):
         _ = implementation(flat).block_until_ready()
     t1 = time.perf_counter()
-    time_fwdpass = (t1 - t0) / 2
+    time_fwdpass = (t1 - t0) / num_runs
     times_fwdpass.append(time_fwdpass)
     print("Time (forward pass):\n\t", time_fwdpass)
 
     vjp_imp = jax.jit(vjp_imp)
     _ = vjp_imp(dnu)[0].block_until_ready()
     t0 = time.perf_counter()
-    for _ in range(2):
+    for _ in range(num_runs):
         _ = vjp_imp(dnu)[0].block_until_ready()
     t1 = time.perf_counter()
-    time_custom = (t1 - t0) / 2
+    time_custom = (t1 - t0) / num_runs
     times_custom.append(time_custom)
     print("Time (custom VJP):\n\t", time_custom)
 
-    if krylov_depth < 150:
+    if krylov_depth < 50:
         fx_ref, vjp_ref = jax.vjp(reference, flat)
         vjp_ref = jax.jit(vjp_ref)
 
         _ = vjp_ref(dnu)[0].block_until_ready()
 
         t0 = time.perf_counter()
-        for _ in range(2):
+        for _ in range(num_runs):
             _ = vjp_ref(dnu)[0].block_until_ready()
         t1 = time.perf_counter()
-        time_autodiff = (t1 - t0) / 2
+        time_autodiff = (t1 - t0) / num_runs
         times_autodiff.append(time_autodiff)
         print("Time (AutoDiff):\n\t", time_autodiff)
 
