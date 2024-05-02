@@ -115,7 +115,7 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
 
         # Log-pdf function
         if which == "naive":
-            logpdf_fun, p_logpdf = gp.logpdf_cholesky(), (key,)
+            logpdf_fun = gp.logpdf_cholesky()
         elif which == "adjoints":
             num_batches = solver_args["num_batches"]
             num_samples = solver_args["num_samples"]
@@ -132,7 +132,6 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
             logpdf_fun = gp.logpdf_lanczos(
                 krylov_depth, sampler, slq_batch_num=num_batches
             )
-            p_logpdf = (key,)
 
         # THIS GUY FOR SMALL DATA REGIME
         # gram_matvec = (
@@ -160,7 +159,7 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
         p_prior["raw_outputscale"] = outputscale.squeeze()
         p_likelihood["raw_noise"] = noise.squeeze()
 
-        reference = (_X, _y), loss, ((p_prior, p_likelihood), p_logpdf)
+        reference = (_X, _y), loss, ((p_prior, p_likelihood), key)
 
     elif which == "gpytorch":
         # output_device = torch.device('cuda:0')
@@ -197,7 +196,7 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
 
     if which == "naive" or which == "adjoints" or which == "gpjax" or which == "cg":
         # getting data, loss and model/params
-        (X, y), loss, ((p_prior, p_likelihood), p_logpdf) = reference
+        (X, y), loss, ((p_prior, p_likelihood), key) = reference
 
         p_opt, unflatten = jax.flatten_util.ravel_pytree([p_prior, p_likelihood])
         optimizer = optax.adam(learning_rate=0.1)
@@ -219,11 +218,11 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
             value, _grad = value_and_grad_gp(p_opt, inputs=X, targets=y)
         elif which == "adjoints":
             value_and_grad_gp = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0))
-            value, _grad = value_and_grad_gp(p_opt, *p_logpdf, inputs=X, targets=y)
+            value, _grad = value_and_grad_gp(p_opt, key, inputs=X, targets=y)
 
         progressbar = tqdm.tqdm(range(args.num_epochs))
         progressbar.set_description(f"loss: {value:.3F}")
-        start = time.time()
+        start = time.perf_counter()
 
         loss_curve.append(float(value))
         loss_timestamps.append(start - start)
@@ -234,21 +233,22 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                 if which == "naive":
                     value, grads = value_and_grad_gp(p_opt, inputs=X, targets=y)
                 elif which == "adjoints":
+                    key, subkey = jax.random.split(key, num=2)
                     value, grads = value_and_grad_gp(
-                        p_opt, *p_logpdf, inputs=X, targets=y
+                        p_opt, subkey, inputs=X, targets=y
                     )
 
                 updates, state = optimizer.update(grads, state)
                 p_opt = optax.apply_updates(p_opt, updates)
                 progressbar.set_description(f"loss: {value:.3F}")
 
-                current = time.time()
+                current = time.perf_counter()
                 loss_curve.append(float(value))
                 loss_timestamps.append(current - start)
 
             except KeyboardInterrupt:
                 break
-        end = time.time()
+        end = time.perf_counter()
         opt_params = p_opt
 
     elif which == "gpytorch":
@@ -257,7 +257,7 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
 
         optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
         progressbar = tqdm.tqdm(range(num_epochs))
-        start = time.time()
+        start = time.perf_counter()
 
         value = -loss(model(X), y)
         loss_curve.append(value.item())
@@ -273,13 +273,13 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                 optimizer.step()
                 progressbar.set_description(f"loss: {value.item():.3F}")
 
-                current = time.time()
+                current = time.perf_counter()
                 loss_curve.append(value.item())
                 loss_timestamps.append(current - start)
 
             except KeyboardInterrupt:
                 break
-        end = time.time()
+        end = time.perf_counter()
 
         lengthscale = (
             model.covar_module.base_kernel.raw_lengthscale.detach().cpu().numpy()
@@ -327,7 +327,7 @@ if __name__ == "__main__":
     reference = gp_select(args.gp_method, X_train, y_train, key_solver, args_solver)
 
     # Training the GP with different methods/matrix-solvers
-    start = time.time()
+    start = time.perf_counter()
     train_time, (conv, tstamp), params = gp_train(
         args.gp_method, reference, args.num_epochs
     )

@@ -55,6 +55,8 @@ def gram_matvec_map():
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x)
             return jnp.reshape(Kv_mapped, (-1,))
 
+        # Why the checkpoint? See gram_matvec_map_over_batch.
+        @jax.checkpoint
         def _matvec_single(x_single, y, v):
             return gram_matrix(fun)(x_single[None, ...], y) @ v
 
@@ -67,11 +69,10 @@ def gram_matvec_map_over_batch(*, batch_size: int):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
+    Why? To reduce memory compared to gram_matvec_full_batch.
 
-    This function is only useful for CPUs. Make the batch_size
-    a divisor of the data set size, and choose the largest batch
-    size such that `batch_size` rows of the Gram matrix fit into
-    memory.
+    Choose the largest batch_size such that
+    `batch_size` rows of the Gram matrix fit into memory.
     """
     matvec_dense = gram_matvec_full_batch()
 
@@ -87,6 +88,16 @@ def gram_matvec_map_over_batch(*, batch_size: int):
 
         matvec_dense_f = matvec_dense(fun)
 
+        # Why the checkpoint?
+        #  Because without a checkpoint, gradient-computation
+        #  would store all intermediate values, which is _exactly_ what
+        #  we want to avoid by calling this function instead of the full-batch
+        #  Gram-matvec.
+        #
+        #  See:
+        #   https://github.com/google/jax/pull/1749
+        #   https://github.com/google/jax/discussions/10131
+        @jax.checkpoint
         def _matvec_single(x_batched, y, v):
             return matvec_dense_f(x_batched, y, v)
 
