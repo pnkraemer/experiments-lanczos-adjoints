@@ -195,19 +195,20 @@ def solver_arnoldi(t0, t1, vector_field, /, expm):
     return solve
 
 
-def solver_diffrax(t0, t1, vector_field, /, *, method: str):
+def solver_diffrax(t0, t1, vector_field, /, *, num_steps: int, method: str):
     @diffrax.ODETerm
     def term(t, y, args):  # noqa: ARG001
         return vector_field(y, args)
 
-    if method == "dopri5":
-        solver = diffrax.Dopri5()
-    elif method == "euler":
-        solver = diffrax.Euler()
-    else:
-        msg = "Method not supported (yet)."
-        raise ValueError(msg)
-    stepsize_controller = diffrax.PIDController(rtol=1e-5, atol=1e-5)
+    match_methods = {
+        "tsit5": diffrax.Tsit5(),
+        "euler": diffrax.Euler(),
+        "heun": diffrax.Heun(),
+    }
+    solver = match_methods[method]
+
+    dt0 = (t1 - t0) / num_steps
+    stepsize_controller = diffrax.ConstantStepSize()
 
     def solve(y0, p):
         sol = diffrax.diffeqsolve(
@@ -216,7 +217,7 @@ def solver_diffrax(t0, t1, vector_field, /, *, method: str):
             args=p,
             t0=t0,
             t1=t1,
-            dt0=0.1,
+            dt0=dt0,
             y0=y0,
             stepsize_controller=stepsize_controller,
         )

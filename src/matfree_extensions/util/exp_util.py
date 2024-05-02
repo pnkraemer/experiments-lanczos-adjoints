@@ -32,8 +32,8 @@ def suite_sparse_download(
     searched.download(destpath=path, format=matrixformat, extract=True)
 
 
-def suite_sparse_load(which, /, path="./data/matrices/"):
-    matrix = scipy.io.mmread(f"{path}{which}/{which}")
+def suite_sparse_load(which, /, path="./data/matrices/", suffix=".mtx"):
+    matrix = scipy.io.mmread(f"{path}{which}/{which}{suffix}")
 
     row = jnp.asarray(matrix.row)
     col = jnp.asarray(matrix.col)

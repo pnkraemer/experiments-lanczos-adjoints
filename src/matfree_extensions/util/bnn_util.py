@@ -7,6 +7,7 @@ import flax.linen
 import jax
 import jax.numpy as jnp
 from matfree import hutchinson
+from tqdm import tqdm
 
 from matfree_extensions import lanczos
 
@@ -111,10 +112,13 @@ def loss_training_cross_entropy_single(logits, labels_hot):
 
 # todo: move to gp? (And rename gp.py appropriately, of course)
 #  laplace-torch calls this Laplace.log_prob(normalized=True)
+# todo: rename unconstrain() to constrain()
 def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
     def loss(a, variables, x_train, y_train, *logdet_params):
         alpha = hyperparam_unconstrain(a)
-        tmp1 = len(variables) / 2 * a
+
+        tmp1 = len(variables) / 2 * jnp.log(alpha)
+
         tmp2 = -0.5 * alpha * jnp.dot(variables, variables)
         log_prior = tmp1 + tmp2
 
@@ -123,6 +127,22 @@ def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
 
         log_marginal = log_prior - 0.5 * logdet
         return -log_marginal
+
+    return loss
+
+
+# todo: move to gp? (And rename gp.py appropriately, of course)
+#  laplace-torch calls this Laplace.log_prob(normalized=True)
+def loss_log_prob_like_in_redux(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
+    def loss(a, variables, x_train, y_train, *logdet_params):
+        alpha = hyperparam_unconstrain(a)
+
+        M = ggn_fun(alpha, variables, x_train, y_train)
+        logdet = logdet_fun(M, *logdet_params)
+
+        tmp1 = -len(variables) / 2 * jnp.log(2 * jnp.pi) + logdet / 2
+        tmp2 = -jnp.dot(variables, variables) / 2
+        return tmp1 + tmp2
 
     return loss
 
@@ -152,6 +172,23 @@ def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     return logdet
 
 
+def solver_logdet_slq_implicit(
+    *, lanczos_rank, slq_num_samples, slq_num_batches, N: int
+):
+    x_like = jnp.ones((N,), dtype=float)
+    sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
+
+    def logdet(Av: Callable, key: jax.random.PRNGKey, *args):
+        integrand = lanczos.integrand_spd(jnp.log, lanczos_rank, Av)
+        estimate = hutchinson.hutchinson(integrand, sampler)
+
+        keys = jax.random.split(key, num=slq_num_batches)
+        values = jax.lax.map(lambda k: estimate(k, *args), keys)
+        return jnp.mean(values, axis=0)
+
+    return logdet
+
+
 def predictive_cov(*, ggn_fun, model_fun, param_unflatten, hyperparam_unconstrain):
     def evaluate(a, variables, x_train, y_train, x_test):
         alpha = hyperparam_unconstrain(a)
@@ -175,6 +212,119 @@ def ggn_full(*, loss_single, model_fun, param_unflatten):
         return jnp.sum(ggn_summands, axis=0) + alpha * jnp.eye(J.shape[-1])
 
     return ggn_fun
+
+
+def ggn_vp_running(*, loss_single, model_fun, param_unflatten):
+    def gvp(v_vec, params_vec, x_batch, y_batch):
+        # v_like_params = param_unflatten(v_vec)
+        params = param_unflatten(params_vec)
+
+        # def model_flat(p, x):
+        #     return model_fun(param_unflatten(p), x)
+        def scan_fun(carry, batch):
+            x, y = batch
+            x = x[None, ...]
+            y = y[None, ...]
+
+            def model_pred(p):
+                return model_fun(p, x)
+                # return model_flat(p, x)
+
+            # Big models(except ConvNext) return a tuple (logits, model_state)
+            preds, Jv = jax.jvp(model_pred, (params_vec,), (v_vec,))
+            _, vjp_fn = jax.vjp(model_pred, params_vec)
+            H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
+            HJv = jnp.einsum("boi, bi->bo", H, Jv)
+            JtHJv = vjp_fn(HJv)[0]
+            # return carry + JtHJv, None
+            return jax.tree_map(lambda c, v: c + v, carry, JtHJv), None
+
+        init_value = jax.tree_map(lambda x: jnp.zeros_like(x), params)
+        # init_value = jnp.zeros_like(params_vec)
+        return jax.lax.scan(scan_fun, init_value, (x_batch, y_batch))[0]
+
+    return gvp
+
+
+def ggn_vp_parallel(*, loss_single, model_fun, param_unflatten):
+    def gvp(v_vec, params_vec, x_batch, y_batch):
+        v_like_params = param_unflatten(v_vec)
+        params = param_unflatten(params_vec)
+
+        def body_fn(x_single, y_single):
+            x = x_single[None, ...]
+            y = y_single[None, ...]
+
+            def model_pred(p):
+                return model_fun(p, x)
+
+            # Big models(except ConvNext) return a tuple (logits, model_state)
+            # Hence: model_pred = lambda p: model_fun(p, x)[0]
+            preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
+            _, vjp_fn = jax.vjp(model_pred, params)
+
+            H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
+            HJv = jnp.einsum("boi, bi->bo", H, Jv)
+            return vjp_fn(HJv)[0]
+
+        return jax.tree_map(
+            lambda x: x.sum(axis=0), jax.vmap(body_fn)(x_batch, y_batch)
+        )
+
+    return gvp
+
+
+def kernel_vp_parallel(*, loss_single, model_fun, param_unflatten):
+    def gvp(v_like_outs, params_vec, x_batch, y_batch):
+        v_like_outs = v_like_outs[None, ...]
+        params = param_unflatten(params_vec)
+
+        def body_fn(x_single, y_single):
+            x = x_single[None, ...]
+            y = y_single[None, ...]
+
+            def model_pred(p):
+                return model_fun(p, x)
+
+            # Big models(except ConvNext) return a tuple (logits, model_state)
+            # Hence: model_pred = lambda p: model_fun(p, x)[0]
+            preds, vjp_fn = jax.vjp(model_pred, params)
+            H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
+            H_sqrt = jnp.linalg.cholesky(H)
+            Hv = jnp.einsum("boi, bi->bo", H_sqrt, v_like_outs)
+            JtHv = vjp_fn(Hv)[0]
+            _, JJtHv = jax.jvp(model_pred, (params,), (JtHv,))
+            return jnp.einsum("boi, bi->bo", H, JJtHv)
+
+        return jax.tree_map(
+            lambda x: x.sum(axis=0), jax.vmap(body_fn)(x_batch, y_batch)
+        )
+
+    return gvp
+
+
+def ggn_vp_dataloader(
+    param_vec, loss_single, model_fun, param_unflatten, data_loader, sum_type="parallel"
+):
+    def ggn_vec_prod(v_vec):
+        if sum_type == "parallel":
+            ggn_vp = ggn_vp_parallel
+        elif sum_type == "running":
+            ggn_vp = ggn_vp_running
+        ggn_vp_fn = ggn_vp(
+            model_fun=model_fun,
+            loss_single=loss_single,
+            param_unflatten=param_unflatten,
+        )
+        ggn_vp_fn = jax.jit(ggn_vp_fn)
+        gvp = jnp.zeros_like(param_vec)
+        for _, batch in enumerate(tqdm(data_loader)):
+            x_batch, y_batch = batch["image"], batch["label"]
+            gvp_tree = ggn_vp_fn(v_vec, param_vec, x_batch, y_batch)
+            gvp += jax.flatten_util.ravel_pytree(gvp_tree)[0]
+        return gvp
+
+    return ggn_vec_prod
 
 
 def ggn_diag(*, loss_single, model_fun, param_unflatten):
@@ -222,3 +372,93 @@ def sampler_lanczos(*, ggn_fun, num, lanczos_rank):
 
 def _dense_tridiag(diagonal, off_diagonal):
     return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
+
+
+def img_to_patch(x, patch_size, flatten_channels=True):
+    """
+    Inputs:
+        x - torch.Tensor representing the image of shape [B, H, W, C]
+        patch_size - Number of pixels per dimension of the patches (integer)
+        flatten_channels - If True, the patches will be returned in a flattened format
+                           as a feature vector instead of a image grid.
+    """
+    B, H, W, C = x.shape
+    x = x.reshape(B, H // patch_size, patch_size, W // patch_size, patch_size, C)
+    x = x.transpose(0, 1, 3, 2, 4, 5)  # [B, H', W', p_H, p_W, C]
+    x = x.reshape(B, -1, *x.shape[3:])  # [B, H'*W', p_H, p_W, C]
+    if flatten_channels:
+        x = x.reshape(B, x.shape[1], -1)  # [B, H'*W', p_H*p_W*C]
+    return x
+
+
+def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
+    ggn_fun = kernel_vp_parallel(
+        loss_single=loss_training_cross_entropy_single,
+        model_fun=model_apply,
+        param_unflatten=unflatten,
+    )
+
+    def ggn_mat(v_vec, alpha, *params):
+        Gv_tree = ggn_fun(v_vec, *params)
+        return jax.flatten_util.ravel_pytree(Gv_tree)[0] + alpha * v_vec
+
+    def loss(log_alpha, params_vec, img, label, key, num_classes=1000):
+        alpha = hyperparam_unconstrain(log_alpha)
+        logdet_fun = solver_logdet_slq_implicit(
+            lanczos_rank=10, slq_num_samples=10, slq_num_batches=1, N=num_classes
+        )
+
+        # logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
+        logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
+        log_prior = jnp.log(alpha) * n_params - alpha * jnp.dot(params_vec, params_vec)
+        log_marginal = log_prior - logdet
+        return -log_marginal
+
+    return loss
+
+
+def vectorize_nn(model_fn, params):
+    """Vectorize the Neural Network
+    Inputs:
+    parameters: Pytree of parameters
+    model_fn: A function that takes in pytree parameters and data
+
+    Outputs:
+    params_vec: Vectorized parameters
+    unflatten_fn: Unflatten function
+    model_apply_vec: A function that takes in vectorized parameters and data
+    """
+    params_vec, unflatten_fn = jax.flatten_util.ravel_pytree(params)
+
+    def model_apply_vec(params_vectorized, x):
+        return model_fn(unflatten_fn(params_vectorized), x)
+
+    return params_vec, unflatten_fn, model_apply_vec
+
+
+def get_model_apply_fn(model_name, model_apply, batch_stats=None, rng=None):
+    if model_name in ["ResNet_small", "ResNet18", "DenseNet", "GoogleNet"]:
+        assert (
+            batch_stats is not None
+        ), "Batch statistics must be provided for ResNet and DenseNet models."
+
+        def model_fn(params, imgs):
+            return model_apply(
+                {"params": params, "batch_stats": batch_stats},
+                imgs,
+                train=False,
+                mutable=False,
+            )
+    elif model_name in ["LeNet", "MLP"]:
+        model_fn = model_apply
+    elif model_name == "VisionTransformer":
+        assert rng is not None, "RNG key must be provided for Vision Transformer model."
+
+        def model_fn(params, imgs):
+            return model_apply(
+                {"params": params}, imgs, train=False, rngs={"dropout": rng}
+            )
+    else:
+        raise ValueError
+
+    return model_fn
