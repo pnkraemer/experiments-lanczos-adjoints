@@ -98,26 +98,6 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # Extract the matrix shapes from Q
     _, krylov_depth = jnp.shape(Q)
 
-    # Transpose matvec
-    def vecmat(x, *p):
-        # Use that input shape/dtype == output shape/dtype
-        x_like = x
-
-        # Transpose the matrix vector product
-        # (as a function of v, not of p)
-        #
-        # Note: we use vjp instead of linear_transpose,
-        #  even though the function is linear.
-        #  Why? Because if the matvec involves a map() or a scan()
-        #  over linear functions, linear_transpose() is not defined.
-        #  See: https://github.com/google/jax/issues/6619
-        #  VJP is a little bit slower, but more robust here.
-        _, vm = jax.vjp(lambda s: matvec(s, *p), x_like)
-
-        # The output of the transpose is a tuple of length 1
-        (a,) = vm(x)
-        return a.conj()
-
     # Prepare a bunch of auxiliary matrices
 
     def lower(m):
@@ -132,7 +112,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
-    dp = jax.tree_util.tree_map(jnp.zeros_like, params)
+    dp = jax.tree_util.tree_map(jnp.zeros_like, *params)
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
@@ -164,7 +144,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # Fix the step function
     def adjoint_step(x, y):
         output = _adjoint_step(
-            *x, **y, vecmat=vecmat, params=params, Q=Q, reortho=reortho
+            *x, **y, matvec=matvec, params=params, Q=Q, reortho=reortho
         )
         return output, ()
 
@@ -176,7 +156,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # Solve for the input gradient
     dv = lambda_k * c
 
-    return dv, *dp
+    return dv, dp
 
 
 def _adjoint_step(
@@ -188,7 +168,7 @@ def _adjoint_step(
     dp,
     *,
     # Matrix-vector product
-    vecmat,
+    matvec,
     params,
     # Loop over: index
     idx,
@@ -209,16 +189,15 @@ def _adjoint_step(
     reortho: str,
 ):
     # Reorthogonalise
-    if reortho != "none":
+    if reortho == "full":
         P = p_mask[:, None] * P
         p = p_mask * p
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
-    # A single vector-matrix product
-    l_At, vjp = jax.vjp(lambda *z: vecmat(lambda_k, *z), *params)
-
-    # Update the parameter-gradients
-    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, vjp(q))
+    # Transposed matvec and parameter-gradient in a single matvec
+    _, vjp = jax.vjp(matvec, q, *params)
+    l_At, dp_increment = vjp(lambda_k)
+    dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, dp_increment)
 
     # Solve for (Gamma + Gamma.T) e_K
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
@@ -227,7 +206,7 @@ def _adjoint_step(
     # Save Lambda and Sigma
     Lambda = Lambda.at[:, idx].set(lambda_k)
 
-    # Solve for the next lambda
+    # Solve for the next lambda (backward substitution step)
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
     asd = beta_plus @ Lambda.T
     lambda_k = xi - (alpha * lambda_k - l_At) - asd

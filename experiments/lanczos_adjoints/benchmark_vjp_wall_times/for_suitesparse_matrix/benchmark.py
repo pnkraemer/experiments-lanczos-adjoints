@@ -12,8 +12,11 @@ from matfree_extensions import lanczos
 from matfree_extensions.util import exp_util
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--reortho", required=True)
+parser.add_argument("--reortho", type=str, required=True)
+parser.add_argument("--precompile", action="store_true")
+parser.add_argument("--num_runs", type=int, required=True)
 args = parser.parse_args()
+print(args)
 
 
 def _rmse_relative(x, y, /, *, nugget):
@@ -24,7 +27,6 @@ def _rmse_relative(x, y, /, *, nugget):
 
 # n = 10_000
 seed = 1
-num_runs = 1
 
 
 # Set up a test-matrix
@@ -91,22 +93,25 @@ for krylov_depth in jnp.arange(10, 100, step=10):
 
     fx_imp, vjp_imp = jax.vjp(implementation, flat)
 
-    _ = implementation(flat).block_until_ready()
+    if args.precompile:
+        _ = implementation(flat).block_until_ready()
+
     t0 = time.perf_counter()
-    for _ in range(num_runs):
+    for _ in range(args.num_runs):
         _ = implementation(flat).block_until_ready()
     t1 = time.perf_counter()
-    time_fwdpass = (t1 - t0) / num_runs
+    time_fwdpass = (t1 - t0) / args.num_runs
     times_fwdpass.append(time_fwdpass)
     print("Time (forward pass):\n\t", time_fwdpass)
 
     vjp_imp = jax.jit(vjp_imp)
-    _ = vjp_imp(dnu)[0].block_until_ready()
+    if args.precompile:
+        _ = vjp_imp(dnu)[0].block_until_ready()
     t0 = time.perf_counter()
-    for _ in range(num_runs):
+    for _ in range(args.num_runs):
         _ = vjp_imp(dnu)[0].block_until_ready()
     t1 = time.perf_counter()
-    time_custom = (t1 - t0) / num_runs
+    time_custom = (t1 - t0) / args.num_runs
     times_custom.append(time_custom)
     print("Time (custom VJP):\n\t", time_custom)
 
@@ -114,13 +119,14 @@ for krylov_depth in jnp.arange(10, 100, step=10):
         fx_ref, vjp_ref = jax.vjp(reference, flat)
         vjp_ref = jax.jit(vjp_ref)
 
-        _ = vjp_ref(dnu)[0].block_until_ready()
+        if args.precompile:
+            _ = vjp_ref(dnu)[0].block_until_ready()
 
         t0 = time.perf_counter()
-        for _ in range(num_runs):
+        for _ in range(args.num_runs):
             _ = vjp_ref(dnu)[0].block_until_ready()
         t1 = time.perf_counter()
-        time_autodiff = (t1 - t0) / num_runs
+        time_autodiff = (t1 - t0) / args.num_runs
         times_autodiff.append(time_autodiff)
         print("Time (AutoDiff):\n\t", time_autodiff)
 
