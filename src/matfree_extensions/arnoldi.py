@@ -25,7 +25,7 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
         (Q, H, r, c), params = cache
         dQ, dH, dr, dc = vjp_incoming
 
-        grads, _ = _adjoint(
+        return _adjoint(
             matvec_convert,
             *params,
             Q=Q,
@@ -38,7 +38,6 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
             dc=dc,
             reortho=reortho,
         )
-        return grads
 
     if custom_vjp:
         estimate_backend = jax.custom_vjp(estimate_backend, nondiff_argnums=(0,))
@@ -174,21 +173,10 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     result, _ = jax.lax.scan(adjoint_step, init, xs=scan_over, reverse=True)
     (lambda_k, Lambda, Gamma, _P, dp) = result
 
-    # Finalise Sigma
-    Sigma_t = Lambda.T @ Q - dH.T
-
     # Solve for the input gradient
     dv = lambda_k * c
 
-    # Bundle the Lagrange multipliers and return
-    multipliers = {
-        "Lambda": Lambda,
-        "rho": lambda_k,
-        "Gamma": Gamma,
-        "Sigma": jnp.triu(Sigma_t, 2).T,
-        "eta": eta,
-    }
-    return (dv, *dp), multipliers
+    return dv, *dp
 
 
 def _adjoint_step(
