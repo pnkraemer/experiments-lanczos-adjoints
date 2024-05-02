@@ -2,8 +2,8 @@
 Script for training/calibrating Gaussian process models on UCI datasets.
 
 Currently, use either of the following datasets:
-* concrete_compressive_strength  (small)
-* combined_cycle_power_plant  (medium)
+* concrete_compressive_strength  (small) ~ 1.000
+* combined_cycle_power_plant  (medium) ~ 10.000
 * ___________________________   (large)
 * ___________________________   (very large)
 """
@@ -26,8 +26,17 @@ from matfree_extensions.util import gp_util as gp
 
 
 def save_parser(directory, args):
-    with open(f"{directory}/args_config_" + args.gp_method + ".json", "w") as f:
-        json.dump(vars(args), f, indent=4)
+    if args.gp_method == "adjoints":
+        with open(
+            f"{directory}/args_config_"
+            + args.gp_method
+            + f"_kr{args.slq_krylov_depth!s}.json",
+            "w",
+        ) as f:
+            json.dump(vars(args), f, indent=4)
+    else:
+        with open(f"{directory}/args_config_" + args.gp_method + ".json", "w") as f:
+            json.dump(vars(args), f, indent=4)
 
 
 def load_parser(directory, args, parser):
@@ -52,7 +61,10 @@ class _ExactGPModel(gpytorch.models.ExactGP):
     def __init__(self, train_x, train_y, likelihood_):
         super().__init__(train_x, train_y, likelihood_)
         self.mean_module = gpytorch.means.ConstantMean()
-        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+        # self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel())
+        self.covar_module = gpytorch.kernels.ScaleKernel(
+            gpytorch.kernels.keops.RBFKernel()
+        )
 
     def forward(self, x):
         mean_x = self.mean_module(x)
@@ -98,8 +110,8 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
         raise ValueError(msg)
 
     if which == "naive" or which == "adjoints":
-        _X = jnp.asarray(X.detach().numpy())
-        _y = jnp.asarray(y.detach().numpy()).ravel()
+        _X = jnp.asarray(X.detach().cpu().numpy())
+        _y = jnp.asarray(y.detach().cpu().numpy()).ravel()
 
         # Log-pdf function
         if which == "naive":
@@ -110,7 +122,8 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
             krylov_depth = solver_args["krylov_depth"]
             # num_batches ---> 1 and larger samples as possible.
             # begin to split batches and lower samples if memory issues
-            # krylov_depth upper bounded by num. of points (roughly the num of eigens)
+            # krylov_depth upper bounded by num. of points
+            # (roughly the num of eigens)
 
             x_like = jnp.ones((_X.shape[0],), dtype=float)
             sampler = hutchinson.sampler_rademacher(
@@ -121,9 +134,17 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
             )
             p_logpdf = (key,)
 
+        # THIS GUY FOR SMALL DATA REGIME
+        # gram_matvec = (
+        #     gp.gram_matvec_full_batch()
+        # )  # I chose this one, but any other could be possible
+        # THIS GUY FOR SMALL DATA REGIME
+        print("HERE")
         gram_matvec = (
-            gp.gram_matvec_full_batch()
-        )  # I chose this one, but any other could be possible
+            gp.gram_matvec_map_over_batch(batch_size=2)
+            # gp.gram_matvec_map()
+            # gp.gram_matvec_full_batch()
+        )
 
         # Set up a GP model
         shape_in = jnp.shape(_X[0])
@@ -142,8 +163,11 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
         reference = (_X, _y), loss, ((p_prior, p_likelihood), p_logpdf)
 
     elif which == "gpytorch":
-        likelihood = gpytorch.likelihoods.GaussianLikelihood()
-        model = _ExactGPModel(X, y.flatten(), likelihood)
+        # output_device = torch.device('cuda:0')
+        # X, y = X.to(output_device), y.to(output_device)
+
+        likelihood = gpytorch.likelihoods.GaussianLikelihood().cuda()
+        model = _ExactGPModel(X, y, likelihood).cuda()
 
         # sets gpytorch classes in training mode (not eval)
         model.train()
@@ -179,21 +203,24 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
         optimizer = optax.adam(learning_rate=0.1)
         state = optimizer.init(p_opt)
 
-        def mll(params, *params_logpdf):
+        def mll(params, *params_logpdf, inputs, targets):
             p1, p2 = unflatten(params)
-            return -loss(X, y, *params_logpdf, params_prior=p1, params_likelihood=p2)
+            return -loss(
+                inputs, targets, *params_logpdf, params_prior=p1, params_likelihood=p2
+            )
 
         # for LANCZOS we need to specify the key
-        def mll_lanczos(params, key):
+        def mll_lanczos(params, key, inputs, targets):
             p1, p2 = unflatten(params)
-            return -loss(X, y, key, params_prior=p1, params_likelihood=p2)
+            return -loss(inputs, targets, key, params_prior=p1, params_likelihood=p2)
 
         if which == "naive":
             value_and_grad_gp = jax.jit(jax.value_and_grad(mll, argnums=0))
+            value, _grad = value_and_grad_gp(p_opt, inputs=X, targets=y)
         elif which == "adjoints":
             value_and_grad_gp = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0))
+            value, _grad = value_and_grad_gp(p_opt, *p_logpdf, inputs=X, targets=y)
 
-        value, _grad = value_and_grad_gp(p_opt, *p_logpdf)
         progressbar = tqdm.tqdm(range(args.num_epochs))
         progressbar.set_description(f"loss: {value:.3F}")
         start = time.time()
@@ -204,7 +231,13 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
         for _ in progressbar:
             try:
                 # todo: if we use lanjczos, split the random key HERE
-                value, grads = value_and_grad_gp(p_opt, *p_logpdf)
+                if which == "naive":
+                    value, grads = value_and_grad_gp(p_opt, inputs=X, targets=y)
+                elif which == "adjoints":
+                    value, grads = value_and_grad_gp(
+                        p_opt, *p_logpdf, inputs=X, targets=y
+                    )
+
                 updates, state = optimizer.update(grads, state)
                 p_opt = optax.apply_updates(p_opt, updates)
                 progressbar.set_description(f"loss: {value:.3F}")
@@ -226,7 +259,8 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
         progressbar = tqdm.tqdm(range(num_epochs))
         start = time.time()
 
-        loss_curve.append(-loss(model(X), y.flatten()).item())
+        value = -loss(model(X), y)
+        loss_curve.append(value.item())
         loss_timestamps.append(start - start)
 
         for _ in progressbar:
@@ -234,7 +268,7 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                 # Zero gradients from previous iteration
                 optimizer.zero_grad()
                 # Calculate loss and backprop gradients
-                value = -loss(model(X), y.flatten())
+                value = -loss(model(X), y)
                 value.backward()
                 optimizer.step()
                 progressbar.set_description(f"loss: {value.item():.3F}")
@@ -247,9 +281,11 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                 break
         end = time.time()
 
-        lengthscale = model.covar_module.base_kernel.raw_lengthscale.detach().numpy()
-        outputscale = model.covar_module.raw_outputscale.detach().numpy()
-        noise = model.likelihood.raw_noise.detach().numpy()
+        lengthscale = (
+            model.covar_module.base_kernel.raw_lengthscale.detach().cpu().numpy()
+        )
+        outputscale = model.covar_module.raw_outputscale.detach().cpu().numpy()
+        noise = model.likelihood.raw_noise.detach().cpu().numpy()
 
         opt_params = [lengthscale.item(), outputscale.item(), noise.item()]
 
@@ -260,13 +296,13 @@ if __name__ == "__main__":
     # Parse the arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--name_of_file", "-nof", type=str, default="gp_train")
-    parser.add_argument("--seed", "-s", type=int, default=1)
+    parser.add_argument("--seed", "-seed", type=int, default=1)
     parser.add_argument("--num_points", "-n", type=int, default=-1)
     parser.add_argument("--num_epochs", "-e", type=int, default=100)
     parser.add_argument("--gp_method", "-gpm", type=str, default="gpytorch")
-    parser.add_argument("--slq_num_batches", type=int, default=1)
-    parser.add_argument("--slq_krylov_depth", type=int, default=10)
-    parser.add_argument("--slq_num_samples", type=int, default=2)
+    parser.add_argument("--slq_num_batches", "-sb", type=int, default=100)
+    parser.add_argument("--slq_krylov_depth", "-kry", type=int, default=5)
+    parser.add_argument("--slq_num_samples", "-s", type=int, default=1)  # higher?
     parser.add_argument(
         "--dataset", "-data", type=str, default="concrete_compressive_strength"
     )
@@ -303,9 +339,24 @@ if __name__ == "__main__":
     os.makedirs(dir_local, exist_ok=True)
 
     # Saving {convergence_curve, convergence time_stamps, optimized parameters}
-    jnp.save(f"{dir_local}/convergence_{args.gp_method}.npy", jnp.array(conv))
-    jnp.save(f"{dir_local}/time_{args.gp_method}.npy", jnp.array(tstamp))
-    jnp.save(f"{dir_local}/params_{args.gp_method}.npy", jnp.array(params))
+    if args.gp_method == "adjoints":
+        jnp.save(
+            f"{dir_local}/convergence_{args.gp_method}_kr{args.slq_krylov_depth!s}.npy",
+            jnp.array(conv),
+        )
+        jnp.save(
+            f"{dir_local}/time_{args.gp_method}" + f"_kr{args.slq_krylov_depth!s}.npy",
+            jnp.array(tstamp),
+        )
+        jnp.save(
+            f"{dir_local}/params_{args.gp_method}"
+            + f"_kr{args.slq_krylov_depth!s}.npy",
+            jnp.array(params),
+        )
+    else:
+        jnp.save(f"{dir_local}/convergence_{args.gp_method}.npy", jnp.array(conv))
+        jnp.save(f"{dir_local}/time_{args.gp_method}.npy", jnp.array(tstamp))
+        jnp.save(f"{dir_local}/params_{args.gp_method}.npy", jnp.array(params))
 
     # Saving {argparse configuration}
     save_parser(dir_local, args)
