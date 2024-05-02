@@ -176,7 +176,7 @@ def _adjoint_step(
     beta_minus,
     alpha,
     beta_plus,
-    # Loop over: auxiliary variables for Gamma and Sigma
+    # Loop over: auxiliary variables for Gamma
     lower_mask,
     Pi_gamma,
     Pi_xi,
@@ -203,12 +203,9 @@ def _adjoint_step(
     tmp = lower_mask * (Pi_gamma - l_At @ Q)
     Gamma = Gamma.at[idx, :].set(tmp)
 
-    # Save Lambda and Sigma
-    Lambda = Lambda.at[:, idx].set(lambda_k)
-
     # Solve for the next lambda (backward substitution step)
+    Lambda = Lambda.at[:, idx].set(lambda_k)
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
-    asd = beta_plus @ Lambda.T
-    lambda_k = xi - (alpha * lambda_k - l_At) - asd
+    lambda_k = xi - (alpha * lambda_k - l_At) - beta_plus @ Lambda.T
     lambda_k /= beta_minus
     return lambda_k, Lambda, Gamma, P, dp

@@ -131,7 +131,7 @@ for krylov_depth in jnp.arange(10, 100, step=10):
         print("Time (AutoDiff):\n\t", time_autodiff)
 
         # diff = vjp_ref(dnu)[0] - vjp_imp(dnu)[0]
-        diff = _rmse_relative(vjp_imp(dnu)[0], vjp_ref(dnu)[0], nugget=1.0)
+        diff = _rmse_relative(vjp_imp(dnu)[0], vjp_ref(dnu)[0], nugget=0.0)
         norms_of_differences.append(diff)
         print("Norm of VJP-difference:\n\t", diff)
         print(
