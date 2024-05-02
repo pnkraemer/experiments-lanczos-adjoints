@@ -18,6 +18,7 @@ import gpytorch.kernels.keops
 import jax
 import jax.numpy as jnp
 import torch
+from matfree import hutchinson
 from matfree_extensions.util import gp_util
 
 
@@ -29,38 +30,43 @@ def print_ts(t: jax.Array, *, label: str, num_runs: int):
     print(msg, description)
 
 
-def time_matvec(mv: Callable, vec: jax.Array, params, *, num_runs: int):
+def time_gp_mll(mv: Callable, vec: jax.Array, *, num_runs, num_batches=10, num_samples=1, krylov_depth=100):
+    sampler = hutchinson.sampler_rademacher(vec, num=num_samples)
+    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
+
+
+
+    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
+    prior = gp_util.model(gp_util.mean_zero(), k, gram_matvec=mv)
+    likelihood, p_likelihood = gp_util.likelihood_gaussian()
+    loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf)
+
+    xs = jnp.linspace(0, 1, num=len(vec), endpoint=True)
+    ys = xs     
+    key = jax.random.PRNGKey(1)
+    
+    p1_flat, unflatten_1 = jax.flatten_util.ravel_pytree(p_prior)
+    p2_flat, unflatten_2 = jax.flatten_util.ravel_pytree(p_likelihood)
+
+    # Change this fun to value_and_grad, and memory blows up.
+    # I think it is because of a JVP of the operation (v \mapsto Kv),
+    # which accidentally assembles a dense matrix and asks for N^2 memory.
+
+    @jax.jit
+    def fun(p1, p2):
+        return loss(xs, ys, key, params_prior=unflatten_1(p1), params_likelihood=unflatten_2(p2))
+    
+    _value = fun(p1_flat, p2_flat)
+
     ts = []
-    _ = mv(vec, params)  # for potential pre-compilation
     for _ in range(num_runs):
         t0 = time.perf_counter()
-        _ = mv(vec, params)
+        value = fun(p1_flat, p2_flat)
+        value.block_until_ready()
+        # grad.block_until_ready()
         t1 = time.perf_counter()
-
         ts.append(t1 - t0)
     return jnp.asarray(ts)
-
-
-def time_gpytorch_via_pykeops(prng_seed, N: int, shape_in: tuple, *, num_runs: int):
-    torch.manual_seed(prng_seed)
-    x = torch.randn((N, *shape_in))
-    vec = torch.randn((N,))
-    kernel = gpytorch.kernels.keops.MaternKernel(nu=1.5)
-    return time_matvec(lambda v, p: kernel(p) @ v, vec, x, num_runs=num_runs)
-
-
-def time_matfree(prng_seed, N: int, shape_in: tuple, mv, *, num_runs: int):
-    key = jax.random.PRNGKey(prng_seed)
-    key1, key2 = jax.random.split(key)
-    x = jax.random.normal(key1, shape=(N, *shape_in))
-    vec = jax.random.normal(key1, shape=(N,))
-    kernel, params = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
-    fun = jax.jit(mv(kernel(**params)))
-
-    def matvec_fun(v, p):
-        return fun(p, p, v).block_until_ready()
-
-    return time_matvec(matvec_fun, vec, x, num_runs=num_runs)
 
 
 if __name__ == "__main__":
@@ -81,31 +87,29 @@ if __name__ == "__main__":
         print(f"\nI = {idx}, N = {num}")
         print("------------------")
 
-        gpytorch_label = "GPyTorch (via pykeops)"
-        gpytorch_t = time_gpytorch_via_pykeops(seed, num, (), num_runs=num_runs)
-        print_ts(gpytorch_t, label=gpytorch_label, num_runs=num_runs)
+        vec = jnp.ones((num,), dtype=float)
 
         map_label = "Matfree (via JAX's map)"
         map_matvec = gp_util.gram_matvec_map()
-        map_t = time_matfree(seed, num, (), mv=map_matvec, num_runs=num_runs)
+        map_t = time_gp_mll(map_matvec, vec, num_runs=num_runs)
         print_ts(map_t, label=map_label, num_runs=num_runs)
 
         if num >= 16:
             b16_label = "Matfree (via map-over-vmap; 16)"
             b16_matvec = gp_util.gram_matvec_map_over_batch(batch_size=16)
-            b16_t = time_matfree(seed, num, (), mv=b16_matvec, num_runs=num_runs)
+            b16_t = time_gp_mll(b16_matvec, vec, num_runs=num_runs)
             print_ts(b16_t, label=b16_label, num_runs=num_runs)
 
         if num >= 256:
             b256_label = "Matfree (via map-over-vmap; 256)"
             b256_matvec = gp_util.gram_matvec_map_over_batch(batch_size=256)
-            b256_t = time_matfree(seed, num, (), mv=b256_matvec, num_runs=num_runs)
+            b256_t = time_gp_mll(b256_matvec, vec, num_runs=num_runs)
             print_ts(b256_t, label=b256_label, num_runs=num_runs)
 
         if num >= 4096:
             b4096_label = "Matfree (via map-over-vmap; 4096)"
             b4096_matvec = gp_util.gram_matvec_map_over_batch(batch_size=4096)
-            b4096_t = time_matfree(seed, num, (), mv=b4096_matvec, num_runs=num_runs)
+            b4096_t = time_gp_mll(b4096_matvec, vec, num_runs=num_runs)
             print_ts(b4096_t, label=b4096_label, num_runs=num_runs)
 
         # 8 GB memory allows storing at most 44_000 rows/columns,
@@ -113,7 +117,7 @@ if __name__ == "__main__":
         if num <= 30_000:
             vmap_label = "Matfree (via JAX's vmap)"
             vmap_matvec = gp_util.gram_matvec_full_batch()
-            vmap_t = time_matfree(seed, num, (), mv=vmap_matvec, num_runs=num_runs)
+            vmap_t = time_gp_mll(vmap_matvec, vec, num_runs=num_runs)
             print_ts(vmap_t, label=vmap_label, num_runs=num_runs)
 
         print()
