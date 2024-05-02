@@ -151,7 +151,7 @@ def tridiag(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
 
 def _tridiag_reortho_full(matvec, krylov_depth, /, *, custom_vjp):
     # Implement via Arnoldi to use the reorthogonalised adjoints.
-    # Todo: implement a dedicated function.
+    # The complexity difference is minimal with full reortho.
     alg = arnoldi.hessenberg(
         matvec, krylov_depth, custom_vjp=custom_vjp, reortho="full"
     )

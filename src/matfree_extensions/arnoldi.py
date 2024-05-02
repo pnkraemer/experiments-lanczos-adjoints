@@ -196,16 +196,16 @@ def _adjoint_step(
 
     # Transposed matvec and parameter-gradient in a single matvec
     _, vjp = jax.vjp(matvec, q, *params)
-    l_At, dp_increment = vjp(lambda_k)
+    vecmat_lambda, dp_increment = vjp(lambda_k)
     dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, dp_increment)
 
     # Solve for (Gamma + Gamma.T) e_K
-    tmp = lower_mask * (Pi_gamma - l_At @ Q)
+    tmp = lower_mask * (Pi_gamma - vecmat_lambda @ Q)
     Gamma = Gamma.at[idx, :].set(tmp)
 
     # Solve for the next lambda (backward substitution step)
     Lambda = Lambda.at[:, idx].set(lambda_k)
     xi = Pi_xi + (Gamma + Gamma.T)[idx, :] @ Q.T
-    lambda_k = xi - (alpha * lambda_k - l_At) - beta_plus @ Lambda.T
+    lambda_k = xi - (alpha * lambda_k - vecmat_lambda) - beta_plus @ Lambda.T
     lambda_k /= beta_minus
     return lambda_k, Lambda, Gamma, P, dp

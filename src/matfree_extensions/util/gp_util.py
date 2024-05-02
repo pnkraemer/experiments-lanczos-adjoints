@@ -214,8 +214,8 @@ def logpdf_lanczos(
     /,
     slq_sampler: Callable,
     slq_batch_num: int,
-    cg_tol: float,
-    cg_maxiter: int,
+    cg_tol: float = 1e-5,  # same as in jax.scipy.sparse
+    cg_maxiter: int | None = None,  # same as in jax.scipy.sparse
 ) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
 

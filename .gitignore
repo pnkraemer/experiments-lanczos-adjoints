@@ -2,7 +2,7 @@
 mfe/
 
 # Data
-./data/*
+data/
 .ssgetpy
 
 # Byte-compiled / optimized / DLL files
