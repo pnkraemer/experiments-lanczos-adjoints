@@ -192,6 +192,7 @@ def logpdf_cholesky() -> Callable:
 
         # Combine the terms
         (n,) = jnp.shape(mean)
+
         return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
 
     return logpdf
