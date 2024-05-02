@@ -2,7 +2,7 @@ import os
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from matfree_extensions import exp_util
+from matfree_extensions.util import exp_util
 from tueplots import axes, figsizes, fontsizes
 
 # Plotting-configuration
@@ -15,12 +15,12 @@ plt.rcParams.update(axes.grid())
 
 # Load the results
 matrix_which = "t3dl_e"
-directory = exp_util.matching_directory(__file__, "data/")
-krylov_depths = jnp.load(f"{directory}/{matrix_which}_krylov_depths.npy")
-times_fwdpass = jnp.load(f"{directory}/{matrix_which}_times_fwdpass.npy")
-times_custom = jnp.load(f"{directory}/{matrix_which}_times_custom.npy")
-times_autodiff = jnp.load(f"{directory}/{matrix_which}_times_autodiff.npy")
-norms_of_differences = jnp.load(f"{directory}/{matrix_which}_norms_of_differences.npy")
+directory = exp_util.matching_directory(__file__, "results/")
+krylov_depths = jnp.load(f"{directory}{matrix_which}_krylov_depths.npy")
+times_fwdpass = jnp.load(f"{directory}{matrix_which}_times_fwdpass.npy")
+times_custom = jnp.load(f"{directory}{matrix_which}_times_custom.npy")
+times_autodiff = jnp.load(f"{directory}{matrix_which}_times_autodiff.npy")
+norms_of_differences = jnp.load(f"{directory}{matrix_which}_norms_of_differences.npy")
 
 # Download the matrix itself (for plotting sparsity patterns)
 M = exp_util.suite_sparse_load(matrix_which, path="./data/matrices/")
