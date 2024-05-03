@@ -65,7 +65,7 @@ def gram_matvec_map():
     return matvec
 
 
-def gram_matvec_map_over_batch(*, batch_size: int):
+def gram_matvec_map_over_batch(*, num_batches: int):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
@@ -79,10 +79,10 @@ def gram_matvec_map_over_batch(*, batch_size: int):
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
             num, *shape = jnp.shape(x)
-            if num % batch_size != 0:
+            if num_batches % num != 0:
                 raise ValueError
 
-            x_batched = jnp.reshape(x, (num // batch_size, batch_size, *shape))
+            x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)
             return jnp.reshape(Kv_mapped, (-1,))
 
