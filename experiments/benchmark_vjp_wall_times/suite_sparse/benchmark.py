@@ -7,27 +7,28 @@ import time
 import jax.experimental.sparse
 import jax.flatten_util
 import jax.numpy as jnp
-from matfree_extensions import arnoldi
+from matfree_extensions import arnoldi, lanczos
 from matfree_extensions.util import exp_util
 
-# todo: should we include Lanczos in this argparse?
 # How to set up a test-matrix:
 #   Debug with "1138_bus" makes a great plot (small)
 #   Run with "gyro" (like 1138_bus, but 20,000 rows and 1 mio params.)
 parser = argparse.ArgumentParser()
+parser.add_argument("--name", type=str, required=True)
+parser.add_argument("--lanczos_or_arnoldi", type=str, required=True)
 parser.add_argument("--reortho", type=str, required=True)
-parser.add_argument("--name", type=str, default="")
 parser.add_argument("--which_matrix", type=str, default="1138_bus")
 parser.add_argument("--num_runs", type=int, default=3)
-parser.add_argument("--max_krylov_depth", type=int, default=200)
-parser.add_argument("--backprop_until", type=int, default=200)
+parser.add_argument("--max_krylov_depth", type=int, default=50)
+parser.add_argument("--backprop_until", type=int, default=50)
 parser.add_argument("--precompile", action="store_true")
 args = parser.parse_args()
 print(args)
 
 # Label the run (when saving to a file)
-LABEL = f"name_{args.name}"
-LABEL += f"_which_matrix_{args.which_matrix}"
+LABEL = f"{args.name}"
+LABEL += f"_{args.lanczos_or_arnoldi}"
+LABEL += f"_matrix_{args.which_matrix}"
 LABEL += f"_reortho_{args.reortho}"
 LABEL += f"_num_runs_{args.num_runs}"
 LABEL += f"_backprop_until_{args.backprop_until}"
@@ -36,11 +37,17 @@ LABEL += f"_precompile_{args.precompile}"
 print("Label:", LABEL)
 
 
-def decomposition(mv, /, *, unflatten_fun, reortho):
+def decomposition(mv, /, unflatten_fun, reortho, method):
     def make_decomp(kdepth, /, *, custom_vjp):
-        algorithm = arnoldi.hessenberg(
-            mv, kdepth, custom_vjp=custom_vjp, reortho=reortho
-        )
+        match_methods = {
+            "arnoldi": arnoldi.hessenberg(
+                mv, kdepth, custom_vjp=custom_vjp, reortho=reortho
+            ),
+            "lanczos": lanczos.tridiag(
+                mv, kdepth, custom_vjp=custom_vjp, reortho=reortho
+            ),
+        }
+        algorithm = match_methods[method]
 
         @jax.jit
         def decompose(f):
@@ -69,7 +76,7 @@ def matvec(x, p):
 n = M.shape[0]
 vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
 flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))
-make = decomposition(matvec, unflatten_fun=unflatten, reortho=args.reortho)
+make = decomposition(matvec, unflatten, args.reortho, args.lanczos_or_arnoldi)
 
 # Start looping
 times_fwdpass = []
