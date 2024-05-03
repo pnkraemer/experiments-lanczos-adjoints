@@ -2,10 +2,14 @@
 mfe/
 
 # Data
+.ssgetpy
 data/matrices/*
 !data/matrices/gyro
 !data/matrices/1138_bus
-.ssgetpy
+data/uci_processed/*
+!data/uci_processed/concrete_compressive_strength
+!data/uci_processed/combined_cycle_power_plant
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
