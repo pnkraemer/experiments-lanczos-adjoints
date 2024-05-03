@@ -11,7 +11,7 @@ from matfree_extensions import arnoldi, lanczos
 from matfree_extensions.util import exp_util
 
 # How to set up a test-matrix:
-#   Debug with "1138_bus" makes a great plot (small)
+#   Debug with "1138_bus" (small)
 #   Run with "gyro" (like 1138_bus, but 20,000 rows and 1 mio params.)
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, required=True)
