@@ -80,7 +80,9 @@ def gram_matvec_map_over_batch(*, batch_size: int):
         def matvec_map(x, y, v):
             num, *shape = jnp.shape(x)
             if num % batch_size != 0:
-                raise ValueError
+                raise ValueError(
+                    f"Batch size {batch_size} does not divide  data set size {num}."
+                )
 
             x_batched = jnp.reshape(x, (num // batch_size, batch_size, *shape))
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)
@@ -228,7 +230,7 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
     def logdet(A: Callable, /, key):
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
-
+        estimate = jax.checkpoint(estimate)
         keys = jax.random.split(key, num=slq_batch_num)
         values = jax.lax.map(lambda k: estimate(k), keys)
         return jnp.mean(values, axis=0) / 2

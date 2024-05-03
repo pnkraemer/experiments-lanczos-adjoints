@@ -2,9 +2,9 @@
 Script for error metrics of GP models on UCI (test) datasets.
 
 Currently, use either of the following datasets:
-* concrete_compressive_strength  (small)
-* combined_cycle_power_plant  (medium)
-* ___________________________   (large)
+* concrete_compressive_strength  (small) ~ 1,000
+* combined_cycle_power_plant  (medium)   ~ 10,000
+* airquality  (large)                    ~ 300,000
 * ___________________________   (very large)
 
 These are the GP methods/solvers available:
@@ -149,7 +149,8 @@ palette_20_colors = [
 palette = palette_20_colors
 ##### This is a draft version for quickly reading the data
 
-GP_METHODS_ARGS = ["adjoints", "naive", "gpytorch"]
+# GP_METHODS_ARGS = ["adjoints", "naive", "gpytorch"]
+GP_METHODS_ARGS = ["gpytorch"]
 ADJOINTS_KRY_ARGS = [1, 5, 10, 50, 100]
 
 

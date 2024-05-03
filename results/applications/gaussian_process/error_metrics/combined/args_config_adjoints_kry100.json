@@ -1,0 +1,11 @@
+{
+    "name_of_file": "gp_train",
+    "seed": 1,
+    "num_points": -1,
+    "num_epochs": 500,
+    "gp_method": "adjoints",
+    "slq_num_batches": 1,
+    "slq_krylov_depth": 100,
+    "slq_num_samples": 1,
+    "dataset": "combined_cycle_power_plant"
+}

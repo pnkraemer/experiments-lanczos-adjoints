@@ -72,16 +72,6 @@ class _ExactGPModel(gpytorch.models.ExactGP):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 
-def data_train_test_split_80_20(X, y, /, *, key):
-    """Split a data set into a training and a testing part."""
-    ints = jnp.arange(0, len(X))
-    ints_shuffled = jax.random.permutation(key, ints)
-
-    idx = len(X) // 5  # 20 percent test data
-    test, train = ints_shuffled[:idx], ints_shuffled[idx:]
-    return (X[train], y[train]), (X[test], y[test])
-
-
 def init_params_as_gpytorch(X, y):
     """Returns the same initialization hyperparameters as in GPyTorch"""
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
@@ -110,8 +100,8 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
         raise ValueError(msg)
 
     if which == "naive" or which == "adjoints":
-        _X = jnp.asarray(X.detach().cpu().numpy())
-        _y = jnp.asarray(y.detach().cpu().numpy()).ravel()
+        _X = jnp.asarray(X.detach().cpu().numpy(), dtype=float)
+        _y = jnp.asarray(y.detach().cpu().numpy(), dtype=float).ravel()
 
         # Log-pdf function
         if which == "naive":
@@ -138,9 +128,8 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
         #     gp.gram_matvec_full_batch()
         # )  # I chose this one, but any other could be possible
         # THIS GUY FOR SMALL DATA REGIME
-        print("HERE")
         gram_matvec = (
-            gp.gram_matvec_map_over_batch(batch_size=2)
+            gp.gram_matvec_map_over_batch(batch_size=args_solver["num_batches"])
             # gp.gram_matvec_map()
             # gp.gram_matvec_full_batch()
         )
@@ -234,9 +223,7 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                     value, grads = value_and_grad_gp(p_opt, inputs=X, targets=y)
                 elif which == "adjoints":
                     key, subkey = jax.random.split(key, num=2)
-                    value, grads = value_and_grad_gp(
-                        p_opt, subkey, inputs=X, targets=y
-                    )
+                    value, grads = value_and_grad_gp(p_opt, subkey, inputs=X, targets=y)
 
                 updates, state = optimizer.update(grads, state)
                 p_opt = optax.apply_updates(p_opt, updates)

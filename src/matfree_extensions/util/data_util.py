@@ -3,7 +3,6 @@
 import os
 import random
 from io import BytesIO
-from math import floor
 from typing import Literal, get_args
 from zipfile import ZipFile
 
@@ -27,6 +26,10 @@ UCI_DATASET_ARGS = Literal[
     "gassensors",
 ]
 UCI_DATASETS = get_args(UCI_DATASET_ARGS)
+
+
+def round_down_1000(num, divisor=1000):
+    return num - (num % divisor)
 
 
 def set_seed(seed):
@@ -65,7 +68,9 @@ def uci_preprocessing(inputs, targets, seed, device="cpu", verbose=False):
     X = X[shuffled_indices, :]
     y = y[shuffled_indices]
 
-    N_train = int(floor(0.8 * X.size(0)))
+    N_train = int(round_down_1000(0.8 * X.size(0)))
+    # N_train = 10_000
+    print(f"N_train: {N_train}")
     N_valid = 0
 
     # X_train = X[:N_train, :].contiguous().to(device)
