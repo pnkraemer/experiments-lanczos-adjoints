@@ -1,7 +1,6 @@
 """Measure the vjp-wall-time for a sparse matrix."""
 
 import argparse
-import functools
 import os
 import time
 
@@ -11,92 +10,91 @@ import jax.numpy as jnp
 from matfree_extensions import arnoldi
 from matfree_extensions.util import exp_util
 
+# How to set up a test-matrix:
+#   "t2dal_e" is diagonal, spd, and nicely small (5_000x5_000)
+#   "bloweybq" is not diagonal, spd, and nicely large. But ugly.
+#   "t3dl_e" is diagonal, spd, and nicely large (20_000x20_000)
+#   "af23560" is asymmetric and nicely large (~20_000x20_000)
+#   "gyro_k" makes a great plot (large)
+#   "1138_bus" makes a great plot (small)
 parser = argparse.ArgumentParser()
 parser.add_argument("--reortho", type=str, required=True)
+parser.add_argument("--name", type=str, default="")
+parser.add_argument("--which_matrix", type=str, default="1138_bus")
+parser.add_argument("--num_runs", type=int, default=3)
+parser.add_argument("--max_krylov_depth", type=int, default=200)
+parser.add_argument("--backprop_until", type=int, default=200)
 parser.add_argument("--precompile", action="store_true")
-parser.add_argument("--num_runs", type=int, required=True)
 args = parser.parse_args()
 print(args)
 
+# Label the run (when saving to a file)
+LABEL = f"name_{args.name}"
+LABEL += f"_which_matrix_{args.which_matrix}"
+LABEL += f"_reortho_{args.reortho}"
+LABEL += f"_num_runs_{args.num_runs}"
+LABEL += f"_backprop_until_{args.backprop_until}"
+LABEL += f"_max_krylov_depth_{args.max_krylov_depth}"
+LABEL += f"_precompile_{args.precompile}"
+print("Label:", LABEL)
 
-# n = 10_000
-seed = 1
+
+def decomposition(mv, /, *, unflatten_fun, reortho):
+    def make_decomp(kdepth, /, *, custom_vjp):
+        algorithm = arnoldi.hessenberg(
+            mv, kdepth, custom_vjp=custom_vjp, reortho=reortho
+        )
+
+        @jax.jit
+        def decompose(f):
+            output = algorithm(*unflatten_fun(f))
+            return jax.flatten_util.ravel_pytree(output)[0]
+
+        return decompose
+
+    return make_decomp
 
 
-# Set up a test-matrix
-# "t2dal_e" is diagonal, spd, and nicely small (5_000x5_000)
-# "bloweybq" is not diagonal, spd, and nicely large
-# "t3dl_e" is diagonal, spd, and nicely large (20_000x20_000)
-# "af23560" is asymmetric and nicely large (~20_000x20_000)
-# "gyro_k" makes a great plot (large)
-# "1138_bus" makes a great plot (small)
-matrix_which = "1138_bus"
 path = "./data/matrices/"
-
-# bounds =(17361-1, 17361+1)  # get the gyro* matrices
-# exp_util.suite_sparse_download(path=path, rowbounds=bounds, colbounds=bounds)
-M = exp_util.suite_sparse_load(matrix_which, path=path)
-print(M.shape)
-
-#
-# fig, ax = plt.subplots()
-# exp_util.plt_spy_coo(ax, M)
-# plt.show()
+M = exp_util.suite_sparse_load(args.which_matrix, path=path)
 
 params, params_unflatten = jax.flatten_util.ravel_pytree(M.data)
 
 
 @jax.jit
 def matvec(x, p):
-    # return p * x
     pp = params_unflatten(p)
-    P_ = jax.experimental.sparse.BCOO((pp, M.indices), shape=M.shape)
-    return P_ @ x
+    matrix = jax.experimental.sparse.BCOO((pp, M.indices), shape=M.shape)
+    return matrix @ x
 
 
+# Set up an initial vector and learn how to (un)flatten parameters
 n = M.shape[0]
-
-# Set up an initial vector
-vector = jax.random.normal(jax.random.PRNGKey(seed + 1), shape=(n,))
-
-# Flatten the inputs
+vector = jax.random.normal(jax.random.PRNGKey(1), shape=(n,))
 flat, unflatten = jax.flatten_util.ravel_pytree((vector, params))
+make = decomposition(matvec, unflatten_fun=unflatten, reortho=args.reortho)
 
-krylov_depths = []
+# Start looping
 times_fwdpass = []
 times_custom = []
 times_autodiff = []
 
-for krylov_depth in jnp.arange(10, 200, step=10):
-    krylov_depth = int(krylov_depth)
+krylov_depths = jnp.arange(10, args.max_krylov_depth, step=10, dtype=int)
+for krylov_depth in krylov_depths:
     print("Krylov-depth:", krylov_depth)
-    krylov_depths.append(krylov_depth)
 
-    # Construct a vector-to-vector decomposition function
-    def decompose(f, *, custom_vjp):  # todo: resolve noqa
-        algorithm = arnoldi.hessenberg(
-            matvec,
-            krylov_depth,  # noqa: B023
-            custom_vjp=custom_vjp,
-            reortho=args.reortho,
-        )
-        output = algorithm(*unflatten(f))
-        return jax.flatten_util.ravel_pytree(output)[0]
+    # Array(dtype=int) would not be static, so we transform
+    krylov_depth = int(krylov_depth)
 
     # Construct the two implementations
-    reference = jax.jit(functools.partial(decompose, custom_vjp=False))
-    implementation = jax.jit(functools.partial(decompose, custom_vjp=True))
-
-    # Compute both VJPs
+    reference = jax.jit(make(krylov_depth, custom_vjp=False))
+    implementation = jax.jit(make(krylov_depth, custom_vjp=True))
 
     # Compute a VJP into a random direction
-    # (This ignores potential symmetry/orthogonality constraints of the outputs.
-    # But we only care about speed at this point, so it is fine.)
-    key = jax.random.PRNGKey(seed + 2)
+    key = jax.random.PRNGKey(krylov_depth)
     dnu = jax.random.normal(key, shape=jnp.shape(reference(flat)))
 
-    fx_imp, vjp_imp = jax.vjp(implementation, flat)
-
+    print("Evaluating the forward pass")
     if args.precompile:
         _ = implementation(flat).block_until_ready()
 
@@ -108,18 +106,23 @@ for krylov_depth in jnp.arange(10, 200, step=10):
     times_fwdpass.append(time_fwdpass)
     print("Time (forward pass):\n\t", time_fwdpass)
 
+    print("Evaluating the forward+adjoint pass")
+    fx_imp, vjp_imp = jax.vjp(implementation, flat)
     vjp_imp = jax.jit(vjp_imp)
+
     if args.precompile:
         _ = vjp_imp(dnu)[0].block_until_ready()
+
     t0 = time.perf_counter()
     for _ in range(args.num_runs):
         _ = vjp_imp(dnu)[0].block_until_ready()
     t1 = time.perf_counter()
     time_custom = (t1 - t0) / args.num_runs
     times_custom.append(time_custom)
-    print("Time (custom VJP):\n\t", time_custom)
+    print("Time (adjoint):\n\t", time_custom)
 
-    if krylov_depth < 1000:
+    if krylov_depth < args.backprop_until:
+        print("Evaluating the forward+backprop pass")
         fx_ref, vjp_ref = jax.vjp(reference, flat)
         vjp_ref = jax.jit(vjp_ref)
 
@@ -134,17 +137,23 @@ for krylov_depth in jnp.arange(10, 200, step=10):
         times_autodiff.append(time_autodiff)
         print("Time (AutoDiff):\n\t", time_autodiff)
 
-        # print("Norm of VJP-difference:\n\t", diff)
-        print(
-            "Ratio of VJP run times (small is good):\n\t", time_custom / time_autodiff
-        )
+        msg = "Ratio of VJP run times (small is good)"
+        print(f"{msg}:\n\t", time_custom / time_autodiff)
 
     print()
 
-
-directory = exp_util.matching_directory(__file__, "data/")
+print("Saving to a file")
+directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
-jnp.save(f"{directory}/{matrix_which}_krylov_depths.npy", jnp.asarray(krylov_depths))
-jnp.save(f"{directory}/{matrix_which}_times_fwdpass.npy", jnp.asarray(times_fwdpass))
-jnp.save(f"{directory}/{matrix_which}_times_custom.npy", jnp.asarray(times_custom))
-jnp.save(f"{directory}/{matrix_which}_times_autodiff.npy", jnp.asarray(times_autodiff))
+
+path = f"{directory}/{LABEL}_krylov_depths.npy"
+jnp.save(path, jnp.asarray(krylov_depths))
+
+path = f"{directory}/{LABEL}_times_fwdpass.npy"
+jnp.save(path, jnp.asarray(times_fwdpass))
+
+path = f"{directory}/{LABEL}_times_custom.npy"
+jnp.save(path, jnp.asarray(times_custom))
+
+path = f"{directory}/{LABEL}_times_autodiff.npy"
+jnp.save(path, jnp.asarray(times_autodiff))
