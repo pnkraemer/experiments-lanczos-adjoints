@@ -2,9 +2,9 @@
 mfe/
 
 # Data
-data/matrices/
-!data/matrices/gyro  # good experiment
-!data/matrices/1138_bus  # good experiment
+data/matrices/*
+!data/matrices/gyro
+!data/matrices/1138_bus
 .ssgetpy
 
 # Byte-compiled / optimized / DLL files

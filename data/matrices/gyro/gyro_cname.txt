@@ -1,0 +1,12 @@
+det1pUX
+det1pUY
+det1pUZ
+det1mUX
+det1mUY
+det1mUZ
+det2pUX
+det2pUY
+det2pUZ
+det2mUX
+det2mUY
+det2mUZ
