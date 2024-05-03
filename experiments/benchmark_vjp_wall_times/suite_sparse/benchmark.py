@@ -14,7 +14,6 @@ from matfree_extensions.util import exp_util
 #   Debug with "1138_bus" (small)
 #   Run with "gyro" (like 1138_bus, but 20,000 rows and 1 mio params.)
 parser = argparse.ArgumentParser()
-parser.add_argument("--name", type=str, required=True)
 parser.add_argument("--lanczos_or_arnoldi", type=str, required=True)
 parser.add_argument("--reortho", type=str, required=True)
 parser.add_argument("--which_matrix", type=str, default="1138_bus")
@@ -26,9 +25,8 @@ args = parser.parse_args()
 print(args)
 
 # Label the run (when saving to a file)
-LABEL = f"{args.name}"
-LABEL += f"_{args.lanczos_or_arnoldi}"
-LABEL += f"_matrix_{args.which_matrix}"
+LABEL = f"{args.lanczos_or_arnoldi}"
+LABEL += f"_{args.which_matrix}"
 LABEL += f"_reortho_{args.reortho}"
 LABEL += f"_num_runs_{args.num_runs}"
 LABEL += f"_backprop_until_{args.backprop_until}"
@@ -83,7 +81,8 @@ times_fwdpass = []
 times_custom = []
 times_autodiff = []
 
-krylov_depths = jnp.arange(10, args.max_krylov_depth, step=10, dtype=int)
+n = args.max_krylov_depth // 10
+krylov_depths = jnp.arange(n, args.max_krylov_depth+n, step=n, dtype=int)
 for krylov_depth in krylov_depths:
     print("Krylov-depth:", krylov_depth)
 
