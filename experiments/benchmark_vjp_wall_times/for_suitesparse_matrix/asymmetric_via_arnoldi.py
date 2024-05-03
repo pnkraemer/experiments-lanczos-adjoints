@@ -10,13 +10,10 @@ import jax.numpy as jnp
 from matfree_extensions import arnoldi
 from matfree_extensions.util import exp_util
 
+# todo: should we include Lanczos in this argparse?
 # How to set up a test-matrix:
-#   "t2dal_e" is diagonal, spd, and nicely small (5_000x5_000)
-#   "bloweybq" is not diagonal, spd, and nicely large. But ugly.
-#   "t3dl_e" is diagonal, spd, and nicely large (20_000x20_000)
-#   "af23560" is asymmetric and nicely large (~20_000x20_000)
-#   "gyro_k" makes a great plot (large)
-#   "1138_bus" makes a great plot (small)
+#   Debug with "1138_bus" makes a great plot (small)
+#   Run with "gyro" (like 1138_bus, but 20,000 rows and 1 mio params.)
 parser = argparse.ArgumentParser()
 parser.add_argument("--reortho", type=str, required=True)
 parser.add_argument("--name", type=str, default="")
