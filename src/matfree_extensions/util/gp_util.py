@@ -65,7 +65,7 @@ def gram_matvec_map():
     return matvec
 
 
-def gram_matvec_map_over_batch(*, batch_size: int):
+def gram_matvec_map_over_batch(*, num_batches: int):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
@@ -79,12 +79,12 @@ def gram_matvec_map_over_batch(*, batch_size: int):
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
             num, *shape = jnp.shape(x)
-            if num % batch_size != 0:
+            if num_batches % num != 0:
                 raise ValueError(
-                    f"Batch size {batch_size} does not divide  data set size {num}."
+                    f"Number of batches {num_batches} does not divide  data set size {num}."
                 )
 
-            x_batched = jnp.reshape(x, (num // batch_size, batch_size, *shape))
+            x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)
             return jnp.reshape(Kv_mapped, (-1,))
 
@@ -211,7 +211,14 @@ def logpdf_cholesky() -> Callable:
     return logpdf
 
 
-def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Callable:
+def logpdf_lanczos(
+    krylov_depth,
+    /,
+    slq_sampler: Callable,
+    slq_batch_num: int,
+    cg_tol: float = 1e-5,  # same as in jax.scipy.sparse
+    cg_maxiter: int | None = None,  # same as in jax.scipy.sparse
+) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
 
     If this logpdf is plugged into mll_exact(), the returned mll function
@@ -224,7 +231,7 @@ def logpdf_lanczos(krylov_depth, /, slq_sampler: Callable, slq_batch_num) -> Cal
     """
 
     def solve(A: Callable, /, b):
-        result, _info = jax.scipy.sparse.linalg.cg(A, b)
+        result, _info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
         return result
 
     def logdet(A: Callable, /, key):

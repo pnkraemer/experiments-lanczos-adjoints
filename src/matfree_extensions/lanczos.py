@@ -144,12 +144,14 @@ def tridiag(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
         return _tridiag_reortho_full(matvec, krylov_depth, custom_vjp=custom_vjp)
     if reortho == "none":
         return _tridiag_reortho_none(matvec, krylov_depth, custom_vjp=custom_vjp)
-    raise ValueError
+
+    msg = f"reortho={reortho} unsupported. Choose eiter {'full', 'none'}."
+    raise ValueError(msg)
 
 
 def _tridiag_reortho_full(matvec, krylov_depth, /, *, custom_vjp):
     # Implement via Arnoldi to use the reorthogonalised adjoints.
-    # Todo: implement a dedicated function.
+    # The complexity difference is minimal with full reortho.
     alg = arnoldi.hessenberg(
         matvec, krylov_depth, custom_vjp=custom_vjp, reortho="full"
     )

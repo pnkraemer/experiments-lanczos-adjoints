@@ -2,7 +2,9 @@
 mfe/
 
 # Data
-./data/*
+data/matrices/*
+!data/matrices/gyro
+!data/matrices/1138_bus
 .ssgetpy
 
 # Byte-compiled / optimized / DLL files
