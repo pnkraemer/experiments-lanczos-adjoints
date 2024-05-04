@@ -6,6 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "matfree_extensions"
 version = "0.0.1"
 
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = [
+    "tests"
+]
+
+
 dependencies = [
     # Ensure that JAX is installed:
     "matfree",

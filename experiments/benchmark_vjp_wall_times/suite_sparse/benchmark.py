@@ -82,7 +82,7 @@ times_custom = []
 times_autodiff = []
 
 n = args.max_krylov_depth // 10
-krylov_depths = jnp.arange(n, args.max_krylov_depth+n, step=n, dtype=int)
+krylov_depths = jnp.arange(n, args.max_krylov_depth + n, step=n, dtype=int)
 for krylov_depth in krylov_depths:
     print("Krylov-depth:", krylov_depth)
 
