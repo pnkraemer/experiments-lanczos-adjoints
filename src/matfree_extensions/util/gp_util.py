@@ -160,10 +160,10 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
         mean_, cov_ = likelihood(**params_likelihood)(mean, cov)
 
         # Evaluate the log-pdf
-        value = logpdf(y, *params_logdet, mean=mean_, cov=cov_)
+        value, info = logpdf(y, *params_logdet, mean=mean_, cov=cov_)
 
         # Normalise by the number of data points because GPyTorch does
-        return value / len(x)
+        return value / len(x), info
 
     return mll
 
@@ -176,7 +176,7 @@ def logpdf_scipy_stats() -> Callable:
         cov_matrix = jax.jacfwd(cov)(mean)
 
         _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
-        return _logpdf_fun(y, mean=mean, cov=cov_matrix)
+        return _logpdf_fun(y, mean=mean, cov=cov_matrix), {}
 
     return logpdf
 
@@ -205,7 +205,7 @@ def logpdf_cholesky() -> Callable:
         # Combine the terms
         (n,) = jnp.shape(mean)
 
-        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
+        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), {}
 
     return logpdf
 
@@ -230,8 +230,8 @@ def logpdf_lanczos(
     """
 
     def solve(A: Callable, /, b):
-        result, _info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
-        return result
+        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
+        return result, info
 
     def logdet(A: Callable, /, key):
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
@@ -250,12 +250,12 @@ def logpdf_lanczos(
         logdet_ = logdet(cov, *params_logdet)
 
         # Mahalanobis norm
-        tmp = solve(cov, y - mean)
+        tmp, info = solve(cov, y - mean)
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms
         (n,) = jnp.shape(mean)
-        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
+        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
 
     return logpdf
 
@@ -288,8 +288,8 @@ def logpdf_lanczos_reuse(
     """
 
     def solve(A: Callable, b):
-        result, _info = jax.scipy.sparse.linalg.cg(A, b)
-        return result
+        result, info = jax.scipy.sparse.linalg.cg(A, b)
+        return result, info
 
     def logdet(A: Callable, key):
         integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
@@ -304,12 +304,12 @@ def logpdf_lanczos_reuse(
         logdet_ = logdet(cov, *params_logdet)
 
         # Mahalanobis norm
-        tmp = solve(cov, y - mean)
+        tmp, info = solve(cov, y - mean)
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms
         (n,) = jnp.shape(mean)
-        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi)
+        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
 
     return logpdf
 

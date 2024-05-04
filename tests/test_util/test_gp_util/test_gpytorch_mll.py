@@ -113,7 +113,7 @@ def test_mll_exact(logpdf, gram_matvec):
     def mll(p1, p2):
         return loss(x, y, *p_logpdf, params_prior=p1, params_likelihood=p2)
 
-    value, _grad = jax.value_and_grad(mll)(p_prior, p_likelihood)
+    (value, _info), _grad = jax.value_and_grad(mll, has_aux=True)(p_prior, p_likelihood)
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)
