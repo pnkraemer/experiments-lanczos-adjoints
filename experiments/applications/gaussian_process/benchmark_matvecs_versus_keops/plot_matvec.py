@@ -5,10 +5,6 @@ import matplotlib.pyplot as plt
 from matfree_extensions.util import exp_util
 from tueplots import axes, figsizes, fontsizes
 
-# todo: reduce all benchmarks to map, vmap, and keops
-# todo: clean up and simplify the plotting script
-# todo: simplify the experiment code and write a bash script to run it
-
 labels = {
     "gpytorch": "GPyTorch (via Keops)",
     "matfree_map": "Ours (via map)",
