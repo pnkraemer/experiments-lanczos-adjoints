@@ -67,9 +67,9 @@ def time_matfree(prng_seed, N: int, shape_in: tuple, mv, *, num_runs: int):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num_runs", type=int, required=True)
     parser.add_argument("--data_dim_min", type=int, required=True)
     parser.add_argument("--data_dim_max", type=int, required=True)
+    parser.add_argument("--num_runs", type=int, default=3)
     parser.add_argument("--data_size", type=int, default=40_000)
     args = parser.parse_args()
 
@@ -95,17 +95,15 @@ if __name__ == "__main__":
             results[label] = []
         results[label].append(t)
 
-        for bnum in reversed([1, 10, 200, 4000]):
-            if args.data_size >= bnum:
-                label = f"Matfree (via map-over-vmap; {bnum} batches)"
-                matvec = gp_util.gram_matvec_map_over_batch(num_batches=bnum)
-                t = time_matfree(
-                    seed, args.data_size, (dim,), mv=matvec, num_runs=args.num_runs
-                )
-                print_ts(t, label=label, num_runs=args.num_runs)
-                if label not in results:
-                    results[label] = []
-                results[label].append(t)
+        # for bnum in reversed([1, 10, 200, 4000]):
+        #     if args.data_size >= bnum:
+        #         label = f"Matfree (via map-over-vmap; {bnum} batches)"
+        #         matvec = gp_util.gram_matvec_map_over_batch(num_batches=bnum)
+        #         t = time_matfree(seed, args.data_size, (dim,), mv=matvec, num_runs=args.num_runs)
+        #         print_ts(t, label=label, num_runs=args.num_runs)
+        #         if not label in results:
+        #             results[label] = []
+        #         results[label].append(t)
 
         label = "Matfree (via JAX's vmap)"
         matvec = gp_util.gram_matvec_full_batch()
