@@ -1,23 +1,16 @@
 """Compare the efficiency of GPyTorch+KeOps to gp.gram_matvec_map()."""
 
+import os 
 import argparse
+import functools
 import time
 from typing import Callable
 
 import jax
 import jax.numpy as jnp
 from matfree import hutchinson
-from matfree_extensions.util import gp_util
+from matfree_extensions.util import gp_util, exp_util
 
-# Two components for memory efficient gradients: firstly, run
-#
-# jax.config.update("xla_python_client_preallocate", False)
-#
-# Secondly, checkpoint the gram_matvec code (done automatically # todo: don't do it automatically).
-# It is currently unclear where exactly to checkpoint, but current code runs so we are happy?
-#
-#
-#
 
 
 def print_ts(t: jax.Array, *, label: str, num_runs: int):
@@ -31,50 +24,47 @@ def print_ts(t: jax.Array, *, label: str, num_runs: int):
 def time_gp_mll(
     mv: Callable,
     vec: jax.Array,
+    input_dim: int,
     *,
     num_runs,
-    num_batches=10,
+    num_batches=1,
     num_samples=1,
     krylov_depth=10,
+    cg_tol=1.,
+    checkpoint_kernel: bool,
+    checkpoint_montecarlo: bool
 ):
     sampler = hutchinson.sampler_rademacher(vec, num=num_samples)
-    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
+    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=cg_tol, checkpoint=checkpoint_montecarlo)
 
-    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
+    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(input_dim,), shape_out=(), checkpoint=checkpoint_kernel)
 
     prior = gp_util.model(gp_util.mean_zero(), k, gram_matvec=mv)
     likelihood, p_likelihood = gp_util.likelihood_gaussian()
     loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf)
 
     xs = jnp.linspace(0, 1, num=len(vec), endpoint=True)
-    ys = xs
+    xs = jnp.stack([xs]*input_dim, axis=1)
+    ys = jnp.linspace(0, 1, num=len(vec), endpoint=True)
+
     key = jax.random.PRNGKey(1)
 
     p1_flat, unflatten_1 = jax.flatten_util.ravel_pytree(p_prior)
     p2_flat, unflatten_2 = jax.flatten_util.ravel_pytree(p_likelihood)
 
-    # Change this fun to value_and_grad, and memory blows up.
-    # I think it is because of a JVP of the operation (v \mapsto Kv),
-    # which accidentally assembles a dense matrix and asks for N^2 memory.
-
-    # todo: do we have to remat() the kernel matrix?
-    #  https://github.com/google/jax/pull/1749
-    #  https://github.com/google/jax/discussions/10131
-    #  and probably a bunch more.
-
     @jax.jit
-    @jax.value_and_grad
+    @functools.partial(jax.value_and_grad, has_aux=True)
     def fun(p1, p2):
         return loss(
             xs, ys, key, params_prior=unflatten_1(p1), params_likelihood=unflatten_2(p2)
         )
 
-    _value, _grad = fun(p1_flat, p2_flat)
+    (_value, _aux), _grad = fun(p1_flat, p2_flat)
 
     ts = []
     for _ in range(num_runs):
         t0 = time.perf_counter()
-        value, grad = fun(p1_flat, p2_flat)
+        (value, _aux), grad = fun(p1_flat, p2_flat)
         value.block_until_ready()
         grad.block_until_ready()
         t1 = time.perf_counter()
@@ -85,54 +75,54 @@ def time_gp_mll(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_runs", type=int, required=True)
-    parser.add_argument("--matrix_size_min", type=int, required=True)
-    parser.add_argument("--matrix_size_max", type=int, required=True)
+    parser.add_argument("--log_data_size", type=int, required=True)
+    parser.add_argument("--data_dim", type=int, required=True)
+    parser.add_argument("--checkpoint_kernel", action="store_true")
+    parser.add_argument("--checkpoint_matvec", action="store_true")
+    parser.add_argument("--checkpoint_montecarlo", action="store_true")
     args = parser.parse_args()
+    print(args)
 
-    powers = jnp.arange(args.matrix_size_min, args.matrix_size_max)
-    num_runs = args.num_runs
 
-    matrix_sizes = 2**powers
-    for idx, num in zip(powers, matrix_sizes):
-        # Use the current "size" as a seed
-        seed = idx
+    title = "mll"
+    title += f"_num_runs_{args.num_runs}"
+    title += f"_data_size_{2**args.log_data_size}"
+    title += f"_data_dim_{args.data_dim}"
+    if args.checkpoint_kernel:
+        title += "_checkpoint_kernel"
+    if args.checkpoint_matvec:
+        title += "checkpoint_matvec"
+    if args.checkpoint_montecarlo:
+        title += "_checkpoint_montecarlo"
 
-        print(f"\nI = {idx}, N = {num}")
-        print("------------------")
+    # Use the current "size" as a seed
+    seed = args.log_data_size
 
-        vec = jnp.ones((num,), dtype=float)
+    num = 2**args.log_data_size
+    results: dict[str, jax.Array] = {}
 
-        # 8 GB memory allows storing at most 44_000 rows/columns,
-        # but the process gets killed around 30_000 already
-        if num <= 30_000:
-            vmap_label = "Matfree (via JAX's vmap)"
-            vmap_matvec = gp_util.gram_matvec_full_batch()
-            vmap_t = time_gp_mll(vmap_matvec, vec, num_runs=num_runs)
-            print_ts(vmap_t, label=vmap_label, num_runs=num_runs)
+    print(f"\nN = {num}")
+    print("------------------")
 
-        if num >= 4096:
-            b4096_label = "Matfree (via map-over-vmap; 4096)"
-            b4096_matvec = gp_util.gram_matvec_map_over_batch(batch_size=4096)
-            b4096_t = time_gp_mll(b4096_matvec, vec, num_runs=num_runs)
-            print_ts(b4096_t, label=b4096_label, num_runs=num_runs)
+    vec = jnp.ones((num,), dtype=float)
 
-        if num >= 256:
-            b256_label = "Matfree (via map-over-vmap; 256)"
-            b256_matvec = gp_util.gram_matvec_map_over_batch(batch_size=256)
-            b256_t = time_gp_mll(b256_matvec, vec, num_runs=num_runs)
-            print_ts(b256_t, label=b256_label, num_runs=num_runs)
+    label = "matfree_vmap"
+    matvec = gp_util.gram_matvec_full_batch()
+    t = time_gp_mll(matvec, vec, args.data_dim, num_runs=args.num_runs, checkpoint_kernel=args.checkpoint_kernel, checkpoint_montecarlo=args.checkpoint_montecarlo)
+    print_ts(t, label=label, num_runs=args.num_runs)
+    results[label] = t 
 
-        if num >= 16:
-            b16_label = "Matfree (via map-over-vmap; 16)"
-            b16_matvec = gp_util.gram_matvec_map_over_batch(batch_size=16)
-            b16_t = time_gp_mll(b16_matvec, vec, num_runs=num_runs)
-            print_ts(b16_t, label=b16_label, num_runs=num_runs)
+    # label = "matfree_map"
+    # matvec = gp_util.gram_matvec_map(checkpoint=args.checkpoint_matvec)
+    # t = time_gp_mll(matvec, vec, args.data_dim,num_runs=args.num_runs, checkpoint_kernel=args.checkpoint_kernel, checkpoint_montecarlo=args.checkpoint_montecarlo)
+    # print_ts(t, label=label, num_runs=args.num_runs)
+    # results[label] = t 
 
-        # Using MAP is slooooooow
-        if num <= 50_000:
-            map_label = "Matfree (via JAX's map)"
-            map_matvec = gp_util.gram_matvec_map()
-            map_t = time_gp_mll(map_matvec, vec, num_runs=num_runs)
-            print_ts(map_t, label=map_label, num_runs=num_runs)
 
-        print()
+    print("\nSaving to a file")
+    directory = exp_util.matching_directory(__file__, "results/")
+    os.makedirs(directory, exist_ok=True)
+
+    for name, value in results.items():
+        path = f"{directory}/{title}_{name}.npy"
+        jnp.save(path, jnp.asarray(value))

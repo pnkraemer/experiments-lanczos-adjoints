@@ -42,7 +42,7 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
 #  gram_matvec_map_over_pmap_over_dense
 
 
-def gram_matvec_map():
+def gram_matvec_map(*, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by row-wise mapping.
@@ -52,11 +52,16 @@ def gram_matvec_map():
 
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
-            Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x)
+
+            # Why the checkpoint? See gram_matvec_map_over_batch.
+            if checkpoint:
+                matvec_single = jax.checkpoint(_matvec_single)
+            else:
+                matvec_single = _matvec_single 
+
+            Kv_mapped = jax.lax.map(lambda x_: matvec_single(x_, y, v), x)
             return jnp.reshape(Kv_mapped, (-1,))
 
-        # Why the checkpoint? See gram_matvec_map_over_batch.
-        @jax.checkpoint
         def _matvec_single(x_single, y, v):
             return gram_matrix(fun)(x_single[None, ...], y) @ v
 
@@ -65,7 +70,7 @@ def gram_matvec_map():
     return matvec
 
 
-def gram_matvec_map_over_batch(*, num_batches: int):
+def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
@@ -83,22 +88,26 @@ def gram_matvec_map_over_batch(*, num_batches: int):
                 msg = f"Batch-number {num_batches} does not divide dataset size {num}."
                 raise ValueError(msg)
 
+            # Why the checkpoint?
+            #  Because without a checkpoint, gradient-computation
+            #  would store all intermediate values, which is _exactly_ what
+            #  we want to avoid by calling this function instead of the full-batch
+            #  Gram-matvec.
+            #
+            #  See:
+            #   https://github.com/google/jax/pull/1749
+            #   https://github.com/google/jax/discussions/10131
+            if checkpoint:
+                matvec_single = jax.checkpoint(_matvec_single)
+            else:
+                matvec_single = _matvec_single 
+
             x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
-            Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)
+            Kv_mapped = jax.lax.map(lambda x_: matvec_single(x_, y, v), x_batched)
             return jnp.reshape(Kv_mapped, (-1,))
 
         matvec_dense_f = matvec_dense(fun)
 
-        # Why the checkpoint?
-        #  Because without a checkpoint, gradient-computation
-        #  would store all intermediate values, which is _exactly_ what
-        #  we want to avoid by calling this function instead of the full-batch
-        #  Gram-matvec.
-        #
-        #  See:
-        #   https://github.com/google/jax/pull/1749
-        #   https://github.com/google/jax/discussions/10131
-        @jax.checkpoint
         def _matvec_single(x_batched, y, v):
             return matvec_dense_f(x_batched, y, v)
 
@@ -216,6 +225,8 @@ def logpdf_lanczos(
     slq_sampler: Callable,
     slq_batch_num: int,
     cg_tol: float,
+    *,
+    checkpoint: bool,
     cg_maxiter: int | None = None,  # same as in jax.scipy.sparse.cg
 ) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
@@ -239,7 +250,8 @@ def logpdf_lanczos(
 
         # Memory-efficient reverse-mode derivatives
         #  See gram_matvec_map_over_batch().
-        estimate = jax.checkpoint(estimate)
+        if checkpoint:
+            estimate = jax.checkpoint(estimate)
 
         keys = jax.random.split(key, num=slq_batch_num)
         values = jax.lax.map(lambda k: estimate(k), keys)
@@ -388,7 +400,7 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
     return parametrize, params_like
 
 
-def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
+def kernel_scaled_rbf(*, shape_in, shape_out, checkpoint: bool) -> tuple[Callable, dict]:
     """Construct a (scaled) radial basis function kernel.
 
     The parametrisation equals that of GPyTorch's
@@ -396,7 +408,7 @@ def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """
 
     def parametrize(*, raw_lengthscale, raw_outputscale):
-        def k(x, y):
+        def _k(x, y):
             _assert_shapes(x, y, shape_in)
 
             # Apply a soft-plus because GPyTorch does
@@ -410,6 +422,10 @@ def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
             # Return the kernel function
             return outputscale * jnp.exp(-log_k / 2)
 
+        if checkpoint:
+            k = jax.checkpoint(_k)
+        else:
+            k = _k
         return k
 
     params_like = {
