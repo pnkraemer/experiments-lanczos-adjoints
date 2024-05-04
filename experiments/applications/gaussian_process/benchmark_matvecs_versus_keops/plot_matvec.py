@@ -1,7 +1,13 @@
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matfree_extensions.util import exp_util
+from tueplots import axes, figsizes, fontsizes
 
+plt.rcParams.update(figsizes.neurips2024(ncols=1, rel_width=0.5))
+plt.rcParams.update(fontsizes.neurips2024())
+plt.rcParams.update(axes.lines())
+plt.rcParams.update(axes.grid())
+plt.rcParams.update(axes.legend())
 labels = [
     "dim",
     "Matfree (via JAX's map)",
@@ -29,13 +35,15 @@ for key, value in results.items():
         print(inputs.shape)
         print(value.shape)
         if " map" in key:
-            plt.semilogy(inputs[: len(value)], jnp.amin(value, axis=1), label=key)
+            plt.loglog(inputs[: len(value)], jnp.amin(value, axis=1), label=key)
         else:
-            plt.semilogy(inputs, jnp.amin(value, axis=1), label=key)
+            plt.loglog(inputs, jnp.amin(value, axis=1), label=key)
         # plt.loglog(inputs, jnp.amax(value, axis=1), label=key)
 
-plt.grid(which="major", linestyle="dotted")
-plt.legend()
+plt.xlabel("Data dimension")
+plt.ylabel("Run time (sec)")
+plt.grid(which="major")
+plt.legend(fontsize="xx-small")
 plt.show()
 print(results)
 
@@ -71,7 +79,9 @@ for key, value in results.items():
             plt.loglog(inputs, jnp.amin(value, axis=1), label=key)
         # plt.loglog(inputs, jnp.amax(value, axis=1), label=key)
 
-plt.grid(which="major", linestyle="dotted")
-plt.legend()
+plt.xlabel("Data size")
+plt.ylabel("Run time (sec)")
+plt.grid(which="major")
+plt.legend(fontsize="xx-small")
 plt.show()
 print(results)
