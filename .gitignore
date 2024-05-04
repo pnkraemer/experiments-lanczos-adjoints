@@ -1,6 +1,9 @@
 #Environment
 mfe/
 
+# Results
+results/applications/gaussian_process/benchmark_matvecs_versus_keops/*
+
 # Data
 .ssgetpy
 data/matrices/*
