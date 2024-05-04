@@ -215,8 +215,8 @@ def logpdf_lanczos(
     /,
     slq_sampler: Callable,
     slq_batch_num: int,
-    cg_tol: float = 1e-5,  # same as in jax.scipy.sparse
-    cg_maxiter: int | None = None,  # same as in jax.scipy.sparse
+    cg_tol: float,
+    cg_maxiter: int | None = None,  # same as in jax.scipy.sparse.cg
 ) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
 
@@ -236,7 +236,11 @@ def logpdf_lanczos(
     def logdet(A: Callable, /, key):
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
+
+        # Memory-efficient reverse-mode derivatives
+        #  See gram_matvec_map_over_batch().
         estimate = jax.checkpoint(estimate)
+
         keys = jax.random.split(key, num=slq_batch_num)
         values = jax.lax.map(lambda k: estimate(k), keys)
         return jnp.mean(values, axis=0) / 2

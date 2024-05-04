@@ -29,7 +29,9 @@ def case_logpdf_lanczos_rademacher():
 
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
+    logpdf = gp_util.logpdf_lanczos(
+        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4
+    )
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
@@ -44,7 +46,9 @@ def case_logpdf_lanczos_normal():
 
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_normal(x_like, num=num_samples)
-    logpdf = gp_util.logpdf_lanczos(krylov_depth, sampler, slq_batch_num=num_batches)
+    logpdf = gp_util.logpdf_lanczos(
+        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4
+    )
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
