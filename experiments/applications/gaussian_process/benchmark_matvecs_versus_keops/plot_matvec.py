@@ -18,7 +18,9 @@ plt.rcParams.update(axes.legend())
 
 directory = exp_util.matching_directory(__file__, "results/")
 
-fig, axes = plt.subplot_mosaic([["per_size1","per_size4", "per_dim"]], sharex=False, sharey=True)
+fig, axes = plt.subplot_mosaic(
+    [["per_size1", "per_size4", "per_dim"]], sharex=False, sharey=True
+)
 
 
 print("Plotting data varied by dataset size")
@@ -32,7 +34,9 @@ for data_dim in [1, 4]:
             x = jnp.load(f"{directory}{title}_{method}.npy")
             times.append(x)
         times = jnp.asarray(times)
-        axes[f"per_size{data_dim}"].loglog(data_sizes, jnp.amin(times, axis=1), label=labels[method])
+        axes[f"per_size{data_dim}"].loglog(
+            data_sizes, jnp.amin(times, axis=1), label=labels[method]
+        )
 
     axes[f"per_size{data_dim}"].set_title(f"Dataset dimension: {data_dim}")
 

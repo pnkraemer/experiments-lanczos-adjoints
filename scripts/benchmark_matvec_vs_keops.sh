@@ -31,5 +31,3 @@ for i in {1..15}; do \
     # python experiments/applications/gaussian_process/benchmark_matvecs_versus_keops/benchmark_mll.py --num_runs 1 --log_data_size 10  --data_dim $i --checkpoint_matvec;
     # python experiments/applications/gaussian_process/benchmark_matvecs_versus_keops/benchmark_mll.py --num_runs 1 --log_data_size 10  --data_dim $i --checkpoint_montecarlo;
 done
-
-

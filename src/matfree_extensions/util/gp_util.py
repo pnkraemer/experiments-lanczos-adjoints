@@ -52,12 +52,11 @@ def gram_matvec_map(*, checkpoint: bool):
 
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
-
             # Why the checkpoint? See gram_matvec_map_over_batch.
             if checkpoint:
                 matvec_single = jax.checkpoint(_matvec_single)
             else:
-                matvec_single = _matvec_single 
+                matvec_single = _matvec_single
 
             Kv_mapped = jax.lax.map(lambda x_: matvec_single(x_, y, v), x)
             return jnp.reshape(Kv_mapped, (-1,))
@@ -100,7 +99,7 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
             if checkpoint:
                 matvec_single = jax.checkpoint(_matvec_single)
             else:
-                matvec_single = _matvec_single 
+                matvec_single = _matvec_single
 
             x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
             Kv_mapped = jax.lax.map(lambda x_: matvec_single(x_, y, v), x_batched)
@@ -269,7 +268,7 @@ def logpdf_lanczos(
         (n,) = jnp.shape(mean)
         return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
 
-    return logpdf
+    return logpdf, logdet
 
 
 def logpdf_lanczos_reuse(
@@ -400,7 +399,9 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
     return parametrize, params_like
 
 
-def kernel_scaled_rbf(*, shape_in, shape_out, checkpoint: bool) -> tuple[Callable, dict]:
+def kernel_scaled_rbf(
+    *, shape_in, shape_out, checkpoint: bool
+) -> tuple[Callable, dict]:
     """Construct a (scaled) radial basis function kernel.
 
     The parametrisation equals that of GPyTorch's
