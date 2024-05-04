@@ -117,11 +117,11 @@ if __name__ == "__main__":
             results[label] = []
         results[label].append(t)
 
-        gpytorch_label = "GPyTorch (via pykeops)"
-        gpytorch_t = time_gpytorch_via_pykeops(
+        label = "GPyTorch (via pykeops)"
+        t = time_gpytorch_via_pykeops(
             seed, args.data_size, (dim,), num_runs=args.num_runs
         )
-        print_ts(gpytorch_t, label=gpytorch_label, num_runs=args.num_runs)
+        print_ts(t, label=label, num_runs=args.num_runs)
         if label not in results:
             results[label] = []
         results[label].append(t)
