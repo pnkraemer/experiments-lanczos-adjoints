@@ -112,7 +112,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     lambda_k = dr + Q @ eta
     Lambda = jnp.zeros_like(Q)
     Gamma = jnp.zeros_like(dQ.T @ Q)
-    dp = jax.tree_util.tree_map(jnp.zeros_like, *params)
+    dp = jax.tree_util.tree_map(jnp.zeros_like, params)
 
     # Prepare more  auxiliary matrices
     Pi_xi = dQ.T + jnp.outer(eta, r)
@@ -156,7 +156,7 @@ def _adjoint(matvec, *params, Q, H, r, c, dQ, dH, dr, dc, reortho: str):
     # Solve for the input gradient
     dv = lambda_k * c
 
-    return dv, dp
+    return dv, *dp
 
 
 def _adjoint_step(
@@ -195,7 +195,7 @@ def _adjoint_step(
         lambda_k = lambda_k - P.T @ (P @ lambda_k) + P.T @ p
 
     # Transposed matvec and parameter-gradient in a single matvec
-    _, vjp = jax.vjp(matvec, q, *params)
+    _, vjp = jax.vjp(lambda u, v: matvec(u, *v), q, params)
     vecmat_lambda, dp_increment = vjp(lambda_k)
     dp = jax.tree_util.tree_map(lambda g, h: g + h, dp, dp_increment)
 

@@ -73,7 +73,7 @@ def case_gram_matvec_full_batch():
 
 @pytest_cases.case
 def case_gram_matvec_map_over_batch():
-    return gp_util.gram_matvec_map_over_batch(batch_size=1)
+    return gp_util.gram_matvec_map_over_batch(num_batches=1)
 
 
 @pytest_cases.case

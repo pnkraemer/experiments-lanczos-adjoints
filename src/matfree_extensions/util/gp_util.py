@@ -79,10 +79,9 @@ def gram_matvec_map_over_batch(*, num_batches: int):
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
             num, *shape = jnp.shape(x)
-            if num_batches % num != 0:
-                raise ValueError(
-                    f"Number of batches {num_batches} does not divide  data set size {num}."
-                )
+            if num % num_batches != 0:
+                msg = f"Batch-number {num_batches} does not divide dataset size {num}."
+                raise ValueError(msg)
 
             x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
             Kv_mapped = jax.lax.map(lambda x_: _matvec_single(x_, y, v), x_batched)

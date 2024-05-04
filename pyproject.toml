@@ -5,19 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "matfree_extensions"
 version = "0.0.1"
-
-
-[tool.pytest.ini_options]
-addopts = "-v"
-testpaths = [
-    "tests"
-]
-
-
 dependencies = [
     # Ensure that JAX is installed:
     "matfree",
 ]
+
+
+
 
 
 [project.optional-dependencies]
@@ -108,3 +102,10 @@ skip-magic-trailing-comma = true
 
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false
+
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = [
+    "tests"
+]
