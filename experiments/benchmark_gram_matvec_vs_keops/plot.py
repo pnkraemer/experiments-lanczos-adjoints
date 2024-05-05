@@ -38,14 +38,14 @@ plot_fun(
     markerfacecolor="white",
 )
 plot_fun(Ns, ts_bwd_custom, label="Custom VJP", color="C1")
-plot_fun(Ns, ts_bwd_checkpt, label="Ad+checkpt", color="C2")
+plot_fun(Ns, ts_bwd_checkpt, label="AD (checkpt)", color="C2")
 
 plt.xlabel("Data set size", fontsize="small")
 plt.ylabel("Run time (sec)", fontsize="small")
 plt.title("Gradients of kernel-vector products", fontsize="small")
 plt.grid()
 plt.ylim((0.08, 20.0))
-plt.legend(fontsize="x-small")
+plt.legend(fontsize="xx-small")
 
 
 directory = exp_util.matching_directory(__file__, "figures/")

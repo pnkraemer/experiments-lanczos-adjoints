@@ -6,124 +6,166 @@ import jax
 import jax.numpy as jnp
 from matfree_extensions.util import exp_util
 
+jax.config.update("jax_enable_compilation_cache", False)
+
+MAX_BATCH = 2**30
+"""We can fit MAX_BATCH * 32 bit values in memory."""
+
 
 def k(x, y, p):
     """Evaluate a square-exponential kernel."""
-    diff = x - y
-    return p[0] * jnp.exp(-p[1] * jnp.dot(diff, diff))
+    # maaaan, this is factor ~10 times faster than dot(x-y, x-y)
+    norm_sq = jnp.dot(x, x) + jnp.dot(y, y) - 2*jnp.dot(x, y)
+    
+
+    return p[0] * jnp.exp(-p[1] * norm_sq)
 
 
-@functools.partial(jax.jit, static_argnums=[0])
-def gram_map_checkpt(f, x, y, p, v):
-    """Evaluate a Gram-matrix-vector-product."""
-
-    @jax.checkpoint
-    def fx(z):
-        fun_v = jax.vmap(f, in_axes=(None, 0, None), out_axes=-1)
-        return jax.tree_util.tree_map(lambda s: jnp.dot(s, v), fun_v(z, y, p))
-
-    # Map over rows to reduce memory
-    return jax.lax.map(fx, x)
-
-
-@functools.partial(jax.jit, static_argnums=[0])
-def gram_map(f, x, y, p, v):
+@functools.partial(jax.jit, static_argnums=[0, 5])
+def gram_map_checkpt(f, x, y, p, v, batch_size):
     """Evaluate a Gram-matrix-vector-product."""
 
     def fx(z):
         fun_v = jax.vmap(f, in_axes=(None, 0, None), out_axes=-1)
         return jax.tree_util.tree_map(lambda s: jnp.dot(s, v), fun_v(z, y, p))
 
-    # Map over rows to reduce memory
-    return jax.lax.map(fx, x)
+    n, *shape = jnp.shape(x) 
+    x_ = jnp.reshape(x, (n // batch_size, batch_size, *shape))
+    mapped = jax.lax.map(jax.checkpoint(jax.vmap(fx)), x_)
+    return jax.tree_util.tree_map(lambda s: s.reshape((-1,)), mapped)
 
 
-def gram_map_fwd(f, x, y, p, v):
+@functools.partial(jax.jit, static_argnums=[0, 5])
+def gram_map(f, x, y, p, v, batch_size):
+    """Evaluate a Gram-matrix-vector-product."""
+
+    def fx(z):
+        fun_v = jax.vmap(f, in_axes=(None, 0, None), out_axes=-1)
+        return jax.tree_util.tree_map(lambda s: jnp.dot(s, v), fun_v(z, y, p))
+
+    n, *shape = jnp.shape(x) 
+    x_ = jnp.reshape(x, (n // batch_size, batch_size, *shape))
+    mapped = jax.lax.map(jax.vmap(fx), x_)
+    return jax.tree_util.tree_map(
+        lambda s: s.reshape((s.shape[0] * s.shape[1], -1)).squeeze(), mapped
+    )
+
+
+def gram_map_fwd(f, x, y, p, v, batch_size):
     """Evaluate a custom forward-pass for the Gram-matrix-vector-product."""
-    return gram_map(f, x, y, p, v), {"p": p, "v": v}
+    return gram_map(f, x, y, p, v, batch_size), {"p": p, "v": v}
 
 
-def gram_map_bwd(f, x, y, cache, df):
+def gram_map_bwd(f, x, y, batch_size, cache, df):
     """Evaluate a custom backward-pass for the Gram-matrix-vector-product."""
-    dv, tmp = gram_map(jax.value_and_grad(f, argnums=2), y, x, cache["p"], df)
+    # For some reason, two calls (one with f, one with jacrev)
+    # beat one call (value_and_grad).
+    # dv = gram_map(f, y, x, cache["p"], df, batch_size)
+    # tmp = gram_map(jax.jacrev(f, argnums=2), y, x, cache["p"], df, batch_size)
+    dv, tmp = gram_map(jax.value_and_grad(f, argnums=2), y, x, cache["p"], df, batch_size)
     return cache["v"].T @ tmp, dv
 
 
-def gradient(gram_fun, f, x, y):
+def gradient(gram_fun, f, x, y, batch_size):
     """Evaluate the gradient of a vector-Gram-matrix-vector-product."""
-    fun = functools.partial(gram_fun, f, x, y)
 
     def loss(p, v):
         key = jax.random.PRNGKey(1)
         u = jax.random.normal(key, shape=v.shape, dtype=v.dtype)
-        return u @ fun(p, v)
+        return u @ gram_fun(f, x, y, p, v, batch_size)
 
-    return jax.jit(jax.grad(loss, argnums=(0, 1)))
+    return jax.jit(jax.value_and_grad(loss, argnums=(0, 1)))
 
 
 # Assigning the AD functions
 gram_map_ad = gram_map
 
 gram_map_custom = gram_map
-gram_map_custom = jax.custom_vjp(gram_map_custom, nondiff_argnums=[0, 1, 2])
+gram_map_custom = jax.custom_vjp(gram_map_custom, nondiff_argnums=[0, 1, 2, 5])
 gram_map_custom.defvjp(gram_map_fwd, gram_map_bwd)
 
-Ns = 2 ** jnp.arange(5, 17, step=1, dtype=int)
+Ns = 2 ** jnp.arange(15, 20, step=1, dtype=int)
 ts_fwd = []
 ts_bwd_custom = []
 ts_bwd_checkpt = []
 ts_bwd_ad = []
 
+dim = 16
+
 for N in Ns:
-    print(f"\nN = {N}")
+    batch_size = jnp.minimum(N, MAX_BATCH // N)
+    print(f"\nN = {N}, batch_size = {batch_size}")
+
     # Create some test data
     X = jnp.linspace(0, 1, num=N)
-    Y = jnp.linspace(0, 1, num=N)
-    params = jnp.asarray([1.0, 1.0])
+    X = jnp.stack([X]*dim, axis=1)
+    Y = X
+    # Y = jnp.linspace(0, 1, num=N)
+    params = jnp.asarray([1.0, 1.])
     vector = jnp.linspace(0, 1, num=N)
 
-    print("Benchmark the forward pass.")
-    gram_map(k, X, Y, params, vector).block_until_ready()  # pre-compile
+    print("Benchmark the forward pass.", end=" ")
+    fun = jax.jit(gram_map, static_argnums=[0, 5])
+    fun(k, X, Y, params, vector, int(batch_size)).block_until_ready()  # pre-compile
     t0 = time.perf_counter()
-    gram_map(k, X, Y, params, vector).block_until_ready()
-    ts_fwd.append(time.perf_counter() - t0)
+    fun(k, X, Y, params, vector, int(batch_size)).block_until_ready()
+    t1 = time.perf_counter() - t0
+    ts_fwd.append(t1)
+    print(t1)
 
-    if N <= 17_000:
-        print("Benchmark the forward+backward pass (autodiff).")
+    if N <= 16_000:
+        print("Benchmark the forward+backward pass (autodiff).", end=" ")
         # Pre-compile
-        (d0, d1) = gradient(gram_map_ad, k, X, Y)(params, vector)
+        fun = jax.jit(gradient(gram_map_ad, k, X, Y, int(batch_size)))
+        v0, (d0, d1) = fun(params, vector)
+        v0.block_until_ready()
         d0.block_until_ready()
         d1.block_until_ready()
 
         t0 = time.perf_counter()
-        (d0, d1) = gradient(gram_map_ad, k, X, Y)(params, vector)
+        v0, (d0, d1) = fun(params, vector)
+        v0.block_until_ready()
         d0.block_until_ready()
         d1.block_until_ready()
-        ts_bwd_ad.append(time.perf_counter() - t0)
+        t1 = time.perf_counter() - t0
+        ts_bwd_ad.append(t1)
+        print(t1)
 
-    print("Benchmark the forward+backward pass (autodiff+checkpoint).")
+    print("Benchmark the forward+backward pass (autodiff+checkpoint).", end=" ")
     # Pre-compile
-    (d0, d1) = gradient(gram_map_checkpt, k, X, Y)(params, vector)
+    fun = jax.jit(gradient(gram_map_checkpt, k, X, Y, int(batch_size)))
+
+    v0, (d0, d1) = fun(params, vector)
+    v0.block_until_ready()
     d0.block_until_ready()
     d1.block_until_ready()
 
     t0 = time.perf_counter()
-    (d0, d1) = gradient(gram_map_checkpt, k, X, Y)(params, vector)
+    v0, (d0, d1) = fun(params, vector)
+    v0.block_until_ready()
     d0.block_until_ready()
     d1.block_until_ready()
-    ts_bwd_checkpt.append(time.perf_counter() - t0)
+    t1 = time.perf_counter() - t0
+    ts_bwd_checkpt.append(t1)
+    print(t1)
 
-    print("Benchmark the forward+backward pass (custom).")
-    # Pre-compile
-    (d0, d1) = gradient(gram_map_custom, k, X, Y)(params, vector)
-    d0.block_until_ready()
-    d1.block_until_ready()
+    # print("Benchmark the forward+backward pass (custom).", end=" ")
+    # # Pre-compile
+    # fun = jax.jit(gradient(gram_map_custom, k, X, Y, batch_size=int(batch_size)))
 
-    t0 = time.perf_counter()
-    (d0, d1) = gradient(gram_map_custom, k, X, Y)(params, vector)
-    d0.block_until_ready()
-    d1.block_until_ready()
-    ts_bwd_custom.append(time.perf_counter() - t0)
+    # v0, (d0, d1) = fun(params, vector)
+    # v0.block_until_ready()
+    # d0.block_until_ready()
+    # d1.block_until_ready()
+
+    # t0 = time.perf_counter()
+    # v0, (d0, d1) = fun(params, vector)
+    # v0.block_until_ready()
+    # d0.block_until_ready()
+    # d1.block_until_ready()
+    # t1 = time.perf_counter() - t0
+    # ts_bwd_custom.append(t1)
+    # print(t1)
 
 
 print("Saving to a file")
