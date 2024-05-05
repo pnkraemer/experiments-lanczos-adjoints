@@ -46,7 +46,7 @@ def time_gpytorch_via_pykeops(prng_seed, N: int, shape_in: tuple, *, num_runs: i
     torch.manual_seed(prng_seed)
     x = torch.randn((N, *shape_in))
     vec = torch.randn((N,))
-    kernel = gpytorch.kernels.keops.MaternKernel(nu=1.5)
+    kernel = gpytorch.kernels.keops.RBFKernel()
     kernel = gpytorch.kernels.ScaleKernel(kernel)
     return time_matvec(lambda v, p: kernel(p) @ v, vec, x, num_runs=num_runs)
 
@@ -56,7 +56,7 @@ def time_matfree(prng_seed, N: int, shape_in: tuple, mv, *, num_runs: int):
     key1, key2 = jax.random.split(prng_key)
     x = jax.random.normal(key1, shape=(N, *shape_in))
     vec = jax.random.normal(key1, shape=(N,))
-    kernel, params = gp_util.kernel_scaled_matern_32(shape_in=shape_in, shape_out=())
+    kernel, params = gp_util.kernel_scaled_rbf(shape_in=shape_in, shape_out=(), checkpoint=False)
     fun = jax.jit(mv(kernel(**params)))
 
     def matvec_fun(v, p):
@@ -87,14 +87,16 @@ if __name__ == "__main__":
     # Start the simulation
     results: dict[str, jax.Array] = {}
 
-    label = "matfree_map"
-    matvec = gp_util.gram_matvec_map()
-    t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
-    print_ts(t, label, num_runs=args.num_runs)
-    results[label] = t
+    if 2**args.log_data_size <= 200_000:
+        label = "matfree_map"
+        matvec = gp_util.gram_matvec_map(checkpoint=True)
+        t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
+        print_ts(t, label, num_runs=args.num_runs)
+        results[label] = t
 
     label = "matfree_vmap"
-    matvec = gp_util.gram_matvec_full_batch()
+    matvec = gp_util.gram_matvec_map_over_batch(num_batches=128, checkpoint=True)
+    # matvec = gp_util.gram_matvec_full_batch()
     t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
     print_ts(t, label, num_runs=args.num_runs)
     results[label] = t

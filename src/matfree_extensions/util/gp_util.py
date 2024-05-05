@@ -417,11 +417,13 @@ def kernel_scaled_rbf(
             outputscale = _softplus(raw_outputscale)
 
             # Compute the norm of the differences
-            diff = (x - y) / lengthscale
-            log_k = jnp.dot(diff, diff)
+            # diff = (x - y) #/ lengthscale
+            # log_k = jnp.dot(diff, diff)
+            log_k = jnp.dot(x, x) + jnp.dot(y, y) - 2*jnp.dot(x, y)
+            # log_k /= lengthscale 
 
             # Return the kernel function
-            return outputscale * jnp.exp(-log_k / 2)
+            return outputscale * jnp.exp(-log_k / (2*lengthscale))
 
         if checkpoint:
             k = jax.checkpoint(_k)
