@@ -36,12 +36,7 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
     return parametrise
 
 
-# todo: implement
-#  gram_matvec_pmap_over_dense
-#  gram_matvec_map_over_pmap
-#  gram_matvec_map_over_pmap_over_dense
-
-
+# todo: call this gram_matvec_sequential()?
 def gram_matvec_map(*, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
@@ -60,23 +55,26 @@ def gram_matvec_map(*, checkpoint: bool):
 
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
-            # Why the checkpoint? See gram_matvec_map_over_batch.
+            mv = matvec_single(y, v)
             if checkpoint:
-                matvec_single = jax.checkpoint(_matvec_single)
-            else:
-                matvec_single = _matvec_single
+                mv = jax.checkpoint(mv)
 
-            Kv_mapped = jax.lax.map(lambda x_: matvec_single(x_, y, v), x)
-            return jnp.reshape(Kv_mapped, (-1,))
+            mapped = jax.lax.map(mv, x)
+            return jnp.reshape(mapped, (-1,))
 
-        def _matvec_single(x_single, y, v):
-            return gram_matrix(fun)(x_single[None, ...], y) @ v
+        def matvec_single(y, v):
+            def mv(x_single):
+                return gram_matrix(fun)(x_single[None, ...], y) @ v
+
+            return mv
 
         return matvec_map
 
     return matvec
 
 
+# todo: call this gram_matvec_partitioned()?
+# todo: rename num_batches to num_partitions?
 def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
@@ -102,34 +100,37 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
         to, say, the nearest power of 2,
         or select a different number of batches.
     """
-    matvec_dense = gram_matvec_full_batch()
 
     def matvec(fun: Callable) -> Callable:
         def matvec_map(x, y, v):
             num, *shape = jnp.shape(x)
             if num % num_batches != 0:
-                msg = f"Batch-number {num_batches} does not divide dataset size {num}."
+                msg = f"num_batches = {num_batches} does not divide dataset size {num}."
                 raise ValueError(msg)
 
+            mv = matvec_single(y, v)
             if checkpoint:
-                matvec_single = jax.checkpoint(_matvec_single)
-            else:
-                matvec_single = _matvec_single
+                mv = jax.checkpoint(mv)
 
             x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
-            Kv_mapped = jax.lax.map(lambda x_: matvec_single(x_, y, v), x_batched)
-            return jnp.reshape(Kv_mapped, (-1,))
+            mapped = jax.lax.map(mv, x_batched)
+            return jnp.reshape(mapped, (-1,))
 
+        matvec_dense = gram_matvec_full_batch()
         matvec_dense_f = matvec_dense(fun)
 
-        def _matvec_single(x_batched, y, v):
-            return matvec_dense_f(x_batched, y, v)
+        def matvec_single(y, v):
+            def mv(x_batched):
+                return matvec_dense_f(x_batched, y, v)
+
+            return mv
 
         return matvec_map
 
     return matvec
 
 
+# todo: call this gram_matvec()?
 def gram_matvec_full_batch():
     """Turn a covariance function into a gram-matrix vector product.
 
@@ -157,15 +158,15 @@ def gram_matrix(fun: Callable, /) -> Callable:
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
 
 
-# Todo: Ask for a shape input?
+# Todo: Ask for a shape input to have lengthscales per dimension?
 def likelihood_gaussian() -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def parametrise(*, raw_noise):
+        # Apply a soft-plus because GPyTorch does
         noise = _softplus(raw_noise)
 
         def likelihood(mean, cov):
-            # Apply a soft-plus because GPyTorch does
             return mean, lambda v: cov(v) + noise * v
 
         return likelihood
@@ -233,6 +234,7 @@ def logpdf_cholesky() -> Callable:
     return logpdf
 
 
+# todo: rename slq_* to mc_* to indicate monte carlo sampling?
 def logpdf_lanczos(
     krylov_depth,
     /,
@@ -244,6 +246,12 @@ def logpdf_lanczos(
     cg_maxiter: int | None = None,  # same as in jax.scipy.sparse.cg
 ) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
+
+    Vocabulary:
+        "CG" = "Conjugate gradient solver"
+        "Lanczos" = The "Lanczos" iteration
+        "SLQ" = "Stochastic Lanczos quadrature"
+        (which combines Monte Carlo estimation with the Lanczos iteration)
 
     If this logpdf is plugged into mll_exact(), the returned mll function
     evaluates as mll(x, y, key, params_prior=...)
@@ -389,8 +397,9 @@ def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
-            diff = jnp.sqrt(3) * (x - y) / lengthscale
-            scaled = jnp.dot(diff, diff)
+            x = jnp.sqrt(3) * x / lengthscale
+            y = jnp.sqrt(3) * y / lengthscale
+            scaled = jnp.dot(x, x) + jnp.dot(y, y) - 2 * jnp.dot(x, y)
 
             # Shift by epsilon to guarantee differentiable sqrts
             epsilon = jnp.finfo(scaled).eps
@@ -422,8 +431,9 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
             outputscale = _softplus(raw_outputscale)
 
             # Compute the norm of the differences
-            diff = (x - y) / lengthscale
-            scaled = jnp.dot(diff, diff)
+            x /= lengthscale
+            y /= lengthscale
+            scaled = jnp.dot(x, x) + jnp.dot(y, y) - 2 * jnp.dot(x, y)
 
             # Shift by epsilon to guarantee differentiable sqrts
             epsilon = jnp.finfo(scaled).eps
