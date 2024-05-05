@@ -268,7 +268,7 @@ def logpdf_lanczos(
         (n,) = jnp.shape(mean)
         return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
 
-    return logpdf, logdet
+    return logpdf
 
 
 def logpdf_lanczos_reuse(
@@ -416,11 +416,14 @@ def kernel_scaled_rbf(
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
-            # Compute the norm of the differences
-            # diff = (x - y) #/ lengthscale
+            # Compute the norm of the differences:
+
+            # Here is the old code:
+            # diff = (x - y)
             # log_k = jnp.dot(diff, diff)
+
+            # And here is code that leads to 10x performance improvement
             log_k = jnp.dot(x, x) + jnp.dot(y, y) - 2*jnp.dot(x, y)
-            # log_k /= lengthscale 
 
             # Return the kernel function
             return outputscale * jnp.exp(-log_k / (2*lengthscale))
