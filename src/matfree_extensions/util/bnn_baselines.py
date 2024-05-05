@@ -25,9 +25,12 @@ def exact_diagonal(
 
         def body_fn(n, res):
             def single_dim_grad(carry, output_dim):
-                model_single_dim = lambda p: (
-                    model_fn(p, x_train_batch[n])[output_dim]
-                )[0]
+                def model_single_dim(p):
+                    return model_fn(p, x_train_batch[n])[output_dim][0]
+
+                # model_single_dim = lambda p: (
+                #     model_fn(p, x_train_batch[n])[output_dim]
+                # )[0]
                 new_grad = jax.grad(model_single_dim)(params)
                 out = jax.tree_map(lambda x, y: x + y**2, carry, new_grad)
                 return out, None
@@ -36,9 +39,9 @@ def exact_diagonal(
             grad, _ = jax.lax.scan(single_dim_grad, scan_init, output_dim_vec)
             return jax.tree_map(lambda x, y: x + y, res, grad)
 
-        diag = jax.lax.fori_loop(0, n_data_pts, body_fn, diag_init)
-        return diag
-    elif likelihood == "classification":
+        return jax.lax.fori_loop(0, n_data_pts, body_fn, diag_init)
+
+    if likelihood == "classification":
         output_dim_vec = jnp.arange(output_dim)
         grid = jnp.meshgrid(output_dim_vec, output_dim_vec)
         coord_list = [entry.ravel() for entry in grid]
@@ -54,12 +57,13 @@ def exact_diagonal(
 
             def single_dim_grad(carry, output_dims):
                 o_1, o_2 = output_dims
-                model_single_dim_1 = lambda p: (
-                    model_fn(p, x_train_batch[n][None, ...])[0, o_1]
-                )
-                model_single_dim_2 = lambda p: (
-                    model_fn(p, x_train_batch[n][None, ...])[0, o_2]
-                )
+
+                def model_single_dim_1(p):
+                    return model_fn(p, x_train_batch[n][None, ...])[0, o_1]
+
+                def model_single_dim_2(p):
+                    return model_fn(p, x_train_batch[n][None, ...])[0, o_2]
+
                 new_grad_1 = jax.grad(model_single_dim_1)(params)
                 new_grad_2 = jax.grad(model_single_dim_2)(params)
                 h = H.at[0, o_1, o_2].get()
@@ -72,8 +76,10 @@ def exact_diagonal(
             del H
             return jax.tree_map(lambda x, y: x + y, res, grad)
 
-        diag = jax.lax.fori_loop(0, n_data_pts, body_fn, diag_init)
-        return diag
+        return jax.lax.fori_loop(0, n_data_pts, body_fn, diag_init)
+
+    msg = f"Argument likelihood = {likelihood} unknown."
+    raise ValueError(msg)
 
 
 def random_split_like_tree(rng_key, target=None, treedef=None):
@@ -89,14 +95,13 @@ def tree_random_normal_like(rng_key, target, n_samples: Optional[int] = None):
     keys_tree = random_split_like_tree(rng_key, target)
     if n_samples is None:
         return jax.tree_util.tree_map(
-            lambda l, k: jax.random.normal(k, l.shape, l.dtype), target, keys_tree
+            lambda ell, k: jax.random.normal(k, ell.shape, ell.dtype), target, keys_tree
         )
-    else:
-        return jax.tree_util.tree_map(
-            lambda l, k: jax.random.normal(k, (n_samples,) + l.shape, l.dtype),
-            target,
-            keys_tree,
-        )
+    return jax.tree_util.tree_map(
+        lambda ell, k: jax.random.normal(k, (n_samples, *ell.shape), ell.dtype),
+        target,
+        keys_tree,
+    )
 
 
 @partial(
@@ -144,10 +149,9 @@ def hutchinson_diagonal(
                 eps = tree_random_normal_like(key, control_variate)
                 c_v = tm.Vector(control_variate) * tm.Vector(eps)
                 gvp = gvp_fn(eps)
-                new_diag = (
+                return (
                     tm.Vector(eps) * (tm.Vector(gvp) - c_v) + tm.Vector(control_variate)
                 ).tree
-                return new_diag
 
             diag = single_eps_diag(key_list)
             return jax.tree_map(lambda x: x.mean(axis=0), diag)

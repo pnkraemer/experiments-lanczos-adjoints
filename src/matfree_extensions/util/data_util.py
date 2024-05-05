@@ -8,7 +8,7 @@ from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-import requests
+import requests  # type: ignore
 import torch
 import torch.nn.functional as F
 import torch.utils.data as data
@@ -236,7 +236,8 @@ def get_cifar10(
     std = (train_dataset.data / 255.0).std(axis=(0, 1, 2))
     normalize = image_to_numpy(means, std)
     test_transform = normalize
-    # For training, we add some augmentation. Networks are too powerful and would overfit.
+    # For training, we add some augmentation.
+    # Networks are too powerful and would overfit.
     if purp == "train":
         train_transform = T.Compose(
             [
@@ -311,8 +312,8 @@ def get_cifar10(
     )
     if return_dataset:
         return train_set.dataset, val_set.dataset, test_set.dataset
-    else:
-        return train_loader, val_loader, test_loader
+
+    return train_loader, val_loader, test_loader
 
 
 def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0):

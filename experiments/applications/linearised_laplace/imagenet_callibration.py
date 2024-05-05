@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from jax_models.models.swin_transformer import *
-from jax_models.models.van import *
+from jax_models.models.van import van_tiny
 from matfree_extensions.util import bnn_util, data_util, exp_util
 
 seed = 0
