@@ -13,7 +13,7 @@ def k(x, y, p):
 
 
 @functools.partial(jax.jit, static_argnums=[0])
-def gram(f, x, y, p, v):
+def gram_map(f, x, y, p, v):
     """Evaluate a Gram-matrix-vector-product."""
 
     def fx(z):
@@ -36,20 +36,20 @@ def autodiff(gram_fun, f, x, y):
     return jax.jit(jax.value_and_grad(loss, argnums=(0, 1)))
 
 
-def gram_fwd(f, x, y, p, v):
+def gram_map_fwd(f, x, y, p, v):
     """Evaluate a custom forward-pass for the Gram-matrix-vector-product."""
-    return gram(f, x, y, p, v), {"p": p, "v": v}
+    return gram_map(f, x, y, p, v), {"p": p, "v": v}
 
 
-def gram_bwd(f, x, y, cache, df):
+def gram_map_bwd(f, x, y, cache, df):
     """Evaluate a custom backward-pass for the Gram-matrix-vector-product."""
-    dv = gram(f, y, x, cache["p"], df)
-    dp = gram(jax.grad(f, argnums=2), y, x, cache["p"], df)
+    dv = gram_map(f, y, x, cache["p"], df)
+    dp = gram_map(jax.grad(f, argnums=2), y, x, cache["p"], df)
     return cache["v"].T @ dp, dv
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--custom_ad", action=argparse.BooleanOptionalAction)
+parser.add_argument("--custom_ad", action="store_true")
 parser.add_argument("--data_size", type=int, required=True)
 args = parser.parse_args()
 
@@ -62,26 +62,26 @@ vector = jnp.linspace(0, 1, num=args.data_size)
 
 if args.custom_ad:
     print("Setting a clever gradient...")
-    gram = jax.custom_vjp(gram, nondiff_argnums=[0, 1, 2])
-    gram.defvjp(gram_fwd, gram_bwd)
+    gram_map = jax.custom_vjp(gram_map, nondiff_argnums=[0, 1, 2])
+    gram_map.defvjp(gram_map_fwd, gram_map_bwd)
 
 print("Benchmark the forward pass.")
-gram(k, X, Y, params, vector).block_until_ready()  # pre-compile
+gram_map(k, X, Y, params, vector).block_until_ready()  # pre-compile
 t0 = time.perf_counter()
-gram(k, X, Y, params, vector).block_until_ready()
+gram_map(k, X, Y, params, vector).block_until_ready()
 print("\tRun time:", time.perf_counter() - t0)
 
 
 print("Benchmark the forward+backward pass.")
 
 # Pre-compile
-val, (d0, d1) = autodiff(gram, k, X, Y)(params, vector)
+val, (d0, d1) = autodiff(gram_map, k, X, Y)(params, vector)
 val.block_until_ready()
 d0.block_until_ready()
 d1.block_until_ready()
 
 t0 = time.perf_counter()
-val, (d0, d1) = autodiff(gram, k, X, Y)(params, vector)
+val, (d0, d1) = autodiff(gram_map, k, X, Y)(params, vector)
 val.block_until_ready()
 d0.block_until_ready()
 d1.block_until_ready()
