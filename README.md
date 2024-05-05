@@ -76,11 +76,12 @@ Look at tests for how to use the library functions.
 
 # Some useful benchmarking information
 
-Unless specified otherwise, let's use
+* Unless specified otherwise, let's use
 ```commandline
 module load python/3.11
 module load cuda/12.1  # pytorch needs 12.1
 ```
-For XLA_PYTHON_CLIENT_PREALLOCATE=false and other OOM tricks, see [here](https://jax.readthedocs.io/en/latest/gpu_memory_allocation.html)).
 
-For benchmarking python code, there is the `timeit` module; but a simple `import time; time.perf_counter()` often works.
+* For ``XLA_PYTHON_CLIENT_PREALLOCATE=false`` and other OOM tricks, see [here](https://jax.readthedocs.io/en/latest/gpu_memory_allocation.html)).
+* For benchmarking python code, there is the `timeit` module; but a simple `import time; time.perf_counter()` often works.
+* Benchmarking memory usage of JAX programs is difficult; there is `jax.devices()[0].memory_stats()`, but it is often easier to report for which configuration a process gets killed or compilation time as decent proxies.
