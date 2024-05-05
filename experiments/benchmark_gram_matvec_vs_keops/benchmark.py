@@ -1,9 +1,10 @@
-import argparse
 import functools
+import os
 import time
 
 import jax
 import jax.numpy as jnp
+from matfree_extensions.util import exp_util
 
 
 def k(x, y, p):
@@ -47,39 +48,63 @@ def gradient(gram_fun, f, x, y):
     return jax.jit(jax.grad(loss, argnums=(0, 1)))
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--custom_ad", action="store_true")
-parser.add_argument("--data_size", type=int, required=True)
-args = parser.parse_args()
+# Assigning the AD functions
+gram_map_ad = gram_map
+gram_map_custom = gram_map
+gram_map_custom = jax.custom_vjp(gram_map_custom, nondiff_argnums=[0, 1, 2])
+gram_map_custom.defvjp(gram_map_fwd, gram_map_bwd)
 
-# Create some test data
-X = jnp.linspace(0, 1, num=args.data_size)
-Y = jnp.linspace(0, 1, num=args.data_size)
-params = jnp.asarray([1.0, 1.0])
-vector = jnp.linspace(0, 1, num=args.data_size)
+Ns = 2 ** jnp.arange(1, 15, step=1, dtype=int)
+ts_fwd = []
+ts_bwd_custom = []
+ts_bwd_ad = []
+
+for N in Ns:
+    print(f"\nN = {N}")
+    # Create some test data
+    X = jnp.linspace(0, 1, num=N)
+    Y = jnp.linspace(0, 1, num=N)
+    params = jnp.asarray([1.0, 1.0])
+    vector = jnp.linspace(0, 1, num=N)
+
+    print("Benchmark the forward pass.")
+    gram_map(k, X, Y, params, vector).block_until_ready()  # pre-compile
+    t0 = time.perf_counter()
+    gram_map(k, X, Y, params, vector).block_until_ready()
+    ts_fwd.append(time.perf_counter() - t0)
+
+    print("Benchmark the forward+backward pass (autodiff).")
+    if N <= 17_000:
+        # Pre-compile
+        (d0, d1) = gradient(gram_map_ad, k, X, Y)(params, vector)
+        d0.block_until_ready()
+        d1.block_until_ready()
+
+        t0 = time.perf_counter()
+        (d0, d1) = gradient(gram_map_ad, k, X, Y)(params, vector)
+        d0.block_until_ready()
+        d1.block_until_ready()
+        ts_bwd_ad.append(time.perf_counter() - t0)
+
+    print("Benchmark the forward+backward pass (custom).")
+    # Pre-compile
+    (d0, d1) = gradient(gram_map_custom, k, X, Y)(params, vector)
+    d0.block_until_ready()
+    d1.block_until_ready()
+
+    t0 = time.perf_counter()
+    (d0, d1) = gradient(gram_map_custom, k, X, Y)(params, vector)
+    d0.block_until_ready()
+    d1.block_until_ready()
+    ts_bwd_custom.append(time.perf_counter() - t0)
 
 
-if args.custom_ad:
-    print("Setting a clever gradient...")
-    gram_map = jax.custom_vjp(gram_map, nondiff_argnums=[0, 1, 2])
-    gram_map.defvjp(gram_map_fwd, gram_map_bwd)
-
-print("Benchmark the forward pass.")
-gram_map(k, X, Y, params, vector).block_until_ready()  # pre-compile
-t0 = time.perf_counter()
-gram_map(k, X, Y, params, vector).block_until_ready()
-print("\tRun time:", time.perf_counter() - t0)
+print("Saving to a file")
+directory = exp_util.matching_directory(__file__, "results/")
+os.makedirs(directory, exist_ok=True)
 
 
-print("Benchmark the forward+backward pass.")
-
-# Pre-compile
-(d0, d1) = gradient(gram_map, k, X, Y)(params, vector)
-d0.block_until_ready()
-d1.block_until_ready()
-
-t0 = time.perf_counter()
-(d0, d1) = gradient(gram_map, k, X, Y)(params, vector)
-d0.block_until_ready()
-d1.block_until_ready()
-print("\tRun time:", time.perf_counter() - t0)
+jnp.save(f"{directory}/Ns.npy", jnp.asarray(Ns))
+jnp.save(f"{directory}/ts_fwd.npy", jnp.asarray(ts_fwd))
+jnp.save(f"{directory}/ts_bwd_custom.npy", jnp.asarray(ts_bwd_custom))
+jnp.save(f"{directory}/ts_bwd_ad.npy", jnp.asarray(ts_bwd_ad))
