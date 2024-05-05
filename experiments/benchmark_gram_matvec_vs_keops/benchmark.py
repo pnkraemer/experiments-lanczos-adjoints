@@ -14,6 +14,19 @@ def k(x, y, p):
 
 
 @functools.partial(jax.jit, static_argnums=[0])
+def gram_map_checkpt(f, x, y, p, v):
+    """Evaluate a Gram-matrix-vector-product."""
+
+    @jax.checkpoint
+    def fx(z):
+        fun_v = jax.vmap(f, in_axes=(None, 0, None), out_axes=-1)
+        return jax.tree_util.tree_map(lambda s: jnp.dot(s, v), fun_v(z, y, p))
+
+    # Map over rows to reduce memory
+    return jax.lax.map(fx, x)
+
+
+@functools.partial(jax.jit, static_argnums=[0])
 def gram_map(f, x, y, p, v):
     """Evaluate a Gram-matrix-vector-product."""
 
@@ -50,6 +63,7 @@ def gradient(gram_fun, f, x, y):
 
 # Assigning the AD functions
 gram_map_ad = gram_map
+
 gram_map_custom = gram_map
 gram_map_custom = jax.custom_vjp(gram_map_custom, nondiff_argnums=[0, 1, 2])
 gram_map_custom.defvjp(gram_map_fwd, gram_map_bwd)
@@ -57,6 +71,7 @@ gram_map_custom.defvjp(gram_map_fwd, gram_map_bwd)
 Ns = 2 ** jnp.arange(5, 17, step=1, dtype=int)
 ts_fwd = []
 ts_bwd_custom = []
+ts_bwd_checkpt = []
 ts_bwd_ad = []
 
 for N in Ns:
@@ -86,6 +101,18 @@ for N in Ns:
         d1.block_until_ready()
         ts_bwd_ad.append(time.perf_counter() - t0)
 
+    print("Benchmark the forward+backward pass (autodiff+checkpoint).")
+    # Pre-compile
+    (d0, d1) = gradient(gram_map_checkpt, k, X, Y)(params, vector)
+    d0.block_until_ready()
+    d1.block_until_ready()
+
+    t0 = time.perf_counter()
+    (d0, d1) = gradient(gram_map_checkpt, k, X, Y)(params, vector)
+    d0.block_until_ready()
+    d1.block_until_ready()
+    ts_bwd_checkpt.append(time.perf_counter() - t0)
+
     print("Benchmark the forward+backward pass (custom).")
     # Pre-compile
     (d0, d1) = gradient(gram_map_custom, k, X, Y)(params, vector)
@@ -106,5 +133,6 @@ os.makedirs(directory, exist_ok=True)
 
 jnp.save(f"{directory}/Ns.npy", jnp.asarray(Ns))
 jnp.save(f"{directory}/ts_fwd.npy", jnp.asarray(ts_fwd))
+jnp.save(f"{directory}/ts_bwd_checkpt.npy", jnp.asarray(ts_bwd_checkpt))
 jnp.save(f"{directory}/ts_bwd_custom.npy", jnp.asarray(ts_bwd_custom))
 jnp.save(f"{directory}/ts_bwd_ad.npy", jnp.asarray(ts_bwd_ad))

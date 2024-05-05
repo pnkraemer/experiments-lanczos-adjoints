@@ -17,6 +17,7 @@ directory = exp_util.matching_directory(__file__, "results/")
 Ns = jnp.load(f"{directory}/Ns.npy")
 
 ts_fwd = jnp.load(f"{directory}/ts_fwd.npy")
+ts_bwd_checkpt = jnp.load(f"{directory}/ts_bwd_checkpt.npy")
 ts_bwd_custom = jnp.load(f"{directory}/ts_bwd_custom.npy")
 ts_bwd_ad = jnp.load(f"{directory}/ts_bwd_ad.npy")
 
@@ -28,8 +29,16 @@ def plot_fun(a, b, **kw):
 plt.subplots(dpi=200)
 
 plot_fun(Ns, ts_fwd, label="Forward pass", linestyle="dashed", color="black")
-plot_fun(Ns, ts_bwd_ad, label="Backprop")
-plot_fun(Ns, ts_bwd_custom, label="Custom VJP")
+plot_fun(Ns, ts_bwd_ad, label="Backprop", color="C0")
+plot_fun(
+    [Ns[len(ts_bwd_ad) - 1]],
+    [ts_bwd_ad[-1]],
+    color="C0",
+    marker=".",
+    markerfacecolor="white",
+)
+plot_fun(Ns, ts_bwd_custom, label="Custom VJP", color="C1")
+plot_fun(Ns, ts_bwd_checkpt, label="Ad+checkpt", color="C2")
 
 plt.xlabel("Data set size", fontsize="small")
 plt.ylabel("Run time (sec)", fontsize="small")
