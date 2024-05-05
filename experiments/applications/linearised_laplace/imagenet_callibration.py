@@ -1,4 +1,5 @@
 import os
+import pickle
 import time
 
 import jax
@@ -20,7 +21,7 @@ os.makedirs(directory_results, exist_ok=True)
 
 # Get Dataloader
 
-train_loader = data_util.ImageNet1k_loaders(batch_size=128, seed=seed)
+train_loader = data_util.ImageNet1k_loaders(batch_size=16, seed=seed)
 
 # Get model
 model_rng, rng = jax.random.split(rng)
@@ -83,6 +84,8 @@ optimizer_state = optimizer.init(log_alpha)
 
 
 # Epochs
+log_alphas = []
+losses = []
 
 for epoch, batch in enumerate(train_loader):
     model_rng, rng = jax.random.split(rng)
@@ -95,24 +98,9 @@ for epoch, batch in enumerate(train_loader):
     print(
         f"Epoch: {epoch + 1}, loss {loss:.3f}, log alpha {log_alpha:.3f}, time {time.perf_counter() - start_time:.3f}"
     )
+    log_alphas.append(log_alpha)
+    losses.append(loss)
 
-    if epoch == 50:
-        break
-
-
-breakpoint()
-
-# Lanczos Parameters
-numerics_lanczos_rank = 100
-numerics_slq_num_samples = 10
-numerics_slq_num_batches = 1
-evaluate_num_samples = 5
-
-logdet_fun = bnn_util.solver_logdet_slq_implicit(
-    lanczos_rank=numerics_lanczos_rank,
-    slq_num_samples=numerics_slq_num_samples,
-    slq_num_batches=numerics_slq_num_batches,
-)
-sample_fun = bnn_util.sampler_lanczos(
-    lanczos_rank=numerics_lanczos_rank, ggn_fun=ggn_fun, num=evaluate_num_samples
-)
+results = {"log_alphas": log_alphas, "losses": losses}
+save_path = f"./results/applications/linearised_laplace/imagenet_callibration"
+pickle.dump(results, open(f"{save_path}.pickle", "wb"))

@@ -392,7 +392,7 @@ def img_to_patch(x, patch_size, flatten_channels=True):
 
 
 def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
-    ggn_fun = kernel_vp_parallel(
+    ggn_fun = ggn_vp_parallel(
         loss_single=loss_training_cross_entropy_single,
         model_fun=model_apply,
         param_unflatten=unflatten,
@@ -405,7 +405,7 @@ def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
     def loss(log_alpha, params_vec, img, label, key, num_classes=1000):
         alpha = hyperparam_unconstrain(log_alpha)
         logdet_fun = solver_logdet_slq_implicit(
-            lanczos_rank=10, slq_num_samples=10, slq_num_batches=1, N=num_classes
+            lanczos_rank=10, slq_num_samples=10, slq_num_batches=1, N=n_params
         )
 
         # logdet = logdet_fun(ggn_mat, key, alpha, params_vec, img, label)
