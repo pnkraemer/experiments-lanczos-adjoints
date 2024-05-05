@@ -6,8 +6,6 @@ import jax
 import jax.numpy as jnp
 from matfree_extensions.util import exp_util
 
-jax.config.update("jax_enable_compilation_cache", False)
-
 MAX_BATCH = 2**30
 """We can fit MAX_BATCH * 32 bit values in memory."""
 
