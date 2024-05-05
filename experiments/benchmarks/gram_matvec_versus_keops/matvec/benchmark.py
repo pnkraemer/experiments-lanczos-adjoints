@@ -56,9 +56,7 @@ def time_matfree(prng_seed, N: int, shape_in: tuple, mv, *, num_runs: int):
     key1, key2 = jax.random.split(prng_key)
     x = jax.random.normal(key1, shape=(N, *shape_in))
     vec = jax.random.normal(key1, shape=(N,))
-    kernel, params = gp_util.kernel_scaled_rbf(
-        shape_in=shape_in, shape_out=(), checkpoint=False
-    )
+    kernel, params = gp_util.kernel_scaled_rbf(shape_in=shape_in, shape_out=())
     fun = jax.jit(mv(kernel(**params)))
 
     def matvec_fun(v, p):
@@ -68,6 +66,7 @@ def time_matfree(prng_seed, N: int, shape_in: tuple, mv, *, num_runs: int):
 
 
 if __name__ == "__main__":
+    # todo: data_dim -> log_data_dim to go up to 100+
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_runs", type=int, required=True)
     parser.add_argument("--log_data_size", type=int, required=True)
@@ -97,7 +96,10 @@ if __name__ == "__main__":
         results[label] = t
 
     label = "matfree_vmap"
-    matvec = gp_util.gram_matvec_map_over_batch(num_batches=128, checkpoint=True)
+    num_batches = int(jnp.minimum(128, 2**args.log_data_size))
+    matvec = gp_util.gram_matvec_map_over_batch(
+        num_batches=num_batches, checkpoint=True
+    )
     # matvec = gp_util.gram_matvec_full_batch()
     t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
     print_ts(t, label, num_runs=args.num_runs)

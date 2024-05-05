@@ -22,7 +22,7 @@ def print_ts(t: jax.Array, *, label: str, num_runs: int):
 
 def time_gp_mll(
     mv: Callable,
-    vec: jax.Array,
+    v0: jax.Array,
     input_dim: int,
     *,
     num_runs,
@@ -30,10 +30,9 @@ def time_gp_mll(
     num_samples=1,
     krylov_depth=10,
     cg_tol=1.0,
-    checkpoint_kernel: bool,
     checkpoint_montecarlo: bool,
 ):
-    sampler = hutchinson.sampler_rademacher(vec, num=num_samples)
+    sampler = hutchinson.sampler_rademacher(v0, num=num_samples)
     logpdf = gp_util.logpdf_lanczos(
         krylov_depth,
         sampler,
@@ -42,17 +41,15 @@ def time_gp_mll(
         checkpoint=checkpoint_montecarlo,
     )
 
-    k, p_prior = gp_util.kernel_scaled_rbf(
-        shape_in=(input_dim,), shape_out=(), checkpoint=checkpoint_kernel
-    )
+    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(input_dim,), shape_out=())
 
     prior = gp_util.model(gp_util.mean_zero(), k, gram_matvec=mv)
     likelihood, p_likelihood = gp_util.likelihood_gaussian()
     loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf)
 
-    xs = jnp.linspace(0, 1, num=len(vec), endpoint=True)
+    xs = jnp.linspace(0, 1, num=len(v0), endpoint=True)
     xs = jnp.stack([xs] * input_dim, axis=1)
-    ys = jnp.linspace(0, 1, num=len(vec), endpoint=True)
+    ys = jnp.linspace(0, 1, num=len(v0), endpoint=True)
 
     key = jax.random.PRNGKey(1)
 
@@ -71,8 +68,8 @@ def time_gp_mll(
     ts = []
     for _ in range(num_runs):
         t0 = time.perf_counter()
-        (value, _aux), grad = fun(p1_flat, p2_flat)
-        value.block_until_ready()
+        (val, _aux), grad = fun(p1_flat, p2_flat)
+        val.block_until_ready()
         grad.block_until_ready()
         t1 = time.perf_counter()
         ts.append(t1 - t0)
@@ -84,7 +81,6 @@ if __name__ == "__main__":
     parser.add_argument("--num_runs", type=int, required=True)
     parser.add_argument("--log_data_size", type=int, required=True)
     parser.add_argument("--data_dim", type=int, required=True)
-    parser.add_argument("--checkpoint_kernel", action="store_true")
     parser.add_argument("--checkpoint_matvec", action="store_true")
     parser.add_argument("--checkpoint_montecarlo", action="store_true")
     args = parser.parse_args()
@@ -94,8 +90,6 @@ if __name__ == "__main__":
     title += f"_num_runs_{args.num_runs}"
     title += f"_data_size_{2**args.log_data_size}"
     title += f"_data_dim_{args.data_dim}"
-    if args.checkpoint_kernel:
-        title += "_checkpoint_kernel"
     if args.checkpoint_matvec:
         title += "checkpoint_matvec"
     if args.checkpoint_montecarlo:
@@ -119,17 +113,22 @@ if __name__ == "__main__":
         vec,
         args.data_dim,
         num_runs=args.num_runs,
-        checkpoint_kernel=args.checkpoint_kernel,
         checkpoint_montecarlo=args.checkpoint_montecarlo,
     )
     print_ts(t, label=label, num_runs=args.num_runs)
     results[label] = t
 
-    # label = "matfree_map"
-    # matvec = gp_util.gram_matvec_map(checkpoint=args.checkpoint_matvec)
-    # t = time_gp_mll(matvec, vec, args.data_dim,num_runs=args.num_runs, checkpoint_kernel=args.checkpoint_kernel, checkpoint_montecarlo=args.checkpoint_montecarlo)
-    # print_ts(t, label=label, num_runs=args.num_runs)
-    # results[label] = t
+    label = "matfree_map"
+    matvec = gp_util.gram_matvec_map(checkpoint=args.checkpoint_matvec)
+    t = time_gp_mll(
+        matvec,
+        vec,
+        args.data_dim,
+        num_runs=args.num_runs,
+        checkpoint_montecarlo=args.checkpoint_montecarlo,
+    )
+    print_ts(t, label=label, num_runs=args.num_runs)
+    results[label] = t
 
     print("\nSaving to a file")
     directory = exp_util.matching_directory(__file__, "results/")

@@ -1,12 +1,20 @@
 
-# Small-scale runs (for debugging)
+# Dry-runs (for debugging)
 
+
+printf "\nDry-run: Matrix-vector-product benchmark | per data dimension\n"
 for i in {1..8}; do \
-    python experiments/applications/gaussian_process/benchmark_matvecs_versus_keops/benchmark_matvec.py --num_runs 3 --log_data_size 6 --data_dim $i ;
+    python experiments/benchmarks/gram_matvec_versus_keops/matvec/benchmark.py --num_runs 3 --log_data_size 6 --data_dim $i ;
 done
 
+printf "\nDry-run: Matrix-vector-product benchmark | per data size\n"
 for i in {1..10}; do \
-    python experiments/applications/gaussian_process/benchmark_matvecs_versus_keops/benchmark_matvec.py --num_runs 3 --log_data_size $i --data_dim 1 ;
+    python experiments/benchmarks/gram_matvec_versus_keops/matvec/benchmark.py --num_runs 3 --log_data_size $i --data_dim 1 ;
+done
+
+printf "\nDry-run: MLL benchmark | per data size\n"
+for i in {1..10}; do \
+    python experiments/benchmarks/gram_matvec_versus_keops/matvec/benchmark.py --num_runs 3 --log_data_size $i --data_dim 1 ;
 done
 
 
