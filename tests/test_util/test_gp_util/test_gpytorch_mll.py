@@ -30,7 +30,7 @@ def case_logpdf_lanczos_rademacher():
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
     logpdf = gp_util.logpdf_lanczos(
-        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4
+        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4, checkpoint=False
     )
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
@@ -47,7 +47,7 @@ def case_logpdf_lanczos_normal():
     x_like = jnp.ones((3,), dtype=float)
     sampler = hutchinson.sampler_normal(x_like, num=num_samples)
     logpdf = gp_util.logpdf_lanczos(
-        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4
+        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4, checkpoint=True
     )
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
@@ -76,13 +76,15 @@ def case_gram_matvec_full_batch():
 
 
 @pytest_cases.case
-def case_gram_matvec_map_over_batch():
-    return gp_util.gram_matvec_map_over_batch(num_batches=1)
+@pytest_cases.parametrize("checkpoint", [True, False])
+def case_gram_matvec_map_over_batch(checkpoint):
+    return gp_util.gram_matvec_map_over_batch(num_batches=1, checkpoint=checkpoint)
 
 
 @pytest_cases.case
-def case_gram_matvec_map():
-    return gp_util.gram_matvec_map()
+@pytest_cases.parametrize("checkpoint", [True, False])
+def case_gram_matvec_map(checkpoint):
+    return gp_util.gram_matvec_map(checkpoint=checkpoint)
 
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")

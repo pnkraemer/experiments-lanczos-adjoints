@@ -56,7 +56,9 @@ def time_matfree(prng_seed, N: int, shape_in: tuple, mv, *, num_runs: int):
     key1, key2 = jax.random.split(prng_key)
     x = jax.random.normal(key1, shape=(N, *shape_in))
     vec = jax.random.normal(key1, shape=(N,))
-    kernel, params = gp_util.kernel_scaled_rbf(shape_in=shape_in, shape_out=(), checkpoint=False)
+    kernel, params = gp_util.kernel_scaled_rbf(
+        shape_in=shape_in, shape_out=(), checkpoint=False
+    )
     fun = jax.jit(mv(kernel(**params)))
 
     def matvec_fun(v, p):

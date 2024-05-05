@@ -46,8 +46,16 @@ def gram_matvec_map(*, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by row-wise mapping.
+    This function uses jax.lax.map.
 
-    Use this function for gigantic matrices on GPUs.
+    Use this function for gigantic matrices (on GPUs).
+
+    Parameters
+    ----------
+    checkpoint
+        Whether to wrap each row through jax.checkpoint.
+        This increases both, memory efficiency and runtime.
+        Setting it to `True` is generally a good idea.
     """
 
     def matvec(fun: Callable) -> Callable:
@@ -73,10 +81,26 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
-    Why? To reduce memory compared to gram_matvec_full_batch.
+    Why? To reduce memory compared to gram_matvec_full_batch,
+    but to increase runtime compare to gram_matvec_map.
 
-    Choose the largest batch_size such that
-    `batch_size` rows of the Gram matrix fit into memory.
+    Parameters
+    ----------
+    num_batches
+        Number of batches. Make this value as large as possible,
+        but small enough so that each batch fits into memory.
+    checkpoint
+        Whether to wrap each row through jax.checkpoint.
+        This increases both, memory efficiency and runtime.
+        Setting it to `True` is generally a good idea.
+
+    Raises
+    ------
+    ValueError
+        If the number of batches does not divide the dataset size.
+        In this case, make them match by either subsampling data
+        to, say, the nearest power of 2,
+        or select a different number of batches.
     """
     matvec_dense = gram_matvec_full_batch()
 
@@ -87,15 +111,6 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
                 msg = f"Batch-number {num_batches} does not divide dataset size {num}."
                 raise ValueError(msg)
 
-            # Why the checkpoint?
-            #  Because without a checkpoint, gradient-computation
-            #  would store all intermediate values, which is _exactly_ what
-            #  we want to avoid by calling this function instead of the full-batch
-            #  Gram-matvec.
-            #
-            #  See:
-            #   https://github.com/google/jax/pull/1749
-            #   https://github.com/google/jax/discussions/10131
             if checkpoint:
                 matvec_single = jax.checkpoint(_matvec_single)
             else:
@@ -120,11 +135,10 @@ def gram_matvec_full_batch():
 
     Compute the matrix-vector product over a full batch.
 
-    On CPU, use this function whenever the full Gram matrix
+    Use this function whenever the full Gram matrix
     fits into memory.
-
-    On GPU, always use this function as the preferred method
-    (it seems to work even for gigantic matrices).
+    Sometimes, on GPU, we get away with using this function
+    even if the matrix does not fit (but usually not).
     """
 
     def matvec(fun: Callable) -> Callable:
@@ -143,6 +157,7 @@ def gram_matrix(fun: Callable, /) -> Callable:
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
 
 
+# Todo: Ask for a shape input?
 def likelihood_gaussian() -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
@@ -222,10 +237,10 @@ def logpdf_lanczos(
     krylov_depth,
     /,
     slq_sampler: Callable,
-    slq_batch_num: int,
-    cg_tol: float,
     *,
+    slq_batch_num: int,
     checkpoint: bool,
+    cg_tol: float,
     cg_maxiter: int | None = None,  # same as in jax.scipy.sparse.cg
 ) -> Callable:
     """Construct a logpdf function that uses CG and Lanczos.
@@ -237,6 +252,31 @@ def logpdf_lanczos(
     The estimator uses slq_batch_num*slq_sample_num samples for SLQ.
     Use a single batch and increase slq_sample_num until memory limits occur.
     Then, increase the number of batches while keeping the batch size maximal.
+
+    Parameters
+    ----------
+    krylov_depth
+        Depth of the Krylov space. Read this as:
+        "Number of matrix-vector products" we want to use.
+    slq_sampler
+        Monte Carlo sampler for stochastic Lanczos quadrature.
+        For instance, matfree.hutchinson.sampler_rademacher().
+    slq_batch_num
+        How many batches to use for Monte Carlo sampling
+        This wraps around `slq_sampler`, so it multiplies
+        however many samples slq_sampler generates.
+        All batches are compute sequentially.
+    checkpoint
+        Whether to checkpoint each SLQ batch.
+        Checkpoint increases memory efficiency but also runtime.
+        Usually, we set this to `False`.
+    cg_tol
+        Tolerance to use for each conjugate gradients solve.
+        For instance, GPyTorch uses `cg_tol=1.0` for
+        Gaussian process hyperparameter calibration.
+    cg_maxiter
+        Maximum number of iterations for each conjugate
+        gradients solve.
     """
 
     def solve(A: Callable, /, b):
@@ -399,9 +439,7 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
     return parametrize, params_like
 
 
-def kernel_scaled_rbf(
-    *, shape_in, shape_out, checkpoint: bool
-) -> tuple[Callable, dict]:
+def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
     """Construct a (scaled) radial basis function kernel.
 
     The parametrisation equals that of GPyTorch's
@@ -409,7 +447,7 @@ def kernel_scaled_rbf(
     """
 
     def parametrize(*, raw_lengthscale, raw_outputscale):
-        def _k(x, y):
+        def k(x, y):
             _assert_shapes(x, y, shape_in)
 
             # Apply a soft-plus because GPyTorch does
@@ -417,21 +455,13 @@ def kernel_scaled_rbf(
             outputscale = _softplus(raw_outputscale)
 
             # Compute the norm of the differences:
-
-            # Here is the old code:
-            # diff = (x - y)
-            # log_k = jnp.dot(diff, diff)
-
-            # And here is code that leads to 10x performance improvement
-            log_k = jnp.dot(x, x) + jnp.dot(y, y) - 2*jnp.dot(x, y)
+            x /= lengthscale
+            y /= lengthscale
+            log_k = jnp.dot(x, x) + jnp.dot(y, y) - 2 * jnp.dot(x, y)
 
             # Return the kernel function
-            return outputscale * jnp.exp(-log_k / (2*lengthscale))
+            return outputscale * jnp.exp(-log_k / 2)
 
-        if checkpoint:
-            k = jax.checkpoint(_k)
-        else:
-            k = _k
         return k
 
     params_like = {
