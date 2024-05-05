@@ -102,5 +102,5 @@ for epoch, batch in enumerate(train_loader):
     losses.append(loss)
 
 results = {"log_alphas": log_alphas, "losses": losses}
-save_path = f"./results/applications/linearised_laplace/imagenet_callibration"
+save_path = "./results/applications/linearised_laplace/imagenet_callibration"
 pickle.dump(results, open(f"{save_path}.pickle", "wb"))

@@ -10,7 +10,7 @@
 #BSUB -o logs/%J.out
 #BSUB -e logs/%J.err
 
-module load cuda/12.4 
+module load cuda/12.4
 source mfe/bin/activate
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
