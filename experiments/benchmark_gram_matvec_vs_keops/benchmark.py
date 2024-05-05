@@ -54,7 +54,7 @@ gram_map_custom = gram_map
 gram_map_custom = jax.custom_vjp(gram_map_custom, nondiff_argnums=[0, 1, 2])
 gram_map_custom.defvjp(gram_map_fwd, gram_map_bwd)
 
-Ns = 2 ** jnp.arange(1, 15, step=1, dtype=int)
+Ns = 2 ** jnp.arange(5, 17, step=1, dtype=int)
 ts_fwd = []
 ts_bwd_custom = []
 ts_bwd_ad = []
@@ -73,8 +73,8 @@ for N in Ns:
     gram_map(k, X, Y, params, vector).block_until_ready()
     ts_fwd.append(time.perf_counter() - t0)
 
-    print("Benchmark the forward+backward pass (autodiff).")
     if N <= 17_000:
+        print("Benchmark the forward+backward pass (autodiff).")
         # Pre-compile
         (d0, d1) = gradient(gram_map_ad, k, X, Y)(params, vector)
         d0.block_until_ready()
