@@ -7,13 +7,14 @@ import jax.numpy as jnp
 
 
 def k(x, y, p):
-    return p[0] * jnp.exp(-p[1] * (x - y) ** 2)
+    diff = x - y
+    return p[0] * jnp.exp(-p[1] * jnp.dot(diff, diff))
 
 
 @functools.partial(jax.jit, static_argnums=[0])
 def gram(f, x, y, p, v):
     def fx(z):
-        fun_v = jax.vmap(f, in_axes=(None, -1, None), out_axes=-1)
+        fun_v = jax.vmap(f, in_axes=(None, 0, None), out_axes=-1)
         return jnp.dot(fun_v(z, y, p), v)
 
     return jax.lax.map(fx, x)
