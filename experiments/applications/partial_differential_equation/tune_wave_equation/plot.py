@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import jax.numpy as jnp
@@ -11,14 +12,18 @@ directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
 directory_results = exp_util.matching_directory(__file__, "results/")
 
-method = "euler"
-y0 = jnp.load(f"{directory_results}{method}_y0.npy")
-scale_mlp_before = jnp.load(f"{directory_results}{method}_scale_mlp_before.npy")
-scale_mlp_after = jnp.load(f"{directory_results}{method}_scale_mlp_after.npy")
-scale_grf = jnp.load(f"{directory_results}{method}_scale_grf.npy")
-y1_target = jnp.load(f"{directory_results}{method}_y1_target.npy")
-y1_approx_before = jnp.load(f"{directory_results}{method}_y1_approx_before.npy")
-y1_approx_after = jnp.load(f"{directory_results}{method}_y1_approx_after.npy")
+parser = argparse.ArgumentParser()
+parser.add_argument("--method", required=True)
+args = parser.parse_args()
+
+
+y0 = jnp.load(f"{directory_results}{args.method}_y0.npy")
+scale_mlp_before = jnp.load(f"{directory_results}{args.method}_scale_mlp_before.npy")
+scale_mlp_after = jnp.load(f"{directory_results}{args.method}_scale_mlp_after.npy")
+scale_grf = jnp.load(f"{directory_results}{args.method}_scale_grf.npy")
+y1_target = jnp.load(f"{directory_results}{args.method}_y1_target.npy")
+y1_approx_before = jnp.load(f"{directory_results}{args.method}_y1_approx_before.npy")
+y1_approx_after = jnp.load(f"{directory_results}{args.method}_y1_approx_after.npy")
 
 
 # Plot

@@ -7,6 +7,7 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
+import matplotlib.pyplot as plt
 import optax
 import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
@@ -29,7 +30,9 @@ parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--num_dx_points", type=int, required=True)
+parser.add_argument("--plot_matrix", action="store_true")
 args = parser.parse_args()
+print(args)
 
 
 # Set parameters
@@ -99,6 +102,15 @@ pde_rhs, _params_rhs = pde_util.pde_wave_anisotropic(
 def vector_field(x, p):
     """Evaluate the PDE dynamics."""
     return pde_rhs(scale=p)(x)
+
+
+if args.plot_matrix:
+    y0flat, unflat = jax.flatten_util.ravel_pytree(y0)
+    matrix = jax.jacfwd(
+        lambda g: jax.flatten_util.ravel_pytree(vector_field(unflat(g), grf_scale))[0]
+    )(y0flat)
+    plt.spy(matrix)
+    plt.show()
 
 
 # Time the vector field (count how many iterations we can fit in a second)
@@ -204,11 +216,13 @@ opt_state = optimizer.init(variables_after)
 progressbar = tqdm.tqdm(range(args.num_epochs))
 progressbar.set_description("Loss ")
 for _ in progressbar:
-    loss, grad = loss_value_and_grad(variables_after, target_y1)
-    updates, opt_state = optimizer.update(grad, opt_state)
-    variables_after = optax.apply_updates(variables_after, updates)
-    progressbar.set_description(f"Loss {loss:.3e}")
-
+    try:
+        loss, grad = loss_value_and_grad(variables_after, target_y1)
+        updates, opt_state = optimizer.update(grad, opt_state)
+        variables_after = optax.apply_updates(variables_after, updates)
+        progressbar.set_description(f"Loss {loss:.3e}")
+    except KeyboardInterrupt:
+        break
 
 # Save to a file
 scale_before = mlp_apply(mlp_unflatten(variables_before), mesh)
