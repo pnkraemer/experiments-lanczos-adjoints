@@ -100,14 +100,14 @@ pde_rhs, _params_rhs = pde_util.pde_wave_anisotropic(
 # Create the data/targets
 
 
-def vector_field(x):
+def vector_field(x, p):
     """Evaluate the PDE dynamics."""
-    return pde_rhs(scale=grf_scale)(x)
+    return pde_rhs(scale=p)(x)
 
 
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=10_000)
 target_solve = pde_util.solver_euler_fixed_step(solve_ts_data, vector_field)
-target_y1 = target_solve(y0)
+target_y1 = target_solve(y0, grf_scale)
 
 # Build an approximate model
 mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
@@ -116,33 +116,23 @@ variables_before, mlp_unflatten = mlp_init(subkey)
 print(f"Number of parameters: {variables_before.size}")
 
 
-def vector_field_mlp(x, p):
-    """Evaluate the MLP-parametrised PDE dynamics."""
-    scale = mlp_apply(mlp_unflatten(p), mesh)
-    return pde_rhs(scale=scale)(x)
-
-
 # Create a loss function
 if args.method == "arnoldi":
     expm = pde_util.expm_arnoldi(arnoldi_depth)
-    approx_solve = pde_util.solver_arnoldi(pde_t0, pde_t1, vector_field_mlp, expm=expm)
+    approx_solve = pde_util.solver_arnoldi(pde_t0, pde_t1, vector_field, expm=expm)
 elif args.method == "euler":
-    approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field_mlp)
+    approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
 elif args.method == "diffrax_tsit5":
     approx_solve = pde_util.solver_diffrax(
-        pde_t0,
-        pde_t1,
-        vector_field_mlp,
-        num_steps=args.num_matvecs // 5,
-        method="tsit5",
+        pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs // 5, method="tsit5"
     )
 elif args.method == "diffrax_euler":
     approx_solve = pde_util.solver_diffrax(
-        pde_t0, pde_t1, vector_field_mlp, num_steps=args.num_matvecs, method="euler"
+        pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs, method="euler"
     )
 elif args.method == "diffrax_heun":
     approx_solve = pde_util.solver_diffrax(
-        pde_t0, pde_t1, vector_field_mlp, num_steps=args.num_matvecs // 2, method="heun"
+        pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs // 2, method="heun"
     )
 else:
     msg = f"Method {args.method} is not supported."
@@ -153,7 +143,8 @@ loss = pde_util.loss_mse()
 @jax.jit
 @jax.value_and_grad
 def loss_value_and_grad(p, y):
-    approx = approx_solve(y0, p)
+    scale = mlp_apply(mlp_unflatten(p), mesh)
+    approx = approx_solve(y0, scale)
     return loss(approx, targets=y)
 
 
@@ -221,7 +212,7 @@ plot_scale(axes["truth_scale"], grf_scale)
 
 axes["before_scale"].set_ylabel("Before optim. (MLP)")
 mlp_scale = mlp_apply(mlp_unflatten(variables_before), mesh)
-approx_y1 = approx_solve(y0, variables_before)
+approx_y1 = approx_solve(y0, mlp_scale)
 plot_t0(axes["before_t0"], y0[0])
 plot_t1(axes["before_t1"], approx_y1[0])
 plot_scale(axes["before_scale"], mlp_scale)
@@ -229,7 +220,7 @@ plot_scale(axes["before_scale"], mlp_scale)
 
 axes["after_scale"].set_ylabel("After optim. (MLP)")
 mlp_scale = mlp_apply(mlp_unflatten(variables_after), mesh)
-approx_y1 = approx_solve(y0, variables_after)
+approx_y1 = approx_solve(y0, mlp_scale)
 plot_t0(axes["after_t0"], y0[0])
 plot_t1(axes["after_t1"], approx_y1[0])
 plot_scale(axes["after_scale"], mlp_scale)
