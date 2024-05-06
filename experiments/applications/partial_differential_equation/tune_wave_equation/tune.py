@@ -67,9 +67,10 @@ def constrain(arg):
 
 # Sample a Gaussian random field as a "true" scale
 grf_xs = mesh.reshape((2, -1)).T
-grf_kernel, _ = gp_util.kernel_scaled_matern_32(shape_in=(2,), shape_out=())
+grf_kernel, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
 kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-4.0)
 grf_K = gp_util.gram_matrix(kernel_fun)(grf_xs, grf_xs)
+grf_K += 1e-6 * jnp.eye(len(grf_K))
 grf_cholesky = jnp.linalg.cholesky(grf_K)
 
 key, subkey = jax.random.split(key, num=2)
