@@ -175,26 +175,6 @@ def solver_euler_fixed_step(ts, vector_field, /):
     return solve
 
 
-def solver_arnoldi(t0, t1, vector_field, /, expm):
-    # todo: turn into a solver
-    # todo: make "how to compute the dense expm" an argument
-    def solve(y0, *p):
-        y0_flat, unflatten_y = jax.flatten_util.ravel_pytree(y0)
-
-        def matvec_p(v, p_):
-            Av = vector_field(unflatten_y(v), *p_)
-            return jax.flatten_util.ravel_pytree(Av)[0]
-
-        algorithm = expm(matvec_p)
-
-        Q, H, _r, c = algorithm(y0_flat, p)
-        e1 = jnp.eye(len(H))[0, :]
-        expmat = jax.scipy.linalg.expm((t1 - t0) * H)
-        return unflatten_y(c * Q @ expmat @ e1)
-
-    return solve
-
-
 def solver_diffrax(t0, t1, vector_field, /, *, num_steps: int, method: str):
     @diffrax.ODETerm
     def term(t, y, args):  # noqa: ARG001
@@ -226,10 +206,31 @@ def solver_diffrax(t0, t1, vector_field, /, *, num_steps: int, method: str):
     return solve
 
 
+def solver_expm(t0, t1, vector_field, /, expm):
+    # todo: turn into a solver
+    # todo: make "how to compute the dense expm" an argument
+    def solve(y0, *p):
+        y0_flat, unflatten_y = jax.flatten_util.ravel_pytree(y0)
+
+        def matvec_p(v, p_):
+            Av = vector_field(unflatten_y(v), *p_)
+            return jax.flatten_util.ravel_pytree(Av)[0]
+
+        dt = t1 - t0
+        expm_matvec = expm(matvec_p, dt, y0_flat, p)
+        return unflatten_y(expm_matvec)
+
+    return solve
+
+
 def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
-    def expm(matvec):
+    def expm(matvec, dt, y0_flat, *p):
         kwargs = {"reortho": reortho, "custom_vjp": custom_vjp}
-        return arnoldi.hessenberg(matvec, krylov_depth, **kwargs)
+        algorithm = arnoldi.hessenberg(matvec, krylov_depth, **kwargs)
+        Q, H, _r, c = algorithm(y0_flat, *p)
+        e1 = jnp.eye(len(H))[0, :]
+        expmat = jax.scipy.linalg.expm(dt * H)
+        return 1 / c * Q @ expmat @ e1
 
     return expm
 
