@@ -117,6 +117,7 @@ if __name__ == "__main__":
     )
     print_ts(t, label=label, num_runs=args.num_runs)
     results[label] = t
+    results[label] = t
 
     label = "matfree_map"
     matvec = gp_util.gram_matvec_map(checkpoint=args.checkpoint_matvec)
