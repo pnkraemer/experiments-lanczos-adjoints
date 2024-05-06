@@ -13,14 +13,14 @@ import optax
 import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
-# todo: verify somehow that we do solve the PDE!
-# todo: turn the sampler into a Lanczos sampler (so we can scale!)
-# todo: 3d?
-# todo: rethink how we compute the gradient accuracy
+# todo: turn the sampler into a Lanczos sampler (for more scale)
 # todo: rethink how we compute the reference solution/derivative 
 #    (with pade? this way, we can say just how long it took!)
 # todo: clean up the script a little bit (less hacky code, progress prints, etc.)
-# todo: plot convergence?
+# todo: plot convergence? plot work/precision diagram for fwd/ & backward as functions of number of matvec?
+# todo: show include backsolve vs recursive_checkpoint adjoint for all ODE solvers
+# todo: run this script on a dedicated GPU, because otherwise, timings will be off.
+# todo: should we create a dataset of y0/y1 pairs, and train on that one instead of a single sample?
 
 
 def rmse(a, b):
@@ -66,13 +66,13 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 def constrain(arg):
     """Constrain the PDE-scale to strictly positive values."""
-    return 0.1 * arg**2
+    return 0.05*arg**2
 
 
 # Sample a Gaussian random field as a "true" scale
 grf_xs = mesh.reshape((2, -1)).T
 grf_kernel, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-4.0)
+kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-5.0)
 grf_K = gp_util.gram_matrix(kernel_fun)(grf_xs, grf_xs)
 
 # Sample  # todo: sample with Lanczos? Otherwise we go crazy here...
@@ -138,7 +138,7 @@ print(f"Projected runtime per iteration: ~{vf_time * args.num_matvecs * 2} secon
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=20_000)
 
 target_solve = pde_util.solver_diffrax(
-    pde_t0, pde_t1, vector_field, num_steps=4095, method="dopri5", adjoint="backsolve"
+    pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs, method="heun", adjoint="direct"
 )
 
 # Build an approximate model
@@ -155,7 +155,7 @@ elif args.method == "euler":
     approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
 elif args.method == "diffrax-tsit5":
     # adjoint = "recursive_checkpoint"
-    adjoint = "backsolve"
+    adjoint = "recursive_checkpoint"
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
         pde_t1,
@@ -166,7 +166,7 @@ elif args.method == "diffrax-tsit5":
     )
 elif args.method == "diffrax-euler":
     # adjoint = "recursive_checkpoint"
-    adjoint = "backsolve"
+    adjoint = "recursive_checkpoint"
 
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
@@ -176,21 +176,9 @@ elif args.method == "diffrax-euler":
         method="euler",
         adjoint=adjoint,
     )
-elif args.method == "diffrax-euler-implicit":
-    # adjoint = "recursive_checkpoint"
-    adjoint = "backsolve"
-
-    approx_solve = pde_util.solver_diffrax(
-        pde_t0,
-        pde_t1,
-        vector_field,
-        num_steps=args.num_matvecs,
-        method="euler-implicit",
-        adjoint=adjoint,
-    )
 elif args.method == "diffrax-heun":
     # adjoint = "recursive_checkpoint"
-    adjoint = "backsolve"
+    adjoint = "recursive_checkpoint"
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
         pde_t1,
@@ -212,7 +200,7 @@ target_y1 = target_solve(y0, grf_scale)
 fun = jax.jit(approx_solve)
 approx_y1 = fun(y0, grf_scale).block_until_ready()
 fwd_error = rmse(approx_y1, target_y1)
-stats["MSE: FWD"] = fwd_error
+stats["Raw MSE: FWD"] = fwd_error
 print("\nForward error:", fwd_error)
 
 t0 = time.perf_counter()
@@ -228,7 +216,7 @@ target_jacrev = jax.grad(lambda z: loss(target_solve(y0, z), targets=target_y1))
 fun = jax.jit(jax.grad(lambda z: loss(approx_solve(y0, z), targets=target_y1)))
 approx_jacrev = fun(grf_scale).block_until_ready()
 bwd_error = rmse(approx_jacrev, target_jacrev)
-stats["MSE: REV"] = bwd_error
+stats["Raw MSE: REV"] = bwd_error
 
 print("Backward error:", bwd_error, "\n")
 t0 = time.perf_counter()
@@ -240,7 +228,7 @@ stats["Time: REV"] = (t1 - t0) / 10
 
 # Set up parameter approximation
 mlp_init, mlp_apply = pde_util.model_mlp(
-    mesh, mlp_features, activation=mlp_activation, output_scale_raw=-4.0
+    mesh, mlp_features, activation=mlp_activation, output_scale_raw=-5.0
 )
 key, mlp_key = jax.random.split(key, num=2)
 variables_before, mlp_unflatten = mlp_init(subkey)
@@ -278,11 +266,19 @@ for _ in progressbar:
 # Save to a file
 # Todo: subsample the meshes before saving?
 
+# First, solve with the unconstrained values (because the solver constrains)
+scale_grf = grf_scale
+scale_before = mlp_apply(mlp_unflatten(variables_before), mesh)
+scale_after = mlp_apply(mlp_unflatten(variables_after), mesh)
+y1_before = approx_solve(y0, scale_before)
+y1_after = approx_solve(y0, scale_after)
+
+
+# Now we may constrain manually before saving
 scale_grf = constrain(grf_scale)
 scale_before = constrain(mlp_apply(mlp_unflatten(variables_before), mesh))
 scale_after = constrain(mlp_apply(mlp_unflatten(variables_after), mesh))
-y1_before = approx_solve(y0, scale_before)
-y1_after = approx_solve(y0, scale_after)
+
 jnp.save(f"{directory_results}{args.method}_y0.npy", y0)
 jnp.save(f"{directory_results}{args.method}_scale_mlp_before.npy", scale_before)
 jnp.save(f"{directory_results}{args.method}_scale_mlp_after.npy", scale_after)
@@ -293,10 +289,15 @@ jnp.save(f"{directory_results}{args.method}_y1_approx_after.npy", y1_after)
 
 error_y1 = rmse(y1_after, target_y1)
 error_scale = rmse(scale_after, scale_grf)
-stats["MSE: Sim."] = error_y1
+stats["MSE: Sim."] = error_y1  # should matche the final loss?
 stats["MSE: Param."] = error_scale
 
 
 stats = jax.tree_util.tree_map(float, stats)
 with open(f"{directory_results}{args.method}_stats.pkl", "wb") as handle:
     pickle.dump(stats, handle)
+
+
+print(stats)
+print()
+print()

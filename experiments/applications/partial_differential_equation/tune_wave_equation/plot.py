@@ -19,6 +19,7 @@ labels = {
     # "expm-pade": "Naive (Pade)",
     # "euler": "Euler",
     "diffrax-euler": "Euler (Diffrax)",
+    "diffrax-heun": "Heun (Diffrax)",
     "diffrax-tsit5": "Tsit5 (Diffrax)",
     "arnoldi": "Arnoldi",
 }
@@ -133,9 +134,9 @@ for method, label in labels.items():
     y1_approx_after = jnp.load(f"{directory_results}{method}_y1_approx_after.npy")
 
     axes[f"param_{method}"].set_title(label, fontsize="small")
-    plot_scale(axes[f"param_{method}"], scale_grf)
+    plot_scale(axes[f"param_{method}"], scale_mlp_after)
     plot_t0(axes[f"y0_{method}"], y0[0])
-    plot_t1(axes[f"y1_{method}"], y1_target[0])
+    plot_t1(axes[f"y1_{method}"], y1_approx_after[0])
 
 
 fig.align_ylabels()

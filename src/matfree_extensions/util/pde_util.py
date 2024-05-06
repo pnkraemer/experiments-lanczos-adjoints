@@ -196,6 +196,7 @@ def solver_diffrax(
         return vector_field(y, args)
 
     match_methods = {
+        "dopri8": diffrax.Dopri8(),
         "dopri5": diffrax.Dopri5(),
         "tsit5": diffrax.Tsit5(),
         "euler": diffrax.Euler(),
