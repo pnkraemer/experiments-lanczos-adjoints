@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
 import pandas as pd
 from matfree_extensions.util import exp_util
+from tueplots import axes, figsizes, fontsizes
 
 # todo: plot all methods next to each other
 # todo: get all stats into a datafram and print latex
@@ -15,8 +16,8 @@ directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
 
 labels = {
-    "expm-pade": "Naive (Pade)",
-    "euler": "Euler",
+    # "expm-pade": "Naive (Pade)",
+    # "euler": "Euler",
     "diffrax-euler": "Euler (Diffrax)",
     "diffrax-tsit5": "Tsit5 (Diffrax)",
     "arnoldi": "Arnoldi",
@@ -29,7 +30,7 @@ for method, label in labels.items():
 
 stats_frame = pd.DataFrame(stats).T
 
-num_stats = len(stats["Euler"].keys())
+num_stats = len(stats["Arnoldi"].keys())
 column_format = f"l{'c'*num_stats}"
 latex = stats_frame.to_latex(column_format=column_format, float_format="%.1e")
 
@@ -38,76 +39,106 @@ print("\n")
 print(latex)
 print("\n")
 print("\n")
-assert False
 
-y0 = jnp.load(f"{directory_results}{args.method}_y0.npy")
-scale_mlp_before = jnp.load(f"{directory_results}{args.method}_scale_mlp_before.npy")
-scale_mlp_after = jnp.load(f"{directory_results}{args.method}_scale_mlp_after.npy")
-scale_grf = jnp.load(f"{directory_results}{args.method}_scale_grf.npy")
-y1_target = jnp.load(f"{directory_results}{args.method}_y1_target.npy")
-y1_approx_before = jnp.load(f"{directory_results}{args.method}_y1_approx_before.npy")
-y1_approx_after = jnp.load(f"{directory_results}{args.method}_y1_approx_after.npy")
+
+# method = "arnoldi"
+# y0 = jnp.load(f"{directory_results}{method}_y0.npy")
+# scale_mlp_before = jnp.load(f"{directory_results}{method}_scale_mlp_before.npy")
+# scale_mlp_after = jnp.load(f"{directory_results}{method}_scale_mlp_after.npy")
+# scale_grf = jnp.load(f"{directory_results}{method}_scale_grf.npy")
+# y1_target = jnp.load(f"{directory_results}{method}_y1_target.npy")
+# y1_approx_before = jnp.load(f"{directory_results}{method}_y1_approx_before.npy")
+# y1_approx_after = jnp.load(f"{directory_results}{method}_y1_approx_after.npy")
 
 
 # Plot
 
-layout = onp.asarray(
-    [
-        ["truth_scale", "truth_t0", "truth_t1"],
-        ["before_scale", "before_t0", "before_t1"],
-        ["after_scale", "after_t0", "after_t1"],
-    ]
-)
-figsize = (onp.shape(layout)[1] * 3, onp.shape(layout)[0] * 2)
-fig, axes = plt.subplot_mosaic(layout, figsize=figsize, sharex=True, sharey=True)
 
-
-def plot_t0(ax, x, /):
+def plot_t0(ax, z, /):
     kwargs_t0 = {"cmap": "Greys"}
-    args_plot = x
-
-    clr = ax.contourf(args_plot, **kwargs_t0)
-    fig.colorbar(clr, ax=ax)
+    x = jnp.linspace(0, 1, endpoint=True, num=z.shape[0])
+    y = jnp.linspace(0, 1, endpoint=True, num=z.shape[1])
+    x0, x1 = jnp.meshgrid(x, y)
+    clr = ax.contourf(x0, x1, z, **kwargs_t0)
+    ax.set_xticks((0.0, 0.5, 1.0))
+    ax.set_yticks((0.0, 0.5, 1.0))
+    ax.tick_params(axis="both", which="major", labelsize="xx-small")
+    cbar = fig.colorbar(clr, ax=ax)
+    cbar.ax.tick_params(labelsize="xx-small")
     return ax
 
 
-def plot_t1(ax, x, /):
+def plot_t1(ax, z, /):
     kwargs_t1 = {"cmap": "Oranges"}
-    args_plot = x
+    x = jnp.linspace(0, 1, endpoint=True, num=z.shape[0])
+    y = jnp.linspace(0, 1, endpoint=True, num=z.shape[1])
+    x0, x1 = jnp.meshgrid(x, y)
+    clr = ax.contourf(x0, x1, z, **kwargs_t1)
+    ax.set_xticks((0.0, 0.5, 1.0))
+    ax.set_yticks((0.0, 0.5, 1.0))
+    ax.tick_params(axis="both", which="major", labelsize="xx-small")
 
-    clr = ax.contourf(args_plot, **kwargs_t1)
-    fig.colorbar(clr, ax=ax)
+    cbar = fig.colorbar(clr, ax=ax)
+    cbar.ax.tick_params(labelsize="xx-small")
     return ax
 
 
-def plot_scale(ax, x, /):
+def plot_scale(ax, z, /):
     kwargs_scale = {"cmap": "Blues"}
-    args_plot = x
-    clr = ax.contourf(args_plot, **kwargs_scale)
-    fig.colorbar(clr, ax=ax)
+    x = jnp.linspace(0, 1, endpoint=True, num=z.shape[0])
+    y = jnp.linspace(0, 1, endpoint=True, num=z.shape[1])
+    x0, x1 = jnp.meshgrid(x, y)
+    clr = ax.contourf(x0, x1, z, **kwargs_scale)
+    ax.set_xticks((0.0, 0.5, 1.0))
+    ax.set_yticks((0.0, 0.5, 1.0))
+    ax.tick_params(axis="both", which="major", labelsize="xx-small")
+
+    cbar = fig.colorbar(clr, ax=ax)
+    cbar.ax.tick_params(labelsize="xx-small")
     return ax
 
 
-axes["truth_t0"].set_title("$y(t=t_0)$ (known)", fontsize="medium")
-axes["truth_t1"].set_title("$y(t=t_1)$ (target)", fontsize="medium")
-axes["truth_scale"].set_title("GRF / MLP (unknown)", fontsize="medium")
+label_col = ["truth", *list(labels.keys())]
+label_row = ["param", "y0", "y1"]
 
-axes["truth_scale"].set_ylabel("Truth (GRF)")
-plot_t0(axes["truth_t0"], y0[0])
-plot_t1(axes["truth_t1"], y1_target[0])
-plot_scale(axes["truth_scale"], scale_grf)
+layout = [[f"{what}_{how}" for how in label_col] for what in label_row]
+layout = onp.asarray(layout)
+
+nrows, ncols = onp.shape(layout)
+plt.rcParams.update(figsizes.neurips2024(nrows=nrows, ncols=ncols))
+
+plt.rcParams.update(fontsizes.neurips2024(default_smaller=2))
+plt.rcParams.update(axes.lines())
+
+fig, axes = plt.subplot_mosaic(layout, sharex=True, sharey=True, dpi=200)
+
+print("Plotting the truth")
+y0 = jnp.load(f"{directory_results}arnoldi_y0.npy")
+scale_grf = jnp.load(f"{directory_results}arnoldi_scale_grf.npy")
+y1_target = jnp.load(f"{directory_results}arnoldi_y1_target.npy")
+
+axes["param_truth"].set_title("Truth", fontsize="medium")
+plot_scale(axes["param_truth"], scale_grf)
+plot_t0(axes["y0_truth"], y0[0])
+plot_t1(axes["y1_truth"], y1_target[0])
 
 
-axes["before_scale"].set_ylabel("Before optim. (MLP)")
-plot_t0(axes["before_t0"], y0[0])
-plot_t1(axes["before_t1"], y1_approx_before[0])
-plot_scale(axes["before_scale"], scale_mlp_before)
+axes["param_truth"].set_ylabel("Parameter", fontsize="small")
+axes["y0_truth"].set_ylabel("Known: $y(t_0)$", fontsize="small")
+axes["y1_truth"].set_ylabel("Target: $y(t_1)$", fontsize="small")
+
+for method, label in labels.items():
+    y0 = jnp.load(f"{directory_results}{method}_y0.npy")
+    scale_mlp_after = jnp.load(f"{directory_results}{method}_scale_mlp_after.npy")
+    y1_approx_after = jnp.load(f"{directory_results}{method}_y1_approx_after.npy")
+
+    axes[f"param_{method}"].set_title(label, fontsize="small")
+    plot_scale(axes[f"param_{method}"], scale_grf)
+    plot_t0(axes[f"y0_{method}"], y0[0])
+    plot_t1(axes[f"y1_{method}"], y1_target[0])
 
 
-axes["after_scale"].set_ylabel("After optim. (MLP)")
-plot_t0(axes["after_t0"], y0[0])
-plot_t1(axes["after_t1"], y1_approx_after[0])
-plot_scale(axes["after_scale"], scale_mlp_after)
+fig.align_ylabels()
 
 plt.savefig(f"{directory_fig}/figure.pdf")
 plt.show()
