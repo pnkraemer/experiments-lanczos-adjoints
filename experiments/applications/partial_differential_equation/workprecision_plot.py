@@ -1,5 +1,6 @@
 """Plot work vs. precision of value_and_grad of matrix exponentials."""
 
+# todo: run in large scale and plot results
 import os
 
 import jax.numpy as jnp
@@ -62,3 +63,4 @@ directory = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory, exist_ok=True)
 
 plt.savefig(f"{directory}workprecision.pdf")
+plt.show()

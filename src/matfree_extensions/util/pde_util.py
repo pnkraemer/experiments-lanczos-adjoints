@@ -163,15 +163,16 @@ def loss_mse():
 
     return loss
 
+
 def loss_mse_relative(*, nugget):
     def loss(sol, /, *, targets):
-        return jnp.mean((sol - targets) ** 2 / (nugget+jnp.abs(targets)))
+        return jnp.mean((sol - targets) ** 2 / (nugget + jnp.abs(targets)))
 
     return loss
 
 
 # Below here is proper tested
-def solver_euler_fixed_step(ts, vector_field, /):
+def solver_euler(ts, vector_field, /):
     def step_fun(t_and_y, dt, p):
         t, y = t_and_y
         t = t + dt
@@ -182,7 +183,7 @@ def solver_euler_fixed_step(ts, vector_field, /):
         t0, dts = ts[0], jnp.diff(ts)
         step = functools.partial(step_fun, p=p)
         (_t1, y1), _y_all = jax.lax.scan(step, xs=dts, init=(t0, y0))
-        return y1
+        return y1, {}
 
     return solve
 
@@ -225,7 +226,11 @@ def solver_diffrax(
             stepsize_controller=stepsize_controller,
             adjoint=backprop,
         )
-        return sol.ys[-1]
+
+        # Stats not directly accessible, so we use a proxy:
+        num_matvecs = sol.stats["num_steps"] * solver.order(term)
+        info = {"num_matvecs": num_matvecs}
+        return sol.ys[-1], info
 
     return solve
 
@@ -241,8 +246,8 @@ def solver_expm(t0, t1, vector_field, /, expm):
             return jax.flatten_util.ravel_pytree(Av)[0]
 
         dt = t1 - t0
-        expm_matvec = expm(matvec_p, dt, y0_flat, p)
-        return unflatten_y(expm_matvec)
+        expm_matvec, info = expm(matvec_p, dt, y0_flat, p)
+        return unflatten_y(expm_matvec), info
 
     return solve
 
@@ -256,7 +261,7 @@ def expm_arnoldi(
         Q, H, _r, c = algorithm(y0_flat, *p)
         e1 = jnp.eye(len(H))[0, :]
         expmat = jax.scipy.linalg.expm(dt * H, max_squarings=max_squarings)
-        return 1 / c * Q @ expmat @ e1
+        return 1 / c * Q @ expmat @ e1, {"num_matvecs": krylov_depth}
 
     return expm
 

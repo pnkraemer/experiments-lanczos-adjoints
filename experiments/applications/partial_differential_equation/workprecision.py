@@ -13,9 +13,10 @@ from matfree_extensions.util import exp_util, pde_util
 
 # Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--num_runs", type=int, required=True, help="Time a function.")
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
+parser.add_argument("--num_runs", type=int, default=1)
+parser.add_argument("--num_steps_max", type=int, default=10)
 args = parser.parse_args()
 print(args)
 
@@ -49,28 +50,25 @@ def vector_field(x, p):
 
 
 def loss_function(solver):
-    nugget = jnp.finfo(targets).eps
-    loss = pde_util.loss_mse_relative(nugget=nugget)
     k = jax.random.PRNGKey(1421)
     u = jax.random.uniform(k, shape=mesh.shape)
 
-    def fun(p, input_, target_):
+    def fun(p, y0):
         """Compute the norm of the solution."""
-        y1 = solver(input_[0], p)
-        return jnp.vdot(u, y1)
-        # return loss(y1, targets=target_[0])
+        y1, info = solver(y0, p)
+        return jnp.vdot(u, y1), info
 
-    return jax.jit(jax.value_and_grad(fun))
+    return jax.jit(jax.value_and_grad(fun, has_aux=True))
 
 
 # Create a reference solver
-kwargs = {"num_steps": 20, "method": "dopri8", "adjoint": "direct"}
+kwargs = {"num_steps": 50, "method": "dopri8", "adjoint": "direct"}
 solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 loss = loss_function(solve)
 
 # Precompile
-value, gradient = loss(parameter, inputs, targets)
+(value, aux), gradient = loss(parameter, inputs[0])
 value.block_until_ready()
 gradient.block_until_ready()
 
@@ -78,7 +76,7 @@ gradient.block_until_ready()
 ts = []
 for _ in range(args.num_runs):
     t0 = time.perf_counter()
-    val, grad = loss(parameter, inputs, targets)
+    (val, aux), grad = loss(parameter, inputs[0])
     val.block_until_ready()
     grad.block_until_ready()
     t1 = time.perf_counter()
@@ -86,39 +84,41 @@ for _ in range(args.num_runs):
 
 ts = jnp.stack(ts)
 
-num_matvecs = jnp.arange(1, 10)
+num_steps = jnp.arange(1, args.num_steps_max)
 errors_fwd = []
 errors_rev = []
+Ns = []
 ts_all = []
 
-progressbar = tqdm.tqdm(num_matvecs)
-for nmv in progressbar:
-    nmv = int(nmv)
-    if nmv > parameter.size:
+progressbar = tqdm.tqdm(num_steps)
+for nstp in progressbar:
+    nstp = int(nstp)
+    if nstp > parameter.size:
+        print("The Krylov depth would exceed the matrix size.")
         break
 
     if args.method == "arnoldi":
-        expm = pde_util.expm_arnoldi(nmv)
+        expm = pde_util.expm_arnoldi(nstp)
         solve = pde_util.solver_expm(0.0, 1.0, vector_field, expm=expm)
 
     elif args.method == "diffrax:euler+backsolve":
         method, adjoint = "euler", "backsolve"
-        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
+        kwargs = {"num_steps": nstp, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     elif args.method == "diffrax:heun+recursive_checkpoint":
         method, adjoint = "heun", "recursive_checkpoint"
-        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
+        kwargs = {"num_steps": nstp, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     elif args.method == "diffrax:tsit5+recursive_checkpoint":
         method, adjoint = "tsit5", "recursive_checkpoint"
-        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
+        kwargs = {"num_steps": nstp, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     elif args.method == "diffrax:dopri5+backsolve":
         method, adjoint = "dopri5", "backsolve"
-        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
+        kwargs = {"num_steps": nstp, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     else:
@@ -127,23 +127,25 @@ for nmv in progressbar:
 
     # Compute values and gradients (and precompile while we're at it)
     loss = loss_function(solve)
-    f, df = loss(parameter, inputs, targets)
-    # print(f)
+    (f, aux), df = loss(parameter, inputs[0])
 
     # Compute the error
     nugget = jnp.finfo(targets).eps
     error = pde_util.loss_mse_relative(nugget=nugget)
     fwd = jnp.sqrt(error(f, targets=value))
     rev = jnp.sqrt(error(df, targets=gradient))
+    n = aux["num_matvecs"]
     errors_fwd.append(fwd)
     errors_rev.append(rev)
-    progressbar.set_description(f"(N={nmv}, fwd={fwd:.1e}, rev={rev:.1e}))")
+    Ns.append(int(n))
+    progressbar.set_description(f"(N={n}, fwd={fwd:.1e}, rev={rev:.1e}))")
 
     # Compute the run times
+    # todo: move to a dedicated function
     ts = []
     for _ in range(args.num_runs):
         t0 = time.perf_counter()
-        val, grad = loss(parameter, inputs, targets)
+        (val, aux), grad = loss(parameter, inputs[0])
         val.block_until_ready()
         grad.block_until_ready()
         t1 = time.perf_counter()
@@ -158,7 +160,7 @@ for nmv in progressbar:
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
 
-jnp.save(f"{directory}/wp_{args.method}_Ns", num_matvecs)
+jnp.save(f"{directory}/wp_{args.method}_Ns", Ns)
 jnp.save(f"{directory}/wp_{args.method}_ts", jnp.asarray(ts_all))
 jnp.save(f"{directory}/wp_{args.method}_errors_fwd", jnp.asarray(errors_fwd))
 jnp.save(f"{directory}/wp_{args.method}_errors_rev", jnp.asarray(errors_rev))
