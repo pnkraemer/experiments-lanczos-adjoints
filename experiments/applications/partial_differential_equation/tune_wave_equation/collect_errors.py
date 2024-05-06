@@ -1,3 +1,5 @@
+"""Evaluate work vs. precision of value_and_grad of matrix exponentials."""
+
 import argparse
 import os
 import pickle
@@ -18,13 +20,12 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_runs", type=int, required=True, help="Time a function.")
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
+parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
 args = parser.parse_args()
 print(args)
 
 # Load data
-directory = exp_util.matching_directory(__file__, "data/")
-os.makedirs(directory, exist_ok=True)
-path = f"{directory}{args.resolution}x{args.resolution}"
+path = f"./data/pde_wave/{args.resolution}x{args.resolution}"
 
 inputs = jnp.load(f"{path}_data_inputs.npy")
 targets = jnp.load(f"{path}_data_targets.npy")
@@ -64,15 +65,14 @@ def loss_function(solver):
 
 
 # Create a reference solver
-
 expm = pde_util.expm_pade()
 solve = pde_util.solver_expm(0., 1., vector_field, expm=expm)
 loss = loss_function(solve)
 
 # Precompile
-val, grad = (loss(parameter, inputs, targets))
-val.block_until_ready()
-grad.block_until_ready()
+value, gradient = (loss(parameter, inputs, targets))
+value.block_until_ready()
+gradient.block_until_ready()
 
 ts = []
 for _ in range(args.num_runs):
@@ -86,25 +86,59 @@ for _ in range(args.num_runs):
 ts = jnp.stack(ts)
 print(ts)
 
-num_matvecs = 10
-expm = pde_util.expm_arnoldi(num_matvecs)
-solve = pde_util.solver_expm(0., 1., vector_field, expm=expm)
+num_matvecs = 2**jnp.arange(3, 8)
+errors_fwd = []
+errors_rev = []
+ts_all = []
 
-loss = loss_function(solve)
+for nmv in tqdm.tqdm(num_matvecs):
+    nmv = int(nmv)
+    if nmv > parameter.size:
+        break 
 
-# Precompile
-val, grad = (loss(parameter, inputs, targets))
-val.block_until_ready()
-grad.block_until_ready()
+    if args.method == "arnoldi":
+        expm = pde_util.expm_arnoldi(nmv)
+        solve = pde_util.solver_expm(0., 1., vector_field, expm=expm)
+    elif args.method == "diffrax:tsit5+backsolve":
+        if nmv < 5:
+            raise ValueError
+        method, adjoint = "tsit5", "backsolve"
+        kwargs = {"num_steps": nmv // 5, "method": method, "adjoint": adjoint}
+        solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+    else:
+        raise ValueError
 
-ts = []
-for _ in range(args.num_runs):
-    t0 = time.perf_counter()
-    val, grad = loss(parameter, inputs, targets)
-    val.block_until_ready()
-    grad.block_until_ready()
-    t1 = time.perf_counter()
-    ts.append(t1 - t0)
 
-ts = jnp.stack(ts)
-print(ts)
+    # Compute values and gradients (and precompile while we're at it)
+    loss = loss_function(solve)
+    f, df = (loss(parameter, inputs, targets))
+
+    # Compute the error
+    nugget = jnp.sqrt(jnp.finfo(targets).eps)
+    error = pde_util.loss_mse_relative(nugget=nugget)
+    fwd = error(f, targets=value)
+    rev = error(df, targets=gradient)
+    errors_fwd.append(jnp.sqrt(fwd))
+    errors_rev.append(jnp.sqrt(rev))
+
+    # Compute the run times
+    ts = []
+    for _ in range(args.num_runs):
+        t0 = time.perf_counter()
+        val, grad = loss(parameter, inputs, targets)
+        val.block_until_ready()
+        grad.block_until_ready()
+        t1 = time.perf_counter()
+        ts.append(t1 - t0)
+
+    ts = jnp.stack(ts)
+    ts_all.append(ts)
+    
+
+directory = exp_util.matching_directory(__file__, "results/")
+os.makedirs(directory, exist_ok=True)
+
+jnp.save(f"{directory}/wp_{args.method}_Ns", num_matvecs)
+jnp.save(f"{directory}/wp_{args.method}_ts", jnp.asarray(ts_all))
+jnp.save(f"{directory}/wp_{args.method}_errors_fwd", jnp.asarray(errors_fwd))
+jnp.save(f"{directory}/wp_{args.method}_errors_rev", jnp.asarray(errors_rev))
