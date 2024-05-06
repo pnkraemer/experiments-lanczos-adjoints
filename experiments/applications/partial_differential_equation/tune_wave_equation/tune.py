@@ -1,5 +1,6 @@
 import argparse
 import os
+import pickle
 import time
 import warnings
 
@@ -12,7 +13,6 @@ import optax
 import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
-# todo: save all reconstruction errors (y1, scale, fwd_raw, bwd_raw) in a file
 # todo: run for different solvers
 # todo: verify somehow that we do solve the PDE!
 # todo: turn the sampler into a Lanczos sampler (so we can scale!)
@@ -25,12 +25,11 @@ os.makedirs(directory_results, exist_ok=True)
 
 # Parse arguments
 parser = argparse.ArgumentParser()
-methods = ["euler", "arnoldi", "diffrax_tsit5", "diffrax_euler", "diffrax_heun"]
-parser.add_argument("--method", help=f"One of {methods}", required=True)
-parser.add_argument("--seed", type=int, required=True)
+parser.add_argument("--method", required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
-parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--num_dx_points", type=int, required=True)
+parser.add_argument("--num_epochs", type=int, default=10_000)
+parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--plot_matrix", action="store_true")
 parser.add_argument("--x64", action="store_true")
 args = parser.parse_args()
@@ -200,19 +199,36 @@ else:
     msg = f"Method {args.method} is not supported."
     raise ValueError(msg)
 
+errors = {}
 target_y1 = target_solve(y0, grf_scale)
-approx_y1 = approx_solve(y0, grf_scale)
 
+fun = jax.jit(approx_solve)
+approx_y1 = fun(y0, grf_scale).block_until_ready()
 fwd_error = jnp.mean((approx_y1 - target_y1) ** 2)
+errors["error_fwd"] = fwd_error
 print("\nForward error:", fwd_error)
+
+t0 = time.perf_counter()
+for _ in range(10):
+    fun(y0, grf_scale).block_until_ready()
+t1 = time.perf_counter()
+errors["time_fwd"] = t1 - t0
 
 key, subkey = jax.random.split(key, num=2)
 u = jax.random.normal(subkey, shape=y0.shape)
 target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
-approx_jacrev = jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z)))(grf_scale)
 
+fun = jax.jit(jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z))))
+approx_jacrev = fun(grf_scale).block_until_ready()
 bwd_error = jnp.mean((approx_jacrev - target_jacrev) ** 2)
+errors["error_bwd"] = fwd_error
+
 print("Backward error:", bwd_error, "\n")
+t0 = time.perf_counter()
+for _ in range(10):
+    fun(grf_scale).block_until_ready()
+t1 = time.perf_counter()
+errors["time_bwd"] = t1 - t0
 
 
 # Set up parameter approximation
@@ -264,3 +280,12 @@ jnp.save(f"{directory_results}{args.method}_scale_grf.npy", scale_grf)
 jnp.save(f"{directory_results}{args.method}_y1_target.npy", target_y1)
 jnp.save(f"{directory_results}{args.method}_y1_approx_before.npy", y1_before)
 jnp.save(f"{directory_results}{args.method}_y1_approx_after.npy", y1_after)
+
+error_y1 = jnp.mean((y1_after - target_y1) ** 2)
+error_scale = jnp.mean((scale_grf - scale_after) ** 2)
+errors["error_y1"] = error_y1
+errors["error_scale"] = error_scale
+
+
+with open(f"{directory_results}stats.pkl", "wb") as handle:
+    pickle.dump(errors, handle)
