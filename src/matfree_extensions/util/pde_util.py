@@ -182,26 +182,15 @@ def solver_euler_fixed_step(ts, vector_field, /):
 
 
 def solver_diffrax(
-    t0,
-    t1,
-    vector_field,
-    /,
-    *,
-    num_steps: int,
-    method: str,
-    adjoint: str,
-    max_steps: int = 4096,
+    t0, t1, vector_field, /, *, num_steps: int, method: str, adjoint: str
 ):
     @diffrax.ODETerm
     def term(t, y, args):  # noqa: ARG001
         return vector_field(y, args)
 
-    tol = jnp.sqrt(jnp.finfo(t0).eps)
-    # todo: use a linear solver in here...
-    root = diffrax.VeryChord(atol=tol, rtol=tol)
     match_methods = {
+        "dopri8": diffrax.Dopri8(),
         "tsit5": diffrax.Tsit5(),
-        "euler-implicit": diffrax.ImplicitEuler(root),
         "euler": diffrax.Euler(),
         "heun": diffrax.Heun(),
     }
@@ -228,7 +217,6 @@ def solver_diffrax(
             y0=y0,
             stepsize_controller=stepsize_controller,
             adjoint=backprop,
-            max_steps=max_steps,
         )
         return sol.ys[-1]
 

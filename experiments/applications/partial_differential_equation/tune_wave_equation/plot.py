@@ -1,10 +1,10 @@
-import argparse
 import os
 import pickle
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
+import pandas as pd
 from matfree_extensions.util import exp_util
 
 # todo: plot all methods next to each other
@@ -14,14 +14,31 @@ directory_results = exp_util.matching_directory(__file__, "results/")
 directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
 
+labels = {
+    "expm-pade": "Naive (Pade)",
+    "euler": "Euler",
+    "diffrax-euler": "Euler (Diffrax)",
+    "diffrax-tsit5": "Tsit5 (Diffrax)",
+    "arnoldi": "Arnoldi",
+}
+stats = {}
+for method, label in labels.items():
+    with open(f"{directory_results}{method}_stats.pkl", "rb") as handle:
+        stats[label] = pickle.load(handle)
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--method", required=True)
-args = parser.parse_args()
 
-with open(f"{directory_results}{args.method}_stats.pkl", "rb") as handle:
-    stats = pickle.load(handle)
+stats_frame = pd.DataFrame(stats).T
 
+num_stats = len(stats["Euler"].keys())
+column_format = f"l{'c'*num_stats}"
+latex = stats_frame.to_latex(column_format=column_format, float_format="%.1e")
+
+print("\n")
+print("\n")
+print(latex)
+print("\n")
+print("\n")
+assert False
 
 y0 = jnp.load(f"{directory_results}{args.method}_y0.npy")
 scale_mlp_before = jnp.load(f"{directory_results}{args.method}_scale_mlp_before.npy")

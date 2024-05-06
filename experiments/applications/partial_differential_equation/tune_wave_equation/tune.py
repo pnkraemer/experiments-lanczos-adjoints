@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--method", required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
 parser.add_argument("--num_dx_points", type=int, required=True)
-parser.add_argument("--num_epochs", type=int, default=10_000)
+parser.add_argument("--num_epochs", type=int, default=100)
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--plot_matrix", action="store_true")
 parser.add_argument("--x64", action="store_true")
@@ -129,13 +129,7 @@ print(f"Projected runtime per iteration: ~{vf_time * args.num_matvecs * 2} secon
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=20_000)
 
 target_solve = pde_util.solver_diffrax(
-    pde_t0,
-    pde_t1,
-    vector_field,
-    num_steps=8095,
-    max_steps=8096,
-    method="tsit5",
-    adjoint="recursive_checkpoint",
+    pde_t0, pde_t1, vector_field, num_steps=1000, method="dopri8", adjoint="backsolve"
 )
 
 # Build an approximate model
@@ -151,7 +145,8 @@ elif args.method == "expm-pade":
 elif args.method == "euler":
     approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
 elif args.method == "diffrax-tsit5":
-    adjoint = "recursive_checkpoint"
+    # adjoint = "recursive_checkpoint"
+    adjoint = "backsolve"
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
         pde_t1,
@@ -161,7 +156,8 @@ elif args.method == "diffrax-tsit5":
         adjoint=adjoint,
     )
 elif args.method == "diffrax-euler":
-    adjoint = "recursive_checkpoint"
+    # adjoint = "recursive_checkpoint"
+    adjoint = "backsolve"
 
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
@@ -172,7 +168,8 @@ elif args.method == "diffrax-euler":
         adjoint=adjoint,
     )
 elif args.method == "diffrax-euler-implicit":
-    adjoint = "recursive_checkpoint"
+    # adjoint = "recursive_checkpoint"
+    adjoint = "backsolve"
 
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
@@ -183,7 +180,8 @@ elif args.method == "diffrax-euler-implicit":
         adjoint=adjoint,
     )
 elif args.method == "diffrax-heun":
-    adjoint = "recursive_checkpoint"
+    # adjoint = "recursive_checkpoint"
+    adjoint = "backsolve"
     approx_solve = pde_util.solver_diffrax(
         pde_t0,
         pde_t1,
@@ -196,20 +194,20 @@ else:
     msg = f"Method {args.method} is not supported."
     raise ValueError(msg)
 
-errors = {}
+stats = {}
 target_y1 = target_solve(y0, grf_scale)
 
 fun = jax.jit(approx_solve)
 approx_y1 = fun(y0, grf_scale).block_until_ready()
 fwd_error = jnp.mean((approx_y1 - target_y1) ** 2)
-errors["error_fwd"] = fwd_error
+stats["MSE: FWD"] = fwd_error
 print("\nForward error:", fwd_error)
 
 t0 = time.perf_counter()
 for _ in range(10):
     fun(y0, grf_scale).block_until_ready()
 t1 = time.perf_counter()
-errors["time_fwd"] = t1 - t0
+stats["Time: FWD"] = (t1 - t0) / 10
 
 key, subkey = jax.random.split(key, num=2)
 u = jax.random.normal(subkey, shape=y0.shape)
@@ -218,14 +216,14 @@ target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
 fun = jax.jit(jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z))))
 approx_jacrev = fun(grf_scale).block_until_ready()
 bwd_error = jnp.mean((approx_jacrev - target_jacrev) ** 2)
-errors["error_bwd"] = fwd_error
+stats["MSE: REV"] = bwd_error
 
 print("Backward error:", bwd_error, "\n")
 t0 = time.perf_counter()
 for _ in range(10):
     fun(grf_scale).block_until_ready()
 t1 = time.perf_counter()
-errors["time_bwd"] = t1 - t0
+stats["Time: REV"] = (t1 - t0) / 10
 
 
 # Set up parameter approximation
@@ -282,9 +280,10 @@ jnp.save(f"{directory_results}{args.method}_y1_approx_after.npy", y1_after)
 
 error_y1 = jnp.mean((y1_after - target_y1) ** 2)
 error_scale = jnp.mean((scale_grf - scale_after) ** 2)
-errors["error_y1"] = error_y1
-errors["error_scale"] = error_scale
+stats["MSE: Sim."] = error_y1
+stats["MSE: Param."] = error_scale
 
 
+stats = jax.tree_util.tree_map(float, stats)
 with open(f"{directory_results}{args.method}_stats.pkl", "wb") as handle:
-    pickle.dump(errors, handle)
+    pickle.dump(stats, handle)
