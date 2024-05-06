@@ -15,6 +15,8 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 # todo: save all reconstruction errors (y1, scale, fwd_raw, bwd_raw) in a file
 # todo: run for different solvers
 # todo: verify somehow that we do solve the PDE!
+# todo: turn the sampler into a Lanczos sampler (so we can scale!)
+# todo: 3d?
 
 
 # Make directories
@@ -57,6 +59,8 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 def constrain(arg):
     """Constrain the PDE-scale to strictly positive values."""
+    # todo: replace the 0.1 with a different output scale in
+    #  the prior and in the mlp, respectively?
     return 0.1 * arg**2
 
 
@@ -199,7 +203,7 @@ else:
 target_y1 = target_solve(y0, grf_scale)
 approx_y1 = approx_solve(y0, grf_scale)
 
-fwd_error = (jnp.mean((approx_y1 - target_y1) ** 2))
+fwd_error = jnp.mean((approx_y1 - target_y1) ** 2)
 print("\nForward error:", fwd_error)
 
 key, subkey = jax.random.split(key, num=2)
@@ -207,7 +211,7 @@ u = jax.random.normal(subkey, shape=y0.shape)
 target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
 approx_jacrev = jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z)))(grf_scale)
 
-bwd_error = (jnp.mean((approx_jacrev - target_jacrev) ** 2))
+bwd_error = jnp.mean((approx_jacrev - target_jacrev) ** 2)
 print("Backward error:", bwd_error, "\n")
 
 
@@ -246,18 +250,17 @@ for _ in progressbar:
         break
 
 # Save to a file
-scale_before = mlp_apply(mlp_unflatten(variables_before), mesh)
-scale_after = mlp_apply(mlp_unflatten(variables_after), mesh)
+# Todo: subsample the meshes before saving?
+
+scale_grf = constrain(grf_scale)
+scale_before = constrain(mlp_apply(mlp_unflatten(variables_before), mesh))
+scale_after = constrain(mlp_apply(mlp_unflatten(variables_after), mesh))
 y1_before = approx_solve(y0, scale_before)
 y1_after = approx_solve(y0, scale_after)
 jnp.save(f"{directory_results}{args.method}_y0.npy", y0)
-jnp.save(
-    f"{directory_results}{args.method}_scale_mlp_before.npy", constrain(scale_before)
-)
-jnp.save(
-    f"{directory_results}{args.method}_scale_mlp_after.npy", constrain(scale_after)
-)
-jnp.save(f"{directory_results}{args.method}_scale_grf.npy", constrain(grf_scale))
+jnp.save(f"{directory_results}{args.method}_scale_mlp_before.npy", scale_before)
+jnp.save(f"{directory_results}{args.method}_scale_mlp_after.npy", scale_after)
+jnp.save(f"{directory_results}{args.method}_scale_grf.npy", scale_grf)
 jnp.save(f"{directory_results}{args.method}_y1_target.npy", target_y1)
 jnp.save(f"{directory_results}{args.method}_y1_approx_before.npy", y1_before)
 jnp.save(f"{directory_results}{args.method}_y1_approx_after.npy", y1_after)
