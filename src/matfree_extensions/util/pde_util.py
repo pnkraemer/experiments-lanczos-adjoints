@@ -175,7 +175,9 @@ def solver_euler_fixed_step(ts, vector_field, /):
     return solve
 
 
-def solver_diffrax(t0, t1, vector_field, /, *, num_steps: int, method: str):
+def solver_diffrax(
+    t0, t1, vector_field, /, *, num_steps: int, method: str, adjoint: str
+):
     @diffrax.ODETerm
     def term(t, y, args):  # noqa: ARG001
         return vector_field(y, args)
@@ -186,6 +188,13 @@ def solver_diffrax(t0, t1, vector_field, /, *, num_steps: int, method: str):
         "heun": diffrax.Heun(),
     }
     solver = match_methods[method]
+
+    match_adjoints = {
+        "recursive_checkpoint": diffrax.RecursiveCheckpointAdjoint(),
+        "direct": diffrax.DirectAdjoint(),
+        "backsolve": diffrax.BacksolveAdjoint(),
+    }
+    backprop = match_adjoints[adjoint]
 
     dt0 = (t1 - t0) / num_steps
     stepsize_controller = diffrax.ConstantStepSize()
@@ -200,6 +209,7 @@ def solver_diffrax(t0, t1, vector_field, /, *, num_steps: int, method: str):
             dt0=dt0,
             y0=y0,
             stepsize_controller=stepsize_controller,
+            adjoint=backprop,
         )
         return sol.ys[-1]
 

@@ -125,16 +125,35 @@ elif args.method == "expm-pade":
 elif args.method == "euler":
     approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
 elif args.method == "diffrax-tsit5":
+    adjoint = "recursive_checkpoint"
     approx_solve = pde_util.solver_diffrax(
-        pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs // 5, method="tsit5"
+        pde_t0,
+        pde_t1,
+        vector_field,
+        num_steps=args.num_matvecs // 5,
+        method="tsit5",
+        adjoint=adjoint,
     )
 elif args.method == "diffrax-euler":
+    adjoint = "recursive_checkpoint"
+
     approx_solve = pde_util.solver_diffrax(
-        pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs, method="euler"
+        pde_t0,
+        pde_t1,
+        vector_field,
+        num_steps=args.num_matvecs,
+        method="euler",
+        adjoint=adjoint,
     )
 elif args.method == "diffrax-heun":
+    adjoint = "recursive_checkpoint"
     approx_solve = pde_util.solver_diffrax(
-        pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs // 2, method="heun"
+        pde_t0,
+        pde_t1,
+        vector_field,
+        num_steps=args.num_matvecs // 2,
+        method="heun",
+        adjoint=adjoint,
     )
 else:
     msg = f"Method {args.method} is not supported."
