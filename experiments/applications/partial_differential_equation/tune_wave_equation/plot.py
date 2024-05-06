@@ -1,5 +1,6 @@
 import argparse
 import os
+import pickle
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -7,14 +8,19 @@ import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
 from matfree_extensions.util import exp_util
 
 # todo: plot all methods next to each other
+# todo: get all stats into a datafram and print latex
 
+directory_results = exp_util.matching_directory(__file__, "results/")
 directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
-directory_results = exp_util.matching_directory(__file__, "results/")
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--method", required=True)
 args = parser.parse_args()
+
+with open(f"{directory_results}{args.method}_stats.pkl", "rb") as handle:
+    stats = pickle.load(handle)
 
 
 y0 = jnp.load(f"{directory_results}{args.method}_y0.npy")

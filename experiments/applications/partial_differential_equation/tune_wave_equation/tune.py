@@ -13,7 +13,6 @@ import optax
 import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
-# todo: run for different solvers
 # todo: verify somehow that we do solve the PDE!
 # todo: turn the sampler into a Lanczos sampler (so we can scale!)
 # todo: 3d?
@@ -287,5 +286,5 @@ errors["error_y1"] = error_y1
 errors["error_scale"] = error_scale
 
 
-with open(f"{directory_results}stats.pkl", "wb") as handle:
+with open(f"{directory_results}{args.method}_stats.pkl", "wb") as handle:
     pickle.dump(errors, handle)
