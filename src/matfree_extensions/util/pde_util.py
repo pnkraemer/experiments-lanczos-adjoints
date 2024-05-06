@@ -163,9 +163,8 @@ def loss_mse():
 
     return loss
 
-def loss_rmse():
+def loss_mse_relative(*, nugget):
     def loss(sol, /, *, targets):
-        nugget = jnp.sqrt(jnp.finfo(targets).eps)
         return jnp.mean((sol - targets) ** 2 / (nugget+jnp.abs(targets)))
 
     return loss
