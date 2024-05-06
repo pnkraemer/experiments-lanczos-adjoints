@@ -10,12 +10,8 @@ import optax
 import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
-# todo: quantify the reconstruction errors a little bit
-
+# todo: save all reconstruction errors (y1, scale, fwd_raw, bwd_raw) in a file
 # todo: run for different solvers
-
-# todo: figure out what to plot...
-
 # todo: verify somehow that we do solve a wave equation!
 
 # Make directories

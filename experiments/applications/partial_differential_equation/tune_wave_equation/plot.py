@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
 from matfree_extensions.util import exp_util
 
+# todo: plot all methods next to each other
+
 directory_fig = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory_fig, exist_ok=True)
 directory_results = exp_util.matching_directory(__file__, "results/")
