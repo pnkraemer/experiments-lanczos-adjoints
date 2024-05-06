@@ -397,11 +397,18 @@ def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
+            # Evaluate the scaled norm of differences
+            # (expanding |x-y|^2 for GPU-speed)
             x = jnp.sqrt(3) * x / lengthscale
             y = jnp.sqrt(3) * y / lengthscale
             scaled = jnp.dot(x, x) + jnp.dot(y, y) - 2 * jnp.dot(x, y)
 
+            # Clamp to allow square-roots
+            scaled = jnp.maximum(0.0, scaled)
+
             # Shift by epsilon to guarantee differentiable sqrts
+            # (Clamping is not enough because |x| is
+            # not differentiable at zero
             epsilon = jnp.finfo(scaled).eps
             sqrt = jnp.sqrt(scaled + epsilon)
             return outputscale * (1 + sqrt) * jnp.exp(-sqrt)
@@ -430,12 +437,18 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
             lengthscale = _softplus(raw_lengthscale)
             outputscale = _softplus(raw_outputscale)
 
-            # Compute the norm of the differences
+            # Evaluate the scaled norm of differences
+            # (expanding |x-y|^2 for GPU-speed)
             x /= lengthscale
             y /= lengthscale
             scaled = jnp.dot(x, x) + jnp.dot(y, y) - 2 * jnp.dot(x, y)
 
+            # Clamp to allow square-roots
+            scaled = jnp.maximum(0.0, scaled)
+
             # Shift by epsilon to guarantee differentiable sqrts
+            # (Clamping is not enough because |x| is
+            # not differentiable at zero
             epsilon = jnp.finfo(scaled).eps
             sqrt = jnp.sqrt(scaled + epsilon)
             return outputscale * jnp.exp(-sqrt)
@@ -468,6 +481,9 @@ def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
             x /= lengthscale
             y /= lengthscale
             log_k = jnp.dot(x, x) + jnp.dot(y, y) - 2 * jnp.dot(x, y)
+
+            # Clamp because the difference should never be negative
+            log_k = jnp.maximum(0.0, log_k)
 
             # Return the kernel function
             return outputscale * jnp.exp(-log_k / 2)
