@@ -70,22 +70,25 @@ grf_xs = mesh.reshape((2, -1)).T
 grf_kernel, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
 kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-4.0)
 grf_K = gp_util.gram_matrix(kernel_fun)(grf_xs, grf_xs)
-grf_K += 1e-6 * jnp.eye(len(grf_K))
-grf_cholesky = jnp.linalg.cholesky(grf_K)
+
+# Sample
+(w, v) = jnp.linalg.eigh(grf_K)
+w = jnp.maximum(0.0, w)  # clamp to allow sqrts
+grf_factor = v * jnp.sqrt(w[..., None, :])
 
 key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
-grf_scale = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
+grf_scale = (grf_factor @ grf_eps).reshape(mesh[0].shape)
 
 
 # Initial condition
 key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
-grf_init = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
+grf_init = (grf_factor @ grf_eps).reshape(mesh[0].shape)
 
 key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
-grf_init_diff = (grf_cholesky @ grf_eps).reshape(mesh[0].shape)
+grf_init_diff = (grf_factor @ grf_eps).reshape(mesh[0].shape)
 y0 = jnp.stack([grf_init, grf_init_diff])
 
 
@@ -110,16 +113,9 @@ target_solve = pde_util.solver_euler_fixed_step(solve_ts_data, vector_field)
 target_y1 = target_solve(y0, grf_scale)
 
 # Build an approximate model
-mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
-key, subkey = jax.random.split(key, num=2)
-variables_before, mlp_unflatten = mlp_init(subkey)
-print(f"Number of parameters: {variables_before.size}")
-
-
-# Create a loss function
 if args.method == "arnoldi":
     expm = pde_util.expm_arnoldi(arnoldi_depth)
-    approx_solve = pde_util.solver_arnoldi(pde_t0, pde_t1, vector_field, expm=expm)
+    approx_solve = pde_util.solver_expm(pde_t0, pde_t1, vector_field, expm=expm)
 elif args.method == "euler":
     approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
 elif args.method == "diffrax_tsit5":
@@ -137,6 +133,20 @@ elif args.method == "diffrax_heun":
 else:
     msg = f"Method {args.method} is not supported."
     raise ValueError(msg)
+
+approx_y1 = approx_solve(y0, grf_scale)
+fwd_error = jnp.mean((approx_y1[0] - target_y1[0]) ** 2)
+print("Forward error:", fwd_error)
+
+
+# Set up parameter approximation
+mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
+key, subkey = jax.random.split(key, num=2)
+variables_before, mlp_unflatten = mlp_init(subkey)
+print(f"Number of parameters: {variables_before.size}")
+
+
+# Create a loss function
 loss = pde_util.loss_mse()
 
 
