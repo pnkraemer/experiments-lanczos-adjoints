@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 import warnings
 
 import jax
@@ -13,6 +14,8 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 # todo: save all reconstruction errors (y1, scale, fwd_raw, bwd_raw) in a file
 # todo: run for different solvers
 # todo: verify somehow that we do solve a wave equation!
+# todo: plot the RHS matrix to see whether it is indeed symmetric
+
 
 # Make directories
 directory_results = exp_util.matching_directory(__file__, "results/")
@@ -33,7 +36,7 @@ args = parser.parse_args()
 pde_t0, pde_t1 = 0.0, 1.0
 mlp_features = [20, 20, 1]
 mlp_activation = jax.nn.tanh
-optimizer = optax.adam(1e-3)
+optimizer = optax.adam(1e-2)
 
 # Process the parameters
 key = jax.random.PRNGKey(args.seed)
@@ -45,7 +48,6 @@ arnoldi_depth = args.num_matvecs
 xs_1d = jnp.linspace(0.0, 1.0, endpoint=True, num=args.num_dx_points)
 dx_space = jnp.diff(xs_1d)[0]
 mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
-print(f"Number of points: {mesh.size // 2}")
 
 
 def constrain(arg):
@@ -59,7 +61,7 @@ grf_kernel, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
 kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-4.0)
 grf_K = gp_util.gram_matrix(kernel_fun)(grf_xs, grf_xs)
 
-# Sample
+# Sample  # todo: sample with Lanczos? Otherwise we go crazy here...
 (w, v) = jnp.linalg.eigh(grf_K)
 w = jnp.maximum(0.0, w)  # clamp to allow sqrts
 grf_factor = v * jnp.sqrt(w[..., None, :])
@@ -78,6 +80,8 @@ key, subkey = jax.random.split(key, num=2)
 grf_eps = jax.random.normal(subkey, shape=grf_xs[:, 0].shape)
 grf_init_diff = (grf_factor @ grf_eps).reshape(mesh[0].shape)
 y0 = jnp.stack([grf_init, grf_init_diff])
+print(f"\nNumber of points: {mesh.size // 2}")
+print(f"Number of ODE dimensions: {y0.size}\n")
 
 
 # Discretise the PDE dynamics with method of lines (MOL)
@@ -91,10 +95,23 @@ pde_rhs, _params_rhs = pde_util.pde_wave_anisotropic(
 # Create the data/targets
 
 
+@jax.jit
 def vector_field(x, p):
     """Evaluate the PDE dynamics."""
     return pde_rhs(scale=p)(x)
 
+
+# Time the vector field (count how many iterations we can fit in a second)
+vector_field(y0, grf_scale).block_until_ready()  # pre compile
+t0 = time.perf_counter()
+ct = 0
+while (vf_time := (time.perf_counter() - t0)) < 1.0:
+    vector_field(y0, grf_scale).block_until_ready()
+    ct += 1
+vf_time /= ct
+print(f"\nRHS evaluation: {vf_time} seconds")
+# x2 because we assume that the adjoint pass also evaluates the RHS
+print(f"Projected runtime per iteration: ~{vf_time * args.num_matvecs * 2} seconds\n")
 
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=10_000)
 target_solve = pde_util.solver_euler_fixed_step(solve_ts_data, vector_field)
@@ -150,7 +167,7 @@ target_y1 = target_solve(y0, grf_scale)
 approx_y1 = approx_solve(y0, grf_scale)
 
 fwd_error = jnp.sqrt(jnp.mean((approx_y1 - target_y1) ** 2))
-print("Forward error:", fwd_error)
+print("\nForward error:", fwd_error)
 
 key, subkey = jax.random.split(key, num=2)
 u = jax.random.normal(subkey, shape=y0.shape)
@@ -158,14 +175,14 @@ target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
 approx_jacrev = jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z)))(grf_scale)
 
 bwd_error = jnp.sqrt(jnp.mean((approx_jacrev - target_jacrev) ** 2))
-print("Backward error:", bwd_error)
+print("Backward error:", bwd_error, "\n")
 
 
 # Set up parameter approximation
 mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
 key, mlp_key = jax.random.split(key, num=2)
 variables_before, mlp_unflatten = mlp_init(subkey)
-print(f"Number of parameters: {variables_before.size}")
+print(f"\nNumber of parameters: {variables_before.size}\n")
 
 
 # Create a loss function
@@ -190,7 +207,7 @@ for _ in progressbar:
     loss, grad = loss_value_and_grad(variables_after, target_y1)
     updates, opt_state = optimizer.update(grad, opt_state)
     variables_after = optax.apply_updates(variables_after, updates)
-    progressbar.set_description(f"Loss {loss:.1e}")
+    progressbar.set_description(f"Loss {loss:.3e}")
 
 
 # Save to a file
