@@ -35,7 +35,7 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 # Create a Gaussian random field
 kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel = kernel_p(raw_lengthscale=-0.75, raw_outputscale=-10.0)
+kernel = kernel_p(raw_lengthscale=-0.75, raw_outputscale=-8.0)
 xs = mesh.reshape((2, -1)).T
 K = gp_util.gram_matrix(kernel)(xs, xs)
 
@@ -64,6 +64,14 @@ def vector_field(x, p):
     """Evaluate the PDE dynamics."""
     return pde_rhs(scale=p)(x)
 
+# Set up a GP for the initial condition
+kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
+kernel = kernel_p(raw_lengthscale=0., raw_outputscale=0.0)
+xs = mesh.reshape((2, -1)).T
+K = gp_util.gram_matrix(kernel)(xs, xs)
+(w, v) = jnp.linalg.eigh(K)
+w = jnp.maximum(0.0, w)  # clamp to allow sqrts
+factor = v * jnp.sqrt(w[..., None, :])
 
 # Choose a solver
 solver_kwargs = {"num_steps":128, "method":"dopri8", "adjoint":"direct"}
@@ -102,7 +110,7 @@ inputs = jnp.stack(inputs)
 targets = jnp.stack(targets)
 jnp.save(f"{path}_data_inputs.npy", inputs)
 jnp.save(f"{path}_data_targets.npy", targets)
-jnp.save(f"{path}_data_parameter.npy", jnp.square(parameter))
+jnp.save(f"{path}_data_parameter.npy", parameter)
 
 
 print("\nPlotting the inputs and targets...", end="")

@@ -25,8 +25,8 @@ methods = [
     "arnoldi", 
     "diffrax:euler+backsolve", 
     "diffrax:heun+recursive_checkpoint", 
-    "diffrax:tsit5+backsolve", 
-    "diffrax:dopri5+recursive_checkpoint",
+    "diffrax:dopri5+backsolve", 
+    "diffrax:tsit5+recursive_checkpoint",
 ]
 for method in methods:
     num_matvecs = jnp.load(f"{directory}/wp_{method}_Ns.npy")
@@ -42,10 +42,10 @@ for method in methods:
     print("rev", errors_rev)
     print()
 
-    axes[0][0].loglog(ts_all, errors_fwd + eps, label=method)
-    axes[0][1].loglog(ts_all, errors_rev+ eps, label=method)
-    axes[1][0].loglog(num_matvecs, errors_fwd+ eps, label=method)
-    axes[1][1].loglog(num_matvecs, errors_rev+ eps, label=method)
+    axes[0][0].semilogy(ts_all, errors_fwd + eps, label=method)
+    axes[0][1].semilogy(ts_all, errors_rev+ eps, label=method)
+    axes[1][0].semilogy(num_matvecs, errors_fwd+ eps, label=method)
+    axes[1][1].semilogy(num_matvecs, errors_rev+ eps, label=method)
 
 axes[0][0].set_xlabel("Time (sec)")
 axes[0][0].set_ylabel("Rel. MSE (value)")
@@ -71,4 +71,4 @@ axes[1][1].grid()
 directory = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory, exist_ok=True)
 
-plt.savefig(f"{directory}figure.pdf")
+plt.savefig(f"{directory}workprecision.pdf")

@@ -16,11 +16,11 @@ import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
 
+
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_runs", type=int, required=True, help="Time a function.")
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
-parser.add_argument("--log2_num_matvec_min", type=int, required=True)
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
 args = parser.parse_args()
 print(args)
@@ -56,37 +56,37 @@ def vector_field(x, p):
 # Solve the problem
 
 def loss_function(solver):
-    print(solver)
     nugget = (jnp.finfo(targets).eps)
     loss = pde_util.loss_mse_relative(nugget=nugget)
     k = jax.random.PRNGKey(1421)
     u = jax.random.uniform(k, shape=mesh.shape)
-    def fun(p, y0):
+    
+    def fun(p, input_, target_):
         """Compute the norm of the solution."""
-        y1 = solver(y0, p)
-        return y1
-        # return jnp.vdot(u, y1)
+        y1 = solver(input_[0], p)
+        return jnp.vdot(u, y1)
+        # return loss(y1, targets=target_[0])
 
     return jax.jit(jax.value_and_grad(fun))
 
 
 
 # Create a reference solver
-method, adjoint = "dopri8", "direct"
-kwargs = {"num_steps": 1024, "method": method, "adjoint": adjoint}
+kwargs = {"num_steps": 20, "method": "dopri8", "adjoint": "direct"}
 solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+
 loss = loss_function(solve)
 
 # Precompile
-value, gradient = (loss(parameter, inputs[0]))
+value, gradient = loss(parameter, inputs, targets)
 value.block_until_ready()
 gradient.block_until_ready()
-print(value)
+
 
 ts = []
 for _ in range(args.num_runs):
     t0 = time.perf_counter()
-    val, grad = loss(parameter, inputs[0])
+    val, grad = loss(parameter, inputs, targets)
     val.block_until_ready()
     grad.block_until_ready()
     t1 = time.perf_counter()
@@ -94,12 +94,13 @@ for _ in range(args.num_runs):
 
 ts = jnp.stack(ts)
 
-num_matvecs = 2**jnp.arange(args.log2_num_matvec_min, 8)
+num_matvecs = jnp.arange(1, 10)
 errors_fwd = []
 errors_rev = []
 ts_all = []
 
-for nmv in tqdm.tqdm(num_matvecs):
+progressbar = tqdm.tqdm(num_matvecs)
+for nmv in progressbar:
     nmv = int(nmv)
     if nmv > parameter.size:
         break 
@@ -114,24 +115,18 @@ for nmv in tqdm.tqdm(num_matvecs):
         solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
 
     elif args.method == "diffrax:heun+recursive_checkpoint":
-        if nmv < 2:
-            raise ValueError
         method, adjoint = "heun", "recursive_checkpoint"
-        kwargs = {"num_steps": nmv // 2, "method": method, "adjoint": adjoint}
+        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
 
-    elif args.method == "diffrax:dopri5+recursive_checkpoint":
-        if nmv < 5:
-            raise ValueError
-        method, adjoint = "dopri5", "recursive_checkpoint"
-        kwargs = {"num_steps": 1, "method": method, "adjoint": adjoint}
+    elif args.method == "diffrax:tsit5+recursive_checkpoint":
+        method, adjoint = "tsit5", "recursive_checkpoint"
+        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
 
-    elif args.method == "diffrax:tsit5+backsolve":
-        if nmv < 5:
-            raise ValueError
-        method, adjoint = "tsit5", "backsolve"
-        kwargs = {"num_steps": nmv // 5, "method": method, "adjoint": adjoint}
+    elif args.method == "diffrax:dopri5+backsolve":
+        method, adjoint = "dopri5", "backsolve"
+        kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
         solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
 
     else:
@@ -141,22 +136,23 @@ for nmv in tqdm.tqdm(num_matvecs):
 
     # Compute values and gradients (and precompile while we're at it)
     loss = loss_function(solve)
-    f, df = (loss(parameter, inputs[0]))
-    print(f)
+    f, df= loss(parameter, inputs, targets)
+    # print(f)
 
     # Compute the error
     nugget = (jnp.finfo(targets).eps)
     error = pde_util.loss_mse_relative(nugget=nugget)
-    fwd = error(f, targets=value)
-    rev = error(df, targets=gradient)
-    errors_fwd.append(jnp.sqrt(fwd))
-    errors_rev.append(jnp.sqrt(rev))
+    fwd = jnp.sqrt(error(f, targets=value))
+    rev = jnp.sqrt(error(df, targets=gradient))
+    errors_fwd.append(fwd)
+    errors_rev.append(rev)
+    progressbar.set_description(f"(N={nmv}, fwd={fwd:.1e}, rev={rev:.1e}))")
 
     # Compute the run times
     ts = []
     for _ in range(args.num_runs):
         t0 = time.perf_counter()
-        val, grad = loss(parameter, inputs[0])
+        val, grad = loss(parameter, inputs, targets)
         val.block_until_ready()
         grad.block_until_ready()
         t1 = time.perf_counter()
@@ -167,7 +163,7 @@ for nmv in tqdm.tqdm(num_matvecs):
 
     # Clear caches in the hopes of avoiding memory issues?
     jax.clear_caches()
-    print(errors_fwd)
+
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
 
