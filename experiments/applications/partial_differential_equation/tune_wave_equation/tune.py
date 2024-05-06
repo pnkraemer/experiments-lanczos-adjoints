@@ -16,7 +16,16 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 # todo: verify somehow that we do solve the PDE!
 # todo: turn the sampler into a Lanczos sampler (so we can scale!)
 # todo: 3d?
+# todo: rethink how we compute the gradient accuracy
+# todo: rethink how we compute the reference solution/derivative 
+#    (with pade? this way, we can say just how long it took!)
+# todo: clean up the script a little bit (less hacky code, progress prints, etc.)
+# todo: plot convergence?
 
+
+def rmse(a, b):
+    nugget = jnp.sqrt(jnp.finfo(a).eps)
+    return jnp.mean((a-b)**2 / (nugget + jnp.abs(b)))
 
 # Make directories
 directory_results = exp_util.matching_directory(__file__, "results/")
@@ -41,7 +50,7 @@ jax.config.update("jax_enable_x64", args.x64)
 pde_t0, pde_t1 = 0.0, 1.0
 mlp_features = [20, 20, 1]
 mlp_activation = jax.nn.tanh
-optimizer = optax.adam(2e-2)  # weirdly important when matrices get large
+optimizer = optax.adam(1e-2)
 
 # Process the parameters
 key = jax.random.PRNGKey(args.seed)
@@ -57,13 +66,13 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 def constrain(arg):
     """Constrain the PDE-scale to strictly positive values."""
-    return arg**2
+    return 0.1 * arg**2
 
 
 # Sample a Gaussian random field as a "true" scale
 grf_xs = mesh.reshape((2, -1)).T
 grf_kernel, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-5.0)
+kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-4.0)
 grf_K = gp_util.gram_matrix(kernel_fun)(grf_xs, grf_xs)
 
 # Sample  # todo: sample with Lanczos? Otherwise we go crazy here...
@@ -129,7 +138,7 @@ print(f"Projected runtime per iteration: ~{vf_time * args.num_matvecs * 2} secon
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=20_000)
 
 target_solve = pde_util.solver_diffrax(
-    pde_t0, pde_t1, vector_field, num_steps=1000, method="dopri8", adjoint="backsolve"
+    pde_t0, pde_t1, vector_field, num_steps=4095, method="dopri5", adjoint="backsolve"
 )
 
 # Build an approximate model
@@ -194,12 +203,15 @@ else:
     msg = f"Method {args.method} is not supported."
     raise ValueError(msg)
 
+
+loss = pde_util.loss_rmse()
+
 stats = {}
 target_y1 = target_solve(y0, grf_scale)
 
 fun = jax.jit(approx_solve)
 approx_y1 = fun(y0, grf_scale).block_until_ready()
-fwd_error = jnp.mean((approx_y1 - target_y1) ** 2)
+fwd_error = rmse(approx_y1, target_y1)
 stats["MSE: FWD"] = fwd_error
 print("\nForward error:", fwd_error)
 
@@ -211,11 +223,11 @@ stats["Time: FWD"] = (t1 - t0) / 10
 
 key, subkey = jax.random.split(key, num=2)
 u = jax.random.normal(subkey, shape=y0.shape)
-target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
+target_jacrev = jax.grad(lambda z: loss(target_solve(y0, z), targets=target_y1))(grf_scale)
 
-fun = jax.jit(jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z))))
+fun = jax.jit(jax.grad(lambda z: loss(approx_solve(y0, z), targets=target_y1)))
 approx_jacrev = fun(grf_scale).block_until_ready()
-bwd_error = jnp.mean((approx_jacrev - target_jacrev) ** 2)
+bwd_error = rmse(approx_jacrev, target_jacrev)
 stats["MSE: REV"] = bwd_error
 
 print("Backward error:", bwd_error, "\n")
@@ -228,7 +240,7 @@ stats["Time: REV"] = (t1 - t0) / 10
 
 # Set up parameter approximation
 mlp_init, mlp_apply = pde_util.model_mlp(
-    mesh, mlp_features, activation=mlp_activation, output_scale_raw=-5.0
+    mesh, mlp_features, activation=mlp_activation, output_scale_raw=-4.0
 )
 key, mlp_key = jax.random.split(key, num=2)
 variables_before, mlp_unflatten = mlp_init(subkey)
@@ -236,7 +248,8 @@ print(f"\nNumber of parameters: {variables_before.size}\n")
 
 
 # Create a loss function
-loss = pde_util.loss_mse()
+# loss = pde_util.loss_mse()
+loss = pde_util.loss_rmse()
 
 
 @jax.jit
@@ -278,8 +291,8 @@ jnp.save(f"{directory_results}{args.method}_y1_target.npy", target_y1)
 jnp.save(f"{directory_results}{args.method}_y1_approx_before.npy", y1_before)
 jnp.save(f"{directory_results}{args.method}_y1_approx_after.npy", y1_after)
 
-error_y1 = jnp.mean((y1_after - target_y1) ** 2)
-error_scale = jnp.mean((scale_grf - scale_after) ** 2)
+error_y1 = rmse(y1_after, target_y1)
+error_scale = rmse(scale_after, scale_grf)
 stats["MSE: Sim."] = error_y1
 stats["MSE: Param."] = error_scale
 

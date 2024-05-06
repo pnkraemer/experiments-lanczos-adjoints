@@ -163,6 +163,13 @@ def loss_mse():
 
     return loss
 
+def loss_rmse():
+    def loss(sol, /, *, targets):
+        nugget = jnp.sqrt(jnp.finfo(targets).eps)
+        return jnp.mean((sol - targets) ** 2 / (nugget+jnp.abs(targets)))
+
+    return loss
+
 
 # Below here is proper tested
 def solver_euler_fixed_step(ts, vector_field, /):
@@ -189,7 +196,7 @@ def solver_diffrax(
         return vector_field(y, args)
 
     match_methods = {
-        "dopri8": diffrax.Dopri8(),
+        "dopri5": diffrax.Dopri5(),
         "tsit5": diffrax.Tsit5(),
         "euler": diffrax.Euler(),
         "heun": diffrax.Heun(),
