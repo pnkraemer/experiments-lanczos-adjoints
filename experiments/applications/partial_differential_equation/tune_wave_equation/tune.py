@@ -6,16 +6,9 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
-import matplotlib.pyplot as plt
-import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
 import optax
 import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
-
-# todo: add a "naive" matrix exponential solver
-
-# todo: compute the error of the simulation
-#  to ensure they are all equally accurate
 
 # todo: quantify the reconstruction errors a little bit
 
@@ -26,8 +19,6 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 # todo: verify somehow that we do solve a wave equation!
 
 # Make directories
-directory_fig = exp_util.matching_directory(__file__, "figures/")
-os.makedirs(directory_fig, exist_ok=True)
 directory_results = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory_results, exist_ok=True)
 
@@ -176,7 +167,7 @@ print("Backward error:", bwd_error)
 
 # Set up parameter approximation
 mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
-key, subkey = jax.random.split(key, num=2)
+key, mlp_key = jax.random.split(key, num=2)
 variables_before, mlp_unflatten = mlp_init(subkey)
 print(f"Number of parameters: {variables_before.size}")
 
@@ -206,69 +197,19 @@ for _ in progressbar:
     progressbar.set_description(f"Loss {loss:.1e}")
 
 
-# Plot the solution
-
-layout = onp.asarray(
-    [
-        ["truth_scale", "truth_t0", "truth_t1"],
-        ["before_scale", "before_t0", "before_t1"],
-        ["after_scale", "after_t0", "after_t1"],
-    ]
+# Save to a file
+scale_before = mlp_apply(mlp_unflatten(variables_before), mesh)
+scale_after = mlp_apply(mlp_unflatten(variables_after), mesh)
+y1_before = approx_solve(y0, scale_before)
+y1_after = approx_solve(y0, scale_after)
+jnp.save(f"{directory_results}{args.method}_y0.npy", y0)
+jnp.save(
+    f"{directory_results}{args.method}_scale_mlp_before.npy", constrain(scale_before)
 )
-figsize = (onp.shape(layout)[1] * 3, onp.shape(layout)[0] * 2)
-fig, axes = plt.subplot_mosaic(layout, figsize=figsize, sharex=True, sharey=True)
-
-
-def plot_t0(ax, x, /):
-    kwargs_t0 = {"cmap": "Greys"}
-    args_plot = x
-
-    clr = ax.contourf(mesh[0], mesh[1], args_plot, **kwargs_t0)
-    fig.colorbar(clr, ax=ax)
-    return ax
-
-
-def plot_t1(ax, x, /):
-    kwargs_t1 = {"cmap": "Oranges"}
-    args_plot = x
-
-    clr = ax.contourf(mesh[0], mesh[1], args_plot, **kwargs_t1)
-    fig.colorbar(clr, ax=ax)
-    return ax
-
-
-def plot_scale(ax, x, /):
-    kwargs_scale = {"cmap": "Blues"}
-    args_plot = constrain(x)
-    clr = ax.contourf(mesh[0], mesh[1], args_plot, **kwargs_scale)
-    fig.colorbar(clr, ax=ax)
-    return ax
-
-
-axes["truth_t0"].set_title(f"$y(t={pde_t0})$ (known)", fontsize="medium")
-axes["truth_t1"].set_title(f"$y(t={pde_t1})$ (target)", fontsize="medium")
-axes["truth_scale"].set_title("GRF / MLP (unknown)", fontsize="medium")
-
-axes["truth_scale"].set_ylabel("Truth (GRF)")
-plot_t0(axes["truth_t0"], y0[0])
-plot_t1(axes["truth_t1"], target_y1[0])
-plot_scale(axes["truth_scale"], grf_scale)
-
-
-axes["before_scale"].set_ylabel("Before optim. (MLP)")
-mlp_scale = mlp_apply(mlp_unflatten(variables_before), mesh)
-approx_y1 = approx_solve(y0, mlp_scale)
-plot_t0(axes["before_t0"], y0[0])
-plot_t1(axes["before_t1"], approx_y1[0])
-plot_scale(axes["before_scale"], mlp_scale)
-
-
-axes["after_scale"].set_ylabel("After optim. (MLP)")
-mlp_scale = mlp_apply(mlp_unflatten(variables_after), mesh)
-approx_y1 = approx_solve(y0, mlp_scale)
-plot_t0(axes["after_t0"], y0[0])
-plot_t1(axes["after_t1"], approx_y1[0])
-plot_scale(axes["after_scale"], mlp_scale)
-
-plt.savefig(f"{directory_fig}/figure.pdf")
-plt.show()
+jnp.save(
+    f"{directory_results}{args.method}_scale_mlp_after.npy", constrain(scale_after)
+)
+jnp.save(f"{directory_results}{args.method}_scale_grf.npy", constrain(grf_scale))
+jnp.save(f"{directory_results}{args.method}_y1_target.npy", target_y1)
+jnp.save(f"{directory_results}{args.method}_y1_approx_before.npy", y1_before)
+jnp.save(f"{directory_results}{args.method}_y1_approx_after.npy", y1_after)
