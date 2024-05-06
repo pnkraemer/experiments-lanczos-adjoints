@@ -235,6 +235,17 @@ def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
     return expm
 
 
+def expm_pade():
+    def expm(matvec, dt, y0_flat, *p):
+        # Materialise the matrix
+        matrix = jax.jacfwd(lambda v: matvec(v, *p))(y0_flat)
+
+        # Compute the matrix exponential
+        return jax.scipy.linalg.expm(dt * matrix) @ y0_flat
+
+    return expm
+
+
 def model_mlp(mesh_like, features, /, activation: Callable):
     assert features[-1] == 1
 

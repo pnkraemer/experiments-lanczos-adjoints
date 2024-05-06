@@ -1,5 +1,6 @@
 import argparse
 import os
+import warnings
 
 import jax
 import jax.flatten_util
@@ -110,23 +111,28 @@ def vector_field(x, p):
 
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=10_000)
 target_solve = pde_util.solver_euler_fixed_step(solve_ts_data, vector_field)
-target_y1 = target_solve(y0, grf_scale)
 
 # Build an approximate model
 if args.method == "arnoldi":
     expm = pde_util.expm_arnoldi(arnoldi_depth)
     approx_solve = pde_util.solver_expm(pde_t0, pde_t1, vector_field, expm=expm)
+elif args.method == "expm-pade":
+    if args.num_dx_points > 20:
+        msg = f"Careful: method '{args.method}' is very expensive"
+        warnings.warn(msg, stacklevel=1)
+    expm = pde_util.expm_pade()
+    approx_solve = pde_util.solver_expm(pde_t0, pde_t1, vector_field, expm=expm)
 elif args.method == "euler":
     approx_solve = pde_util.solver_euler_fixed_step(solve_ts, vector_field)
-elif args.method == "diffrax_tsit5":
+elif args.method == "diffrax-tsit5":
     approx_solve = pde_util.solver_diffrax(
         pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs // 5, method="tsit5"
     )
-elif args.method == "diffrax_euler":
+elif args.method == "diffrax-euler":
     approx_solve = pde_util.solver_diffrax(
         pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs, method="euler"
     )
-elif args.method == "diffrax_heun":
+elif args.method == "diffrax-heun":
     approx_solve = pde_util.solver_diffrax(
         pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs // 2, method="heun"
     )
@@ -134,9 +140,19 @@ else:
     msg = f"Method {args.method} is not supported."
     raise ValueError(msg)
 
+target_y1 = target_solve(y0, grf_scale)
 approx_y1 = approx_solve(y0, grf_scale)
-fwd_error = jnp.mean((approx_y1[0] - target_y1[0]) ** 2)
+
+fwd_error = jnp.sqrt(jnp.mean((approx_y1 - target_y1) ** 2))
 print("Forward error:", fwd_error)
+
+key, subkey = jax.random.split(key, num=2)
+u = jax.random.normal(subkey, shape=y0.shape)
+target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
+approx_jacrev = jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z)))(grf_scale)
+
+bwd_error = jnp.sqrt(jnp.mean((approx_jacrev - target_jacrev) ** 2))
+print("Backward error:", bwd_error)
 
 
 # Set up parameter approximation
