@@ -143,20 +143,6 @@ def pde_wave_anisotropic(scale_like, /, stencil, *, constrain, boundary: Callabl
     return parametrize, {"scale": jnp.empty_like(scale_like)}
 
 
-def _softplus(x, beta=1.0, threshold=20.0):
-    # Shamelessly stolen from:
-    # https://github.com/google/jax/issues/18443
-
-    # mirroring the pytorch implementation
-    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
-    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
-    return jax.lax.select(
-        x * beta < threshold,
-        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
-        x,
-    )
-
-
 def boundary_dirichlet():
     def pad(x, /):
         return jnp.pad(x, 1, mode="constant", constant_values=0.0)
@@ -291,9 +277,7 @@ def expm_pade():
     return expm
 
 
-def model_mlp(
-    mesh_like, features, /, activation: Callable, *, output_scale: float = 1e-1
-):
+def model_mlp(mesh_like, features, /, activation: Callable, *, output_scale_raw: float):
     assert features[-1] == 1
 
     class MLP(flax.linen.Module):
@@ -315,19 +299,32 @@ def model_mlp(
         variables = model.init(key, mesh_like)
         return jax.flatten_util.ravel_pytree(variables)
 
+    # We scale the outputs down to not accidentally
+    #  initialise a too-large-in-magnitude PDE parameter
+    #  which would then lead to solutions blowing up.
+    output_scale = _softplus(output_scale_raw)
+
     def apply(params, args):
         # Reshape into Flax's desired format
         args_ = args.reshape((2, -1)).T
 
         # Apply and shape back into our desired format
         fx = model.apply(params, args_).reshape((-1,))
-
-        # We scale the outputs down to not accidentally
-        #  initialise a too-large-in-magnitude PDE parameter
-        #  which would then lead to solutions blowing up.
         fx *= output_scale
-
-        # Return
         return fx.reshape(args[0].shape)
 
     return init, apply
+
+
+def _softplus(x, beta=1.0, threshold=20.0):
+    # Shamelessly stolen from:
+    # https://github.com/google/jax/issues/18443
+
+    # mirroring the pytorch implementation
+    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
+    return jax.lax.select(
+        x * beta < threshold,
+        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
+        x,
+    )

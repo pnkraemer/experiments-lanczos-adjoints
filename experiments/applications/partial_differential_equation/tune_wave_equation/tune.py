@@ -57,15 +57,13 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 def constrain(arg):
     """Constrain the PDE-scale to strictly positive values."""
-    # todo: replace the 0.1 with a different output scale in
-    #  the prior and in the mlp, respectively?
-    return 0.1 * arg**2
+    return arg**2
 
 
 # Sample a Gaussian random field as a "true" scale
 grf_xs = mesh.reshape((2, -1)).T
 grf_kernel, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-4.0)
+kernel_fun = grf_kernel(raw_lengthscale=-0.75, raw_outputscale=-5.0)
 grf_K = gp_util.gram_matrix(kernel_fun)(grf_xs, grf_xs)
 
 # Sample  # todo: sample with Lanczos? Otherwise we go crazy here...
@@ -231,7 +229,9 @@ errors["time_bwd"] = t1 - t0
 
 
 # Set up parameter approximation
-mlp_init, mlp_apply = pde_util.model_mlp(mesh, mlp_features, activation=mlp_activation)
+mlp_init, mlp_apply = pde_util.model_mlp(
+    mesh, mlp_features, activation=mlp_activation, output_scale_raw=-5.0
+)
 key, mlp_key = jax.random.split(key, num=2)
 variables_before, mlp_unflatten = mlp_init(subkey)
 print(f"\nNumber of parameters: {variables_before.size}\n")
