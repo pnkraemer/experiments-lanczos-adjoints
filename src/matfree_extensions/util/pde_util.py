@@ -103,6 +103,26 @@ def pde_heat_affine(c: float, drift_like, /, stencil, *, boundary: Callable):
     return parametrize, {"drift": jnp.empty_like(drift_like)}
 
 
+def pde_heat_anisotropic(scale_like, /, stencil, *, constrain, boundary: Callable):
+    def parametrize(*, scale):
+        scale_constrained = constrain(scale)  # e.g. ensure positivity
+
+        def rhs(x, /):
+            assert x.ndim == 3, jnp.shape(x)
+            assert x.shape[1] == x.shape[2]
+            assert x.shape[0] == 2
+
+            u, du = x
+            x_padded = boundary(u)
+            fx = jax.scipy.signal.convolve2d(stencil, x_padded, mode="valid")
+            u_new = -fx * scale_constrained
+            return jnp.stack([u_new, du])
+
+        return rhs
+
+    return parametrize, {"scale": jnp.empty_like(scale_like)}
+
+
 def pde_wave_anisotropic(scale_like, /, stencil, *, constrain, boundary: Callable):
     def parametrize(*, scale):
         scale_constrained = constrain(scale)  # e.g. ensure positivity
@@ -182,8 +202,12 @@ def solver_diffrax(
     def term(t, y, args):  # noqa: ARG001
         return vector_field(y, args)
 
+    tol = jnp.sqrt(jnp.finfo(t0).eps)
+    # todo: use a linear solver in here...
+    root = diffrax.VeryChord(atol=tol, rtol=tol)
     match_methods = {
         "tsit5": diffrax.Tsit5(),
+        "euler-implicit": diffrax.ImplicitEuler(root),
         "euler": diffrax.Euler(),
         "heun": diffrax.Heun(),
     }

@@ -14,8 +14,7 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 
 # todo: save all reconstruction errors (y1, scale, fwd_raw, bwd_raw) in a file
 # todo: run for different solvers
-# todo: verify somehow that we do solve a wave equation!
-# todo: plot the RHS matrix to see whether it is indeed symmetric
+# todo: verify somehow that we do solve the PDE!
 
 
 # Make directories
@@ -31,8 +30,11 @@ parser.add_argument("--num_matvecs", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--num_dx_points", type=int, required=True)
 parser.add_argument("--plot_matrix", action="store_true")
+parser.add_argument("--x64", action="store_true")
 args = parser.parse_args()
 print(args)
+
+jax.config.update("jax_enable_x64", args.x64)
 
 
 # Set parameters
@@ -86,7 +88,6 @@ y0 = jnp.stack([grf_init, grf_init_diff])
 print(f"\nNumber of points: {mesh.size // 2}")
 print(f"Number of ODE dimensions: {y0.size}\n")
 
-
 # Discretise the PDE dynamics with method of lines (MOL)
 stencil = pde_util.stencil_laplacian(dx_space)
 boundary = pde_util.boundary_neumann()
@@ -125,8 +126,16 @@ print(f"\nRHS evaluation: {vf_time} seconds")
 # x2 because we assume that the adjoint pass also evaluates the RHS
 print(f"Projected runtime per iteration: ~{vf_time * args.num_matvecs * 2} seconds\n")
 
-solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=10_000)
-target_solve = pde_util.solver_euler_fixed_step(solve_ts_data, vector_field)
+solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=20_000)
+
+target_solve = pde_util.solver_diffrax(
+    pde_t0,
+    pde_t1,
+    vector_field,
+    num_steps=1_000,
+    method="tsit5",
+    adjoint="recursive_checkpoint",
+)
 
 # Build an approximate model
 if args.method == "arnoldi":
@@ -159,6 +168,17 @@ elif args.method == "diffrax-euler":
         vector_field,
         num_steps=args.num_matvecs,
         method="euler",
+        adjoint=adjoint,
+    )
+elif args.method == "diffrax-euler-implicit":
+    adjoint = "recursive_checkpoint"
+
+    approx_solve = pde_util.solver_diffrax(
+        pde_t0,
+        pde_t1,
+        vector_field,
+        num_steps=args.num_matvecs,
+        method="euler-implicit",
         adjoint=adjoint,
     )
 elif args.method == "diffrax-heun":
