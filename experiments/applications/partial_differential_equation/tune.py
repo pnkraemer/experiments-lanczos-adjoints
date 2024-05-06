@@ -14,7 +14,7 @@ import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
 # todo: turn the sampler into a Lanczos sampler (for more scale)
-# todo: rethink how we compute the reference solution/derivative 
+# todo: rethink how we compute the reference solution/derivative
 #    (with pade? this way, we can say just how long it took!)
 # todo: clean up the script a little bit (less hacky code, progress prints, etc.)
 # todo: plot convergence? plot work/precision diagram for fwd/ & backward as functions of number of matvec?
@@ -25,7 +25,8 @@ from matfree_extensions.util import exp_util, gp_util, pde_util
 
 def rmse(a, b):
     nugget = jnp.sqrt(jnp.finfo(a).eps)
-    return jnp.mean((a-b)**2 / (nugget + jnp.abs(b)))
+    return jnp.mean((a - b) ** 2 / (nugget + jnp.abs(b)))
+
 
 # Make directories
 directory_results = exp_util.matching_directory(__file__, "results/")
@@ -66,7 +67,7 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 def constrain(arg):
     """Constrain the PDE-scale to strictly positive values."""
-    return 0.05*arg**2
+    return 0.05 * arg**2
 
 
 # Sample a Gaussian random field as a "true" scale
@@ -138,7 +139,12 @@ print(f"Projected runtime per iteration: ~{vf_time * args.num_matvecs * 2} secon
 solve_ts_data = jnp.linspace(pde_t0, pde_t1, endpoint=True, num=20_000)
 
 target_solve = pde_util.solver_diffrax(
-    pde_t0, pde_t1, vector_field, num_steps=args.num_matvecs, method="heun", adjoint="direct"
+    pde_t0,
+    pde_t1,
+    vector_field,
+    num_steps=args.num_matvecs,
+    method="heun",
+    adjoint="direct",
 )
 
 # Build an approximate model
@@ -211,7 +217,9 @@ stats["Time: FWD"] = (t1 - t0) / 10
 
 key, subkey = jax.random.split(key, num=2)
 u = jax.random.normal(subkey, shape=y0.shape)
-target_jacrev = jax.grad(lambda z: loss(target_solve(y0, z), targets=target_y1))(grf_scale)
+target_jacrev = jax.grad(lambda z: loss(target_solve(y0, z), targets=target_y1))(
+    grf_scale
+)
 
 fun = jax.jit(jax.grad(lambda z: loss(approx_solve(y0, z), targets=target_y1)))
 approx_jacrev = fun(grf_scale).block_until_ready()

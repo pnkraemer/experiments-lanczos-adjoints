@@ -1,20 +1,10 @@
 """Plot work vs. precision of value_and_grad of matrix exponentials."""
 
-import argparse
 import os
-import pickle
-import time
-import warnings
 
-import jax
-import jax.flatten_util
 import jax.numpy as jnp
-import jax.scipy.linalg
 import matplotlib.pyplot as plt
-import optax
-import tqdm
-from matfree_extensions.util import exp_util, gp_util, pde_util
-
+from matfree_extensions.util import exp_util
 
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
@@ -22,10 +12,10 @@ os.makedirs(directory, exist_ok=True)
 fig, axes = plt.subplots(nrows=2, ncols=2, constrained_layout=True)
 
 methods = [
-    "arnoldi", 
-    "diffrax:euler+backsolve", 
-    "diffrax:heun+recursive_checkpoint", 
-    "diffrax:dopri5+backsolve", 
+    "arnoldi",
+    "diffrax:euler+backsolve",
+    "diffrax:heun+recursive_checkpoint",
+    "diffrax:dopri5+backsolve",
     "diffrax:tsit5+recursive_checkpoint",
 ]
 for method in methods:
@@ -34,7 +24,7 @@ for method in methods:
     errors_fwd = jnp.load(f"{directory}/wp_{method}_errors_fwd.npy")
     errors_rev = jnp.load(f"{directory}/wp_{method}_errors_rev.npy")
 
-    eps = 0. * jnp.finfo(errors_fwd).eps**2
+    eps = 0.0 * jnp.finfo(errors_fwd).eps ** 2
     print()
     print(method)
     print("MVs", num_matvecs)
@@ -43,9 +33,9 @@ for method in methods:
     print()
 
     axes[0][0].semilogy(ts_all, errors_fwd + eps, label=method)
-    axes[0][1].semilogy(ts_all, errors_rev+ eps, label=method)
-    axes[1][0].semilogy(num_matvecs, errors_fwd+ eps, label=method)
-    axes[1][1].semilogy(num_matvecs, errors_rev+ eps, label=method)
+    axes[0][1].semilogy(ts_all, errors_rev + eps, label=method)
+    axes[1][0].semilogy(num_matvecs, errors_fwd + eps, label=method)
+    axes[1][1].semilogy(num_matvecs, errors_rev + eps, label=method)
 
 axes[0][0].set_xlabel("Time (sec)")
 axes[0][0].set_ylabel("Rel. MSE (value)")

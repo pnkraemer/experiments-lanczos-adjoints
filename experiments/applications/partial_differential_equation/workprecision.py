@@ -2,20 +2,14 @@
 
 import argparse
 import os
-import pickle
 import time
-import warnings
 
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
-import matplotlib.pyplot as plt
-import optax
 import tqdm
-from matfree_extensions.util import exp_util, gp_util, pde_util
-
-
+from matfree_extensions.util import exp_util, pde_util
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -46,21 +40,20 @@ pde_rhs, _params_rhs = pde_util.pde_wave_anisotropic(
 )
 
 
-
 def vector_field(x, p):
     """Evaluate the PDE dynamics."""
     return pde_rhs(scale=p)(x)
 
 
-
 # Solve the problem
 
+
 def loss_function(solver):
-    nugget = (jnp.finfo(targets).eps)
+    nugget = jnp.finfo(targets).eps
     loss = pde_util.loss_mse_relative(nugget=nugget)
     k = jax.random.PRNGKey(1421)
     u = jax.random.uniform(k, shape=mesh.shape)
-    
+
     def fun(p, input_, target_):
         """Compute the norm of the solution."""
         y1 = solver(input_[0], p)
@@ -70,10 +63,9 @@ def loss_function(solver):
     return jax.jit(jax.value_and_grad(fun))
 
 
-
 # Create a reference solver
 kwargs = {"num_steps": 20, "method": "dopri8", "adjoint": "direct"}
-solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 loss = loss_function(solve)
 
@@ -103,44 +95,43 @@ progressbar = tqdm.tqdm(num_matvecs)
 for nmv in progressbar:
     nmv = int(nmv)
     if nmv > parameter.size:
-        break 
+        break
 
     if args.method == "arnoldi":
         expm = pde_util.expm_arnoldi(nmv)
-        solve = pde_util.solver_expm(0., 1., vector_field, expm=expm)
+        solve = pde_util.solver_expm(0.0, 1.0, vector_field, expm=expm)
 
     elif args.method == "diffrax:euler+backsolve":
         method, adjoint = "euler", "backsolve"
         kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
-        solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+        solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     elif args.method == "diffrax:heun+recursive_checkpoint":
         method, adjoint = "heun", "recursive_checkpoint"
         kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
-        solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+        solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     elif args.method == "diffrax:tsit5+recursive_checkpoint":
         method, adjoint = "tsit5", "recursive_checkpoint"
         kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
-        solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+        solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     elif args.method == "diffrax:dopri5+backsolve":
         method, adjoint = "dopri5", "backsolve"
         kwargs = {"num_steps": nmv, "method": method, "adjoint": adjoint}
-        solve = pde_util.solver_diffrax(0., 1., vector_field, **kwargs)
+        solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
     else:
         msg = f"The method {args.method} is not supported."
         raise ValueError(msg)
 
-
     # Compute values and gradients (and precompile while we're at it)
     loss = loss_function(solve)
-    f, df= loss(parameter, inputs, targets)
+    f, df = loss(parameter, inputs, targets)
     # print(f)
 
     # Compute the error
-    nugget = (jnp.finfo(targets).eps)
+    nugget = jnp.finfo(targets).eps
     error = pde_util.loss_mse_relative(nugget=nugget)
     fwd = jnp.sqrt(error(f, targets=value))
     rev = jnp.sqrt(error(df, targets=gradient))

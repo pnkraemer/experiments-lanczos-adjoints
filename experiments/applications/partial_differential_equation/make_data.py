@@ -2,20 +2,14 @@
 
 import argparse
 import os
-import pickle
-import time
-import warnings
 
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
 import matplotlib.pyplot as plt
-import optax
 import tqdm
-from matfree_extensions.util import exp_util, gp_util, pde_util
-
-
+from matfree_extensions.util import gp_util, pde_util
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -40,7 +34,7 @@ xs = mesh.reshape((2, -1)).T
 K = gp_util.gram_matrix(kernel)(xs, xs)
 
 
-# Prepare sampling 
+# Prepare sampling
 # Use eigh() so we can handle almost singular matrices
 (w, v) = jnp.linalg.eigh(K)
 w = jnp.maximum(0.0, w)  # clamp to allow sqrts
@@ -64,9 +58,10 @@ def vector_field(x, p):
     """Evaluate the PDE dynamics."""
     return pde_rhs(scale=p)(x)
 
+
 # Set up a GP for the initial condition
 kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel = kernel_p(raw_lengthscale=0., raw_outputscale=0.0)
+kernel = kernel_p(raw_lengthscale=0.0, raw_outputscale=0.0)
 xs = mesh.reshape((2, -1)).T
 K = gp_util.gram_matrix(kernel)(xs, xs)
 (w, v) = jnp.linalg.eigh(K)
@@ -74,8 +69,8 @@ w = jnp.maximum(0.0, w)  # clamp to allow sqrts
 factor = v * jnp.sqrt(w[..., None, :])
 
 # Choose a solver
-solver_kwargs = {"num_steps":128, "method":"dopri8", "adjoint":"direct"}
-solver = pde_util.solver_diffrax(0., 1., vector_field, **solver_kwargs)
+solver_kwargs = {"num_steps": 128, "method": "dopri8", "adjoint": "direct"}
+solver = pde_util.solver_diffrax(0.0, 1.0, vector_field, **solver_kwargs)
 solver = jax.jit(solver)
 
 inputs = []
@@ -97,11 +92,8 @@ for _ in tqdm.tqdm(range(args.num_data)):
     targets.append(final)
 
 
-
-
-
 # Make directories
-directory = f"./data/pde_wave/"
+directory = "./data/pde_wave/"
 os.makedirs(directory, exist_ok=True)
 path = f"{directory}{args.resolution}x{args.resolution}"
 
@@ -117,7 +109,7 @@ print("\nPlotting the inputs and targets...", end="")
 num = jnp.minimum(8, args.num_data)  # plot only a few data points
 num = int(num)
 
-figsize = (2*num, 2)
+figsize = (2 * num, 2)
 fig, axes = plt.subplots(nrows=2, ncols=num, figsize=figsize, constrained_layout=True)
 
 for ax, ins, outs in zip(axes.T[:num], inputs[:num], targets[:num]):
