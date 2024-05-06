@@ -196,7 +196,7 @@ def solver_euler_fixed_step(ts, vector_field, /):
 
 
 def solver_diffrax(
-    t0, t1, vector_field, /, *, num_steps: int, method: str, adjoint: str
+    t0, t1, vector_field, /, *, num_steps: int,  method: str, adjoint: str, max_steps: int = 4096,
 ):
     @diffrax.ODETerm
     def term(t, y, args):  # noqa: ARG001
@@ -234,6 +234,7 @@ def solver_diffrax(
             y0=y0,
             stepsize_controller=stepsize_controller,
             adjoint=backprop,
+            max_steps=max_steps,
         )
         return sol.ys[-1]
 
@@ -257,13 +258,13 @@ def solver_expm(t0, t1, vector_field, /, expm):
     return solve
 
 
-def expm_arnoldi(krylov_depth, *, reortho="full", custom_vjp=True):
+def expm_arnoldi(krylov_depth, *, max_squarings: int = 32, reortho="full", custom_vjp=True):
     def expm(matvec, dt, y0_flat, *p):
         kwargs = {"reortho": reortho, "custom_vjp": custom_vjp}
         algorithm = arnoldi.hessenberg(matvec, krylov_depth, **kwargs)
         Q, H, _r, c = algorithm(y0_flat, *p)
         e1 = jnp.eye(len(H))[0, :]
-        expmat = jax.scipy.linalg.expm(dt * H)
+        expmat = jax.scipy.linalg.expm(dt * H, max_squarings=max_squarings)
         return 1 / c * Q @ expmat @ e1
 
     return expm
@@ -280,7 +281,7 @@ def expm_pade():
     return expm
 
 
-def model_mlp(mesh_like, features, /, activation: Callable):
+def model_mlp(mesh_like, features, /, activation: Callable, *, output_scale: float = 1e-1):
     assert features[-1] == 1
 
     class MLP(flax.linen.Module):
@@ -303,8 +304,19 @@ def model_mlp(mesh_like, features, /, activation: Callable):
         return jax.flatten_util.ravel_pytree(variables)
 
     def apply(params, args):
+        # Reshape into Flax's desired format
         args_ = args.reshape((2, -1)).T
+
+
+        # Apply and shape back into our desired format
         fx = model.apply(params, args_).reshape((-1,))
+        
+        # We scale the outputs down to not accidentally 
+        #  initialise a too-large-in-magnitude PDE parameter
+        #  which would then lead to solutions blowing up.
+        fx *= output_scale
+
+        # Return
         return fx.reshape(args[0].shape)
 
     return init, apply

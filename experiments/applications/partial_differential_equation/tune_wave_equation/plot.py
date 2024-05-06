@@ -43,7 +43,7 @@ def plot_t0(ax, x, /):
     kwargs_t0 = {"cmap": "Greys"}
     args_plot = x
 
-    clr = ax.pcolormesh(args_plot, **kwargs_t0)
+    clr = ax.contourf(args_plot, **kwargs_t0)
     fig.colorbar(clr, ax=ax)
     return ax
 
@@ -52,7 +52,7 @@ def plot_t1(ax, x, /):
     kwargs_t1 = {"cmap": "Oranges"}
     args_plot = x
 
-    clr = ax.pcolormesh(args_plot, **kwargs_t1)
+    clr = ax.contourf(args_plot, **kwargs_t1)
     fig.colorbar(clr, ax=ax)
     return ax
 
@@ -60,7 +60,7 @@ def plot_t1(ax, x, /):
 def plot_scale(ax, x, /):
     kwargs_scale = {"cmap": "Blues"}
     args_plot = x
-    clr = ax.pcolormesh(args_plot, **kwargs_scale)
+    clr = ax.contourf(args_plot, **kwargs_scale)
     fig.colorbar(clr, ax=ax)
     return ax
 

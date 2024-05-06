@@ -41,7 +41,7 @@ jax.config.update("jax_enable_x64", args.x64)
 pde_t0, pde_t1 = 0.0, 1.0
 mlp_features = [20, 20, 1]
 mlp_activation = jax.nn.tanh
-optimizer = optax.adam(1e-2)
+optimizer = optax.adam(2e-2)  # weirdly important when matrices get large
 
 # Process the parameters
 key = jax.random.PRNGKey(args.seed)
@@ -132,7 +132,8 @@ target_solve = pde_util.solver_diffrax(
     pde_t0,
     pde_t1,
     vector_field,
-    num_steps=1_000,
+    num_steps=8095,
+    max_steps=8096,
     method="tsit5",
     adjoint="recursive_checkpoint",
 )
@@ -198,7 +199,7 @@ else:
 target_y1 = target_solve(y0, grf_scale)
 approx_y1 = approx_solve(y0, grf_scale)
 
-fwd_error = jnp.sqrt(jnp.mean((approx_y1 - target_y1) ** 2))
+fwd_error = (jnp.mean((approx_y1 - target_y1) ** 2))
 print("\nForward error:", fwd_error)
 
 key, subkey = jax.random.split(key, num=2)
@@ -206,7 +207,7 @@ u = jax.random.normal(subkey, shape=y0.shape)
 target_jacrev = jax.grad(lambda z: jnp.vdot(u, target_solve(y0, z)))(grf_scale)
 approx_jacrev = jax.grad(lambda z: jnp.vdot(u, approx_solve(y0, z)))(grf_scale)
 
-bwd_error = jnp.sqrt(jnp.mean((approx_jacrev - target_jacrev) ** 2))
+bwd_error = (jnp.mean((approx_jacrev - target_jacrev) ** 2))
 print("Backward error:", bwd_error, "\n")
 
 
