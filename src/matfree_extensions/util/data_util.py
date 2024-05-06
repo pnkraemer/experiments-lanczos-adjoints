@@ -221,7 +221,6 @@ def image_to_numpy(mean, std):
 
 def get_cifar10(
     batch_size=128,
-    return_dataset=False,
     purp: Literal["train", "sample"] = "train",
     transform=None,
     seed=0,
@@ -310,13 +309,11 @@ def get_cifar10(
         num_workers=4,
         collate_fn=numpy_collate_fn,
     )
-    if return_dataset:
-        return train_set.dataset, val_set.dataset, test_set.dataset
 
     return train_loader, val_loader, test_loader
 
 
-def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0):
+def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0, n_samples_per_class=None):
     set_seed(seed)
     n_classes = 1000
     mean = (0.485, 0.456, 0.406)
@@ -336,6 +333,13 @@ def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0):
     train_dataset = datasets.ImageFolder(
         train_path, transform=train_transform, target_transform=target_transform
     )
+    if n_samples_per_class is not None:
+        set_seed(seed)
+        n_data = n_samples_per_class * n_classes
+        train_dataset, _ = torch.utils.data.random_split(
+            train_dataset, [n_data, len(train_dataset) - n_data]
+        )
+
     return data.DataLoader(
         train_dataset,
         batch_size=batch_size,

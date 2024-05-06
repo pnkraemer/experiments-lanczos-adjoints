@@ -1,7 +1,6 @@
 """Utilities for BNNs."""
 
 import functools
-import warnings
 from typing import Callable
 
 import flax.linen
@@ -403,10 +402,7 @@ def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
         Gv_tree = ggn_fun(v_vec, *params)
         return jax.flatten_util.ravel_pytree(Gv_tree)[0] + alpha * v_vec
 
-    def loss(log_alpha, params_vec, img, label, key, num_classes=1000):
-        msg = "Argument num_classes is unused. Can it be deleted?"
-        warnings.warn(msg, stacklevel=1)
-
+    def loss(log_alpha, params_vec, img, label, key):
         alpha = hyperparam_unconstrain(log_alpha)
         logdet_fun = solver_logdet_slq_implicit(
             lanczos_rank=10, slq_num_samples=10, slq_num_batches=1, N=n_params
