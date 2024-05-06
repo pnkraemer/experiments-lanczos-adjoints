@@ -13,6 +13,8 @@ data/matrices/*
 data/uci_processed/*
 !data/uci_processed/concrete_compressive_strength
 !data/uci_processed/combined_cycle_power_plant
+data/pde_wave/*
+!data/pde_wave/16x16*
 
 
 # Byte-compiled / optimized / DLL files

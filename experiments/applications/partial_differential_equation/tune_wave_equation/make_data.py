@@ -16,6 +16,7 @@ import tqdm
 from matfree_extensions.util import exp_util, gp_util, pde_util
 
 
+
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, required=True)
@@ -34,7 +35,7 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 # Create a Gaussian random field
 kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel = kernel_p(raw_lengthscale=-0.75, raw_outputscale=-5.0)
+kernel = kernel_p(raw_lengthscale=-0.75, raw_outputscale=-10.0)
 xs = mesh.reshape((2, -1)).T
 K = gp_util.gram_matrix(kernel)(xs, xs)
 
@@ -49,7 +50,6 @@ factor = v * jnp.sqrt(w[..., None, :])
 key, subkey = jax.random.split(key, num=2)
 eps = jax.random.normal(subkey, shape=xs[:, 0].shape)
 parameter = (factor @ eps).reshape(mesh[0].shape)
-parameter = jnp.square(parameter)  # ensure nonnegativity
 
 # Discretise the PDE
 dx_space = jnp.diff(xs_1d)[0]
@@ -93,7 +93,7 @@ for _ in tqdm.tqdm(range(args.num_data)):
 
 
 # Make directories
-directory = exp_util.matching_directory(__file__, "data/")
+directory = f"./data/pde_wave/"
 os.makedirs(directory, exist_ok=True)
 path = f"{directory}{args.resolution}x{args.resolution}"
 
@@ -102,7 +102,7 @@ inputs = jnp.stack(inputs)
 targets = jnp.stack(targets)
 jnp.save(f"{path}_data_inputs.npy", inputs)
 jnp.save(f"{path}_data_targets.npy", targets)
-jnp.save(f"{path}_data_parameter.npy", parameter)
+jnp.save(f"{path}_data_parameter.npy", jnp.square(parameter))
 
 
 print("\nPlotting the inputs and targets...", end="")
