@@ -1,6 +1,7 @@
 """Create a beatiful figure for the paper."""
 
 import argparse
+import os 
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -61,4 +62,11 @@ axes["convergence"].set_title("Convergence", fontsize="medium")
 axes["convergence"].set_xlabel("Time (sec)", fontsize="medium")
 axes["convergence"].set_ylabel("Loss", fontsize="medium")
 plt.legend()
+
+
+directory = exp_util.matching_directory(__file__, "figures/")
+os.makedirs(directory, exist_ok=True)
+
+plt.savefig(f"{directory}lookatme.pdf")
+
 plt.show()
