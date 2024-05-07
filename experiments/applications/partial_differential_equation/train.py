@@ -22,8 +22,8 @@ from matfree_extensions.util import exp_util, pde_util
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
-parser.add_argument("--num_epochs", type=int, default=500)
-parser.add_argument("--learning_rate", type=float, default=1e-2)
+parser.add_argument("--num_epochs", type=int, default=2000)
+parser.add_argument("--learning_rate", type=float, default=1e-3)
 parser.add_argument("--seed", type=int, default=1)
 args = parser.parse_args()
 print(args)
@@ -75,22 +75,22 @@ if args.method == "arnoldi":
 
 elif args.method == "diffrax:euler+backsolve":
     method, adjoint = "euler", "backsolve"
-    kwargs = {"num_steps": 10, "method": method, "adjoint": adjoint}
+    kwargs = {"num_steps": 100, "method": method, "adjoint": adjoint}
     solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 elif args.method == "diffrax:heun+recursive_checkpoint":
     method, adjoint = "heun", "recursive_checkpoint"
-    kwargs = {"num_steps": 10, "method": method, "adjoint": adjoint}
+    kwargs = {"num_steps": 50, "method": method, "adjoint": adjoint}
     solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 elif args.method == "diffrax:tsit5+recursive_checkpoint":
     method, adjoint = "tsit5", "recursive_checkpoint"
-    kwargs = {"num_steps": 10, "method": method, "adjoint": adjoint}
+    kwargs = {"num_steps": 3, "method": method, "adjoint": adjoint}
     solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 elif args.method == "diffrax:dopri5+backsolve":
     method, adjoint = "dopri5", "backsolve"
-    kwargs = {"num_steps": 10, "method": method, "adjoint": adjoint}
+    kwargs = {"num_steps": 3, "method": method, "adjoint": adjoint}
     solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 else:
@@ -100,8 +100,8 @@ print("done.")
 
 print("Setting up the MLP...", end=" ")
 key = jax.random.PRNGKey(args.seed)
-kwargs = {"output_scale_raw": -5.0, "activation": jnp.tanh}
-mlp_init, mlp_apply = pde_util.model_mlp(mesh, [20, 20, 1], **kwargs)
+kwargs = {"output_scale_raw": -5.0, "activation": jax.nn.relu}
+mlp_init, mlp_apply = pde_util.model_mlp(mesh, [500, 500, 1], **kwargs)
 variables_before, mlp_unflatten = mlp_init(key)
 print(f"with {variables_before.size} parameters.")
 

@@ -3,7 +3,6 @@ mfe/
 
 # Results
 results/applications/gaussian_process/benchmark_matvecs_versus_keops/*
-results/applications/partial_differential_equation/*
 
 # Data
 .ssgetpy
