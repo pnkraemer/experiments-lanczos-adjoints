@@ -1,6 +1,7 @@
 """Train an MLP on recovering the diffusion parameter."""
 
 import argparse
+import functools
 import os
 import pickle
 import time
@@ -12,6 +13,10 @@ import jax.scipy.linalg
 import optax
 import tqdm
 from matfree_extensions.util import exp_util, pde_util
+
+# todo: give each method appropriate matvec numbers
+# todo: run on larger scale
+
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -107,12 +112,12 @@ error = pde_util.loss_mse_relative(nugget=nugget, reduce=jnp.mean)
 
 
 @jax.jit
-@jax.value_and_grad
+@functools.partial(jax.value_and_grad, has_aux=True)
 def loss_value_and_grad(p, y0s, y1s):
     """Evaluate the loss over all input/output pairs."""
     scale = mlp_apply(mlp_unflatten(p), mesh)
-    approx = jax.vmap(lambda *a: solve(*a)[0], in_axes=(0, None))(y0s, scale)
-    return error(approx, targets=y1s)
+    approx, aux = jax.vmap(solve, in_axes=(0, None))(y0s, scale)
+    return error(approx, targets=y1s), aux
 
 
 print("done.")
@@ -125,7 +130,7 @@ opt_state = optimizer.init(variables_after)
 print("done.")
 
 print("Precompiling the value-and-grad...", end=" ")
-loss, grad = loss_value_and_grad(variables_after, inputs, targets)
+(loss, _info), grad = loss_value_and_grad(variables_after, inputs, targets)
 loss.block_until_ready()
 grad.block_until_ready()
 print("done.")
@@ -135,14 +140,15 @@ progressbar = tqdm.tqdm(range(args.num_epochs))
 progressbar.set_description(f"Loss {0:.3e}")
 convergence = []
 timestamps = []
+matvecs = []
 t0 = time.perf_counter()
 for _ in progressbar:
-    loss, grad = loss_value_and_grad(variables_after, inputs, targets)
+    (loss, info), grad = loss_value_and_grad(variables_after, inputs, targets)
     updates, opt_state = optimizer.update(grad, opt_state)
     variables_after = optax.apply_updates(variables_after, updates)
-
     progressbar.set_description(f"Loss {loss:.3e}")
     t1 = time.perf_counter()
+    matvecs.append(info["num_matvecs"].sum())
     convergence.append(loss)
     timestamps.append(t1 - t0)
 
@@ -165,6 +171,7 @@ with open(f"{path}_stats.pkl", "wb") as handle:
     pickle.dump(stats, handle)
 
 jnp.save(f"{path}_parameter.npy", scale_after)
+jnp.save(f"{path}_matvecs.npy", jnp.asarray(matvecs))
 jnp.save(f"{path}_convergence.npy", jnp.asarray(convergence))
 jnp.save(f"{path}_timestamps.npy", jnp.asarray(timestamps))
 print("done.")
