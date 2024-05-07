@@ -1,18 +1,12 @@
-
 import argparse
-import functools
-import os
 import pickle
-import time
 
 import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
-import optax
-import tqdm
-from matfree_extensions.util import exp_util, pde_util
-import pandas as pd 
+import pandas as pd
+from matfree_extensions.util import exp_util
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
@@ -30,7 +24,6 @@ labels = {
 methods = list(labels.keys())
 
 
-
 directory = exp_util.matching_directory(__file__, "results/")
 
 stats = {}
@@ -45,7 +38,12 @@ for method in methods:
     timestamps = jnp.load(f"{path}_timestamps.npy")
     matvecs = results["loss"][1]["num_matvecs"].sum()
 
-    stats[labels[method]] = {"Test loss": results["loss"][0], "RMSE (Parameter)": results["rmse_param"], "Runtime/Epoch": jnp.mean(timestamps), "No. Matvecs": matvecs}
+    stats[labels[method]] = {
+        "Test loss": results["loss"][0],
+        "RMSE (Parameter)": results["rmse_param"],
+        "Runtime/Epoch": jnp.mean(timestamps),
+        "No. Matvecs": matvecs,
+    }
 
 
 stats = jax.tree_util.tree_map(float, stats)

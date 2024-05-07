@@ -35,10 +35,14 @@ for method in methods:
     print("fwd", errors_fwd)
     print("rev", errors_rev)
     print()
-    
+
     idx = num_matvecs >= 5
-    axes[0][0].semilogy(jnp.amin(ts_all, axis=1)[idx], errors_fwd[idx] + eps, label=labels[method])
-    axes[0][1].semilogy(jnp.amin(ts_all, axis=1)[idx], errors_rev[idx] + eps, label=labels[method])
+    axes[0][0].semilogy(
+        jnp.amin(ts_all, axis=1)[idx], errors_fwd[idx] + eps, label=labels[method]
+    )
+    axes[0][1].semilogy(
+        jnp.amin(ts_all, axis=1)[idx], errors_rev[idx] + eps, label=labels[method]
+    )
     axes[1][0].semilogy(num_matvecs[idx], errors_fwd[idx] + eps, label=labels[method])
     axes[1][1].semilogy(num_matvecs[idx], errors_rev[idx] + eps, label=labels[method])
 
@@ -61,7 +65,6 @@ axes[1][1].set_xlabel("# Matvecs")
 axes[1][1].set_ylabel("Rel. MSE (gradient)")
 axes[1][1].legend(fontsize="xx-small")
 axes[1][1].grid()
-
 
 
 directory = exp_util.matching_directory(__file__, "figures/")
