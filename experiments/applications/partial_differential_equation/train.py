@@ -17,7 +17,7 @@ from matfree_extensions.util import exp_util, pde_util
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
-parser.add_argument("--num_epochs", type=int, default=10)
+parser.add_argument("--num_epochs", type=int, default=500)
 parser.add_argument("--learning_rate", type=float, default=1e-2)
 parser.add_argument("--seed", type=int, default=1)
 args = parser.parse_args()
@@ -103,7 +103,7 @@ print(f"with {variables_before.size} parameters.")
 
 print("Creating a loss function...", end=" ")
 nugget = jnp.finfo(variables_before.dtype).eps
-error = pde_util.loss_mse_relative(nugget=nugget, reduce=jnp.sum)
+error = pde_util.loss_mse_relative(nugget=nugget, reduce=jnp.mean)
 
 
 @jax.jit

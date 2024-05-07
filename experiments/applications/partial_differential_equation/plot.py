@@ -22,8 +22,8 @@ print(args)
 
 labels = {
     "arnoldi": "Arnoldi",
-    "diffrax:euler+backsolve": "Euler/Backsolve (Diffrax)",
-    "diffrax:heun+recursive_checkpoint": "Heun/AD (Diffrax)",
+    # "diffrax:euler+backsolve": "Euler/Backsolve (Diffrax)",
+    # "diffrax:heun+recursive_checkpoint": "Heun/AD (Diffrax)",
     "diffrax:dopri5+backsolve": "Dopri5/Backsolve (Diffrax)",
     "diffrax:tsit5+recursive_checkpoint": "Tsit5/AD (Diffrax)",
 }
@@ -42,7 +42,7 @@ fig, axes = plt.subplot_mosaic(
 )
 
 axes["truth"].set_title("Truth", fontsize="medium")
-img = axes["truth"].contourf(parameter)
+img = axes["truth"].contourf(jnp.abs(parameter))
 plt.colorbar(img, ax=axes["truth"])
 
 for method in methods:
@@ -52,10 +52,10 @@ for method in methods:
     timestamps = jnp.load(f"{path}_timestamps.npy")
 
     axes[method].set_title(labels[method], fontsize="medium")
-    img = axes[method].contourf(parameter_estimate)
+    img = axes[method].contourf(jnp.abs(parameter_estimate))
     plt.colorbar(img, ax=axes[method])
 
-    axes["convergence"].semilogy(convergence, label=labels[method])
+    axes["convergence"].semilogy(timestamps, convergence, label=labels[method])
 
 axes["convergence"].set_title("Convergence", fontsize="medium")
 axes["convergence"].set_xlabel("Time (sec)", fontsize="medium")
