@@ -1,6 +1,7 @@
 """Create a data set."""
 
 import argparse
+import functools
 import os
 
 import jax
@@ -16,34 +17,34 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--num_data", type=int, required=True, help="Eg. 10, 100, ...")
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
+parser.add_argument("--lanczos_rank", type=int, default=32)
 args = parser.parse_args()
 print(args)
 
-# Prepare randomness
-key = jax.random.PRNGKey(seed=args.seed)
 
 # Create the mesh
 xs_1d = jnp.linspace(0.0, 1.0, endpoint=True, num=args.resolution)
 mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
-
-# Create a Gaussian random field
-kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
-kernel = kernel_p(raw_lengthscale=-0.75, raw_outputscale=-8.0)
+# Prepare randomness
+key = jax.random.PRNGKey(seed=args.seed)
+# gram = gp_util.gram_matvec_map_over_batch(num_batches=4, checkpoint=False)
+gram = gp_util.gram_matvec_full_batch()
 xs = mesh.reshape((2, -1)).T
-K = gp_util.gram_matrix(kernel)(xs, xs)
+mean = jnp.zeros_like(mesh[0]).reshape((-1,))
 
+# Create a sampler for a Gaussian random field
+kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
+kernel = kernel_p(raw_lengthscale=-0.75, raw_outputscale=-10.0)
+matvec = functools.partial(gram(kernel), xs, xs)
+sample = pde_util.sampler_lanczos(
+    mean=mean, cov_matvec=matvec, num=1, lanczos_rank=args.lanczos_rank
+)
 
-# Prepare sampling
-# Use eigh() so we can handle almost singular matrices
-(w, v) = jnp.linalg.eigh(K)
-w = jnp.maximum(0.0, w)  # clamp to allow sqrts
-factor = v * jnp.sqrt(w[..., None, :])
-
-# Sample a true parameter
+# Sample the initial parameter
 key, subkey = jax.random.split(key, num=2)
-eps = jax.random.normal(subkey, shape=xs[:, 0].shape)
-parameter = (factor @ eps).reshape(mesh[0].shape)
+samples = sample(subkey)
+parameter = samples.reshape(mesh[0].shape)
 
 # Discretise the PDE
 dx_space = jnp.diff(xs_1d)[0]
@@ -62,11 +63,10 @@ def vector_field(x, p):
 # Set up a GP for the initial condition
 kernel_p, _ = gp_util.kernel_scaled_rbf(shape_in=(2,), shape_out=())
 kernel = kernel_p(raw_lengthscale=0.0, raw_outputscale=0.0)
-xs = mesh.reshape((2, -1)).T
-K = gp_util.gram_matrix(kernel)(xs, xs)
-(w, v) = jnp.linalg.eigh(K)
-w = jnp.maximum(0.0, w)  # clamp to allow sqrts
-factor = v * jnp.sqrt(w[..., None, :])
+matvec = functools.partial(gram(kernel), xs, xs)
+sample = pde_util.sampler_lanczos(
+    mean=mean, cov_matvec=matvec, num=1, lanczos_rank=args.lanczos_rank
+)
 
 # Choose a solver
 solver_kwargs = {"num_steps": 128, "method": "dopri8", "adjoint": "direct"}
@@ -78,12 +78,12 @@ targets = []
 
 for _ in tqdm.tqdm(range(args.num_data)):
     key, subkey = jax.random.split(key, num=2)
-    eps = jax.random.normal(subkey, shape=xs[:, 0].shape)
-    y0 = (factor @ eps).reshape(mesh[0].shape)
+    samples = sample(subkey)
+    y0 = samples.reshape(mesh[0].shape)
 
     key, subkey = jax.random.split(key, num=2)
-    eps = jax.random.normal(subkey, shape=xs[:, 0].shape)
-    dy0 = (factor @ eps).reshape(mesh[0].shape)
+    samples = sample(subkey)
+    dy0 = samples.reshape(mesh[0].shape)
 
     init = jnp.stack([y0, dy0])
     final, _aux = solver(init, parameter)

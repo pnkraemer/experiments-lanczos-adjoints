@@ -8,7 +8,7 @@ import flax.linen
 import jax
 import jax.numpy as jnp
 
-from matfree_extensions import arnoldi
+from matfree_extensions import arnoldi, lanczos
 
 
 def mesh_tensorproduct(x, y, /):
@@ -330,3 +330,29 @@ def _softplus(x, beta=1.0, threshold=20.0):
         1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
         x,
     )
+
+
+def sampler_lanczos(*, mean, cov_matvec, num, lanczos_rank):
+    def sample(key):
+        tridiag = lanczos.tridiag(cov_matvec, lanczos_rank, reortho="full")
+        eps = jax.random.normal(key, (num, *mean.shape))
+
+        sample_one = functools.partial(_sample_single, tridiag=tridiag)
+        return jax.vmap(sample_one)(eps) + mean[None, ...]
+
+    def _sample_single(eps, *, tridiag):
+        norm = jnp.linalg.norm(eps)
+        eps /= norm
+
+        (Q, tridiag), _ = tridiag(eps)
+        K = _dense_tridiag(*tridiag)
+        (w, v) = jnp.linalg.eigh(K)
+        w = jnp.maximum(0.0, w)  # clamp to allow sqrts
+        factor = (v * jnp.sqrt(w[..., None, :])) @ v.T
+        return norm * Q.T @ factor @ (Q @ eps)
+
+    return sample
+
+
+def _dense_tridiag(diagonal, off_diagonal):
+    return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
