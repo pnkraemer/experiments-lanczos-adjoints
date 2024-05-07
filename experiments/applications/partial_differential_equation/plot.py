@@ -92,9 +92,9 @@ for method in methods:
     convergence = jnp.load(f"{path}_convergence.npy")
     timestamps = jnp.load(f"{path}_timestamps.npy")
     if "arnoldi" in method:
-        alpha, zorder = 0.9, 100
+        alpha, zorder = 0.99, 100
     else:
-        alpha, zorder = 0.7, 0
+        alpha, zorder = 0.8, 0
 
     axes["convergence"].semilogy(
         timestamps, convergence, label=labels[method], zorder=zorder, alpha=alpha
@@ -109,9 +109,9 @@ for method in methods:
     errors_rev = jnp.load(f"{directory}/wp_{method}_errors_rev.npy")
     idx = num_matvecs >= 1
     if "arnoldi" in method:
-        alpha, zorder = 0.9, 100
+        alpha, zorder = 0.99, 100
     else:
-        alpha, zorder = 0.7, 0
+        alpha, zorder = 0.8, 0
 
     axes["workprec_fwd"].loglog(
         num_matvecs[idx],
