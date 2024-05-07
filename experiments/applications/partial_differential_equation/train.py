@@ -9,7 +9,6 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy.linalg
-import matplotlib.pyplot as plt
 import optax
 import tqdm
 from matfree_extensions.util import exp_util, pde_util
@@ -164,12 +163,12 @@ with open(f"{path}_stats.pkl", "wb") as handle:
 
 jnp.save(f"{path}_parameter.npy", scale_after)
 print("done.")
-
-print("Plotting results... todo: remove soon", end=" ")
-fig, axes = plt.subplots(ncols=2)
-img = axes[0].contourf(jnp.abs(scale_after))
-plt.colorbar(img, ax=axes[0])
-img = axes[1].contourf(jnp.abs(parameter))
-plt.colorbar(img, ax=axes[1])
-plt.show()
-print("done.")
+#
+# print("Plotting results... todo: remove soon", end=" ")
+# fig, axes = plt.subplots(ncols=2)
+# img = axes[0].contourf(jnp.abs(scale_after))
+# plt.colorbar(img, ax=axes[0])
+# img = axes[1].contourf(jnp.abs(parameter))
+# plt.colorbar(img, ax=axes[1])
+# plt.show()
+# print("done.")
