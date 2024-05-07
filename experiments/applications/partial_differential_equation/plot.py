@@ -1,145 +1,64 @@
-import os
-import pickle
+"""Create a beatiful figure for the paper."""
+
+import argparse
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-import numpy as onp  # for matplotlib manipulations  # noqa: ICN001
-import pandas as pd
+import numpy as onp  # noqa: ICN001
 from matfree_extensions.util import exp_util
-from tueplots import axes, figsizes, fontsizes
+from tueplots import axes, fontsizes
 
-# todo: plot all methods next to each other
-# todo: get all stats into a datafram and print latex
+plt.rcParams.update(axes.lines())
+plt.rcParams.update(axes.legend())
+plt.rcParams.update(axes.grid())
+plt.rcParams.update(fontsizes.neurips2024())
 
-directory_results = exp_util.matching_directory(__file__, "results/")
-directory_fig = exp_util.matching_directory(__file__, "figures/")
-os.makedirs(directory_fig, exist_ok=True)
+# Parse arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
+args = parser.parse_args()
+print(args)
+
 
 labels = {
-    # "expm-pade": "Naive (Pade)",
-    # "euler": "Euler",
-    "diffrax-euler": "Euler (Diffrax)",
-    "diffrax-heun": "Heun (Diffrax)",
-    "diffrax-tsit5": "Tsit5 (Diffrax)",
     "arnoldi": "Arnoldi",
+    "diffrax:euler+backsolve": "Euler/Backsolve (Diffrax)",
+    "diffrax:heun+recursive_checkpoint": "Heun/AD (Diffrax)",
+    "diffrax:dopri5+backsolve": "Dopri5/Backsolve (Diffrax)",
+    "diffrax:tsit5+recursive_checkpoint": "Tsit5/AD (Diffrax)",
 }
-stats = {}
-for method, label in labels.items():
-    with open(f"{directory_results}{method}_stats.pkl", "rb") as handle:
-        stats[label] = pickle.load(handle)
+methods = list(labels.keys())
 
 
-stats_frame = pd.DataFrame(stats).T
+path = f"./data/pde_wave/{args.resolution}x{args.resolution}"
+parameter = jnp.load(f"{path}_data_parameter.npy")
+directory = exp_util.matching_directory(__file__, "results/")
 
-num_stats = len(stats["Arnoldi"].keys())
-column_format = f"l{'c'*num_stats}"
-latex = stats_frame.to_latex(column_format=column_format, float_format="%.1e")
+layout = onp.asarray([["truth", *methods, "convergence"]])
+figsize = ((len(methods) + 2) * 2, 2)
+# plt.rcParams.update(figsizes.neurips2024(nrows=len(layout), ncols=len(layout.T)))
+fig, axes = plt.subplot_mosaic(
+    layout, figsize=figsize, dpi=100, constrained_layout=True
+)
 
-print("\n")
-print("\n")
-print(latex)
-print("\n")
-print("\n")
+axes["truth"].set_title("Truth", fontsize="medium")
+img = axes["truth"].contourf(parameter)
+plt.colorbar(img, ax=axes["truth"])
 
+for method in methods:
+    path = f"{directory}{args.resolution}x{args.resolution}_{method}"
+    parameter_estimate = jnp.load(f"{path}_parameter.npy")
+    convergence = jnp.load(f"{path}_convergence.npy")
+    timestamps = jnp.load(f"{path}_timestamps.npy")
 
-# method = "arnoldi"
-# y0 = jnp.load(f"{directory_results}{method}_y0.npy")
-# scale_mlp_before = jnp.load(f"{directory_results}{method}_scale_mlp_before.npy")
-# scale_mlp_after = jnp.load(f"{directory_results}{method}_scale_mlp_after.npy")
-# scale_grf = jnp.load(f"{directory_results}{method}_scale_grf.npy")
-# y1_target = jnp.load(f"{directory_results}{method}_y1_target.npy")
-# y1_approx_before = jnp.load(f"{directory_results}{method}_y1_approx_before.npy")
-# y1_approx_after = jnp.load(f"{directory_results}{method}_y1_approx_after.npy")
+    axes[method].set_title(labels[method], fontsize="medium")
+    img = axes[method].contourf(parameter_estimate)
+    plt.colorbar(img, ax=axes[method])
 
+    axes["convergence"].semilogy(convergence, label=labels[method])
 
-# Plot
-
-
-def plot_t0(ax, z, /):
-    kwargs_t0 = {"cmap": "Greys"}
-    x = jnp.linspace(0, 1, endpoint=True, num=z.shape[0])
-    y = jnp.linspace(0, 1, endpoint=True, num=z.shape[1])
-    x0, x1 = jnp.meshgrid(x, y)
-    clr = ax.contourf(x0, x1, z, **kwargs_t0)
-    ax.set_xticks((0.0, 0.5, 1.0))
-    ax.set_yticks((0.0, 0.5, 1.0))
-    ax.tick_params(axis="both", which="major", labelsize="xx-small")
-    cbar = fig.colorbar(clr, ax=ax)
-    cbar.ax.tick_params(labelsize="xx-small")
-    return ax
-
-
-def plot_t1(ax, z, /):
-    kwargs_t1 = {"cmap": "Oranges"}
-    x = jnp.linspace(0, 1, endpoint=True, num=z.shape[0])
-    y = jnp.linspace(0, 1, endpoint=True, num=z.shape[1])
-    x0, x1 = jnp.meshgrid(x, y)
-    clr = ax.contourf(x0, x1, z, **kwargs_t1)
-    ax.set_xticks((0.0, 0.5, 1.0))
-    ax.set_yticks((0.0, 0.5, 1.0))
-    ax.tick_params(axis="both", which="major", labelsize="xx-small")
-
-    cbar = fig.colorbar(clr, ax=ax)
-    cbar.ax.tick_params(labelsize="xx-small")
-    return ax
-
-
-def plot_scale(ax, z, /):
-    kwargs_scale = {"cmap": "Blues"}
-    x = jnp.linspace(0, 1, endpoint=True, num=z.shape[0])
-    y = jnp.linspace(0, 1, endpoint=True, num=z.shape[1])
-    x0, x1 = jnp.meshgrid(x, y)
-    clr = ax.contourf(x0, x1, z, **kwargs_scale)
-    ax.set_xticks((0.0, 0.5, 1.0))
-    ax.set_yticks((0.0, 0.5, 1.0))
-    ax.tick_params(axis="both", which="major", labelsize="xx-small")
-
-    cbar = fig.colorbar(clr, ax=ax)
-    cbar.ax.tick_params(labelsize="xx-small")
-    return ax
-
-
-label_col = ["truth", *list(labels.keys())]
-label_row = ["param", "y0", "y1"]
-
-layout = [[f"{what}_{how}" for how in label_col] for what in label_row]
-layout = onp.asarray(layout)
-
-nrows, ncols = onp.shape(layout)
-plt.rcParams.update(figsizes.neurips2024(nrows=nrows, ncols=ncols))
-
-plt.rcParams.update(fontsizes.neurips2024(default_smaller=2))
-plt.rcParams.update(axes.lines())
-
-fig, axes = plt.subplot_mosaic(layout, sharex=True, sharey=True, dpi=200)
-
-print("Plotting the truth")
-y0 = jnp.load(f"{directory_results}arnoldi_y0.npy")
-scale_grf = jnp.load(f"{directory_results}arnoldi_scale_grf.npy")
-y1_target = jnp.load(f"{directory_results}arnoldi_y1_target.npy")
-
-axes["param_truth"].set_title("Truth", fontsize="medium")
-plot_scale(axes["param_truth"], scale_grf)
-plot_t0(axes["y0_truth"], y0[0])
-plot_t1(axes["y1_truth"], y1_target[0])
-
-
-axes["param_truth"].set_ylabel("Parameter", fontsize="small")
-axes["y0_truth"].set_ylabel("Known: $y(t_0)$", fontsize="small")
-axes["y1_truth"].set_ylabel("Target: $y(t_1)$", fontsize="small")
-
-for method, label in labels.items():
-    y0 = jnp.load(f"{directory_results}{method}_y0.npy")
-    scale_mlp_after = jnp.load(f"{directory_results}{method}_scale_mlp_after.npy")
-    y1_approx_after = jnp.load(f"{directory_results}{method}_y1_approx_after.npy")
-
-    axes[f"param_{method}"].set_title(label, fontsize="small")
-    plot_scale(axes[f"param_{method}"], scale_mlp_after)
-    plot_t0(axes[f"y0_{method}"], y0[0])
-    plot_t1(axes[f"y1_{method}"], y1_approx_after[0])
-
-
-fig.align_ylabels()
-
-plt.savefig(f"{directory_fig}/figure.pdf")
+axes["convergence"].set_title("Convergence", fontsize="medium")
+axes["convergence"].set_xlabel("Time (sec)", fontsize="medium")
+axes["convergence"].set_ylabel("Loss", fontsize="medium")
+plt.legend()
 plt.show()
