@@ -17,7 +17,7 @@ from matfree_extensions.util import exp_util, pde_util
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
-parser.add_argument("--num_epochs", type=int, default=1000)
+parser.add_argument("--num_epochs", type=int, default=10)
 parser.add_argument("--learning_rate", type=float, default=1e-2)
 parser.add_argument("--seed", type=int, default=1)
 args = parser.parse_args()
@@ -133,23 +133,26 @@ print("done.")
 print("Training...\n")
 progressbar = tqdm.tqdm(range(args.num_epochs))
 progressbar.set_description(f"Loss {0:.3e}")
+convergence = []
+timestamps = []
 t0 = time.perf_counter()
 for _ in progressbar:
     loss, grad = loss_value_and_grad(variables_after, inputs, targets)
     updates, opt_state = optimizer.update(grad, opt_state)
     variables_after = optax.apply_updates(variables_after, updates)
-    progressbar.set_description(f"Loss {loss:.3e}")
 
-t1 = time.perf_counter()
+    progressbar.set_description(f"Loss {loss:.3e}")
+    t1 = time.perf_counter()
+    convergence.append(loss)
+    timestamps.append(t1 - t0)
+
 scale_after = mlp_apply(mlp_unflatten(variables_after), mesh)
 
-print("\nEvaluating the error metrics...", end=" ")
-runtime = (t1 - t0) / args.num_epochs
+print("\nEvaluating the error metrics...")
 rmse = error(jnp.abs(scale_after), targets=jnp.abs(parameter))
 loss, _grad = loss_value_and_grad(variables_after, test_inputs, test_targets)
-print("\n\tRuntime per epoch:", runtime)
-print("\tRMSE (param):", rmse)
-print("\tLoss:", loss)
+print("\tRMSE (parameter):", rmse)
+print("\tTest-Loss:", loss)
 print("done.\n")
 
 
@@ -157,11 +160,13 @@ print("Saving results...", end=" ")
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
 path = f"{directory}{args.resolution}x{args.resolution}_{args.method}"
-stats = {"runtime": runtime, "rmse_param": rmse, "loss": loss}
+stats = {"rmse_param": rmse, "loss": loss}
 with open(f"{path}_stats.pkl", "wb") as handle:
     pickle.dump(stats, handle)
 
 jnp.save(f"{path}_parameter.npy", scale_after)
+jnp.save(f"{path}_convergence.npy", jnp.asarray(convergence))
+jnp.save(f"{path}_timestamps.npy", jnp.asarray(timestamps))
 print("done.")
 #
 # print("Plotting results... todo: remove soon", end=" ")
