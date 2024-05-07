@@ -86,7 +86,7 @@ for _ in tqdm.tqdm(range(args.num_data)):
     dy0 = (factor @ eps).reshape(mesh[0].shape)
 
     init = jnp.stack([y0, dy0])
-    final = solver(init, parameter)
+    final, _aux = solver(init, parameter)
 
     inputs.append(init)
     targets.append(final)
