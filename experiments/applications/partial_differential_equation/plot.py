@@ -23,8 +23,8 @@ print(args)
 
 labels = {
     "arnoldi": "Arnoldi",
-    # "diffrax:euler+backsolve": "Euler/Backsolve (Diffrax)",
-    # "diffrax:heun+recursive_checkpoint": "Heun/AD (Diffrax)",
+    "diffrax:euler+backsolve": "Euler/Backsolve (Diffrax)",
+    "diffrax:heun+recursive_checkpoint": "Heun/AD (Diffrax)",
     "diffrax:dopri5+backsolve": "Dopri5/Backsolve (Diffrax)",
     "diffrax:tsit5+recursive_checkpoint": "Tsit5/AD (Diffrax)",
 }

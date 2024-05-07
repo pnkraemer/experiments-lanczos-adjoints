@@ -35,13 +35,12 @@ for method in methods:
     print("fwd", errors_fwd)
     print("rev", errors_rev)
     print()
-
+    
     idx = num_matvecs >= 5
-
-    axes[0][0].semilogy(jnp.amin(ts_all[idx:], axis=1), errors_fwd[idx:] + eps, label=labels[method])
-    axes[0][1].semilogy(jnp.amin(ts_all[idx:], axis=1), errors_rev[idx:] + eps, label=labels[method])
-    axes[1][0].semilogy(num_matvecs[idx:], errors_fwd[idx:] + eps, label=labels[method])
-    axes[1][1].semilogy(num_matvecs[idx:], errors_rev[idx:] + eps, label=labels[method])
+    axes[0][0].semilogy(jnp.amin(ts_all, axis=1)[idx], errors_fwd[idx] + eps, label=labels[method])
+    axes[0][1].semilogy(jnp.amin(ts_all, axis=1)[idx], errors_rev[idx] + eps, label=labels[method])
+    axes[1][0].semilogy(num_matvecs[idx], errors_fwd[idx] + eps, label=labels[method])
+    axes[1][1].semilogy(num_matvecs[idx], errors_rev[idx] + eps, label=labels[method])
 
 axes[0][0].set_xlabel("Time (sec)")
 axes[0][0].set_ylabel("Rel. MSE (value)")

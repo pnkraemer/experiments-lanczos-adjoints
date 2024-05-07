@@ -80,7 +80,7 @@ elif args.method == "diffrax:euler+backsolve":
 
 elif args.method == "diffrax:heun+recursive_checkpoint":
     method, adjoint = "heun", "recursive_checkpoint"
-    kwargs = {"num_steps": 50, "method": method, "adjoint": adjoint}
+    kwargs = {"num_steps": 10, "method": method, "adjoint": adjoint}
     solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 elif args.method == "diffrax:tsit5+recursive_checkpoint":
@@ -156,7 +156,7 @@ scale_after = mlp_apply(mlp_unflatten(variables_after), mesh)
 
 print("\nEvaluating the error metrics...")
 rmse = error(jnp.abs(scale_after), targets=jnp.abs(parameter))
-loss, _grad = loss_value_and_grad(variables_after, test_inputs, test_targets)
+(loss, _aux), _grad = loss_value_and_grad(variables_after, test_inputs, test_targets)
 print("\tRMSE (parameter):", rmse)
 print("\tTest-Loss:", loss)
 print("done.\n")

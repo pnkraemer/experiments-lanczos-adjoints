@@ -1,5 +1,5 @@
 printf "\nGenerating data... TODO\n"
-time python experiments/applications/partial_differential_equation/make_data.py  --seed 1 --resolution 128 --num_data 128;
+time python experiments/applications/partial_differential_equation/make_data.py  --seed 1 --resolution 128 --num_data 256;
 
 
 printf "\nCollecting data for the workprecision diagram\n"
