@@ -132,6 +132,8 @@ def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
     return loss
 
 
+
+
 # todo: move to gp? (And rename gp.py appropriately, of course)
 #  laplace-torch calls this Laplace.log_prob(normalized=True)
 def loss_log_prob_like_in_redux(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
@@ -499,3 +501,58 @@ def get_model_apply_fn(model_name, model_apply, batch_stats=None, rng=None):
         raise ValueError
 
     return model_fn
+
+
+
+def logpdf_cholesky() -> Callable:
+    """Construct a logpdf function that relies on a Cholesky decomposition."""
+
+    def logpdf(y, /, *, mean, cov: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov)(mean)
+
+        cov_matrix += 1e-4 * jnp.eye(*cov_matrix.shape)
+        
+        # Cholesky-decompose
+        cholesky = jnp.linalg.cholesky(cov_matrix)
+
+        # Log-determinant
+        logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
+
+        # Mahalanobis norm
+
+        def solve_triangular(A, b):
+            return jax.scipy.linalg.solve_triangular(A, b, lower=True, trans=False)
+
+        tmp = solve_triangular(cholesky, y - mean)
+        mahalanobis = jnp.dot(tmp, tmp)
+
+        # Combine the terms
+        (n,) = jnp.shape(mean)
+
+        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), {}
+
+    return logpdf
+
+
+
+def predictive_posterior_loglikelihood(*, model_apply, unflatten, logpdf, ggn_fun):
+    def eval_logprob(params_vec, x_test, y_test):
+        # p(y| x, theta) = N(y | f(x, theta), J_* H^-1 J_*^T)
+        mean_pred, jvp_fn = jax.linearize(lambda p: model_apply(unflatten(p), x_test), params_vec)
+        vjp_fn = jax.linear_transpose(jvp_fn, params_vec)
+        y_flat, unflat = jax.flatten_util.ravel_pytree(y_test)
+        mean_flat, _unflat = jax.flatten_util.ravel_pytree(mean_pred)
+
+        # logpdf = bnn_util.logpdf_lanczos(num_matvecs, slq_sampler=sampler, slq_batch_num=3, checkpoint=False, cg_tol=1e-1)
+        def cov_vp(v_):
+            v = unflat(v_)
+
+            Jtv, = vjp_fn(v)
+            # _, jvp = jax.jvp(lambda p: model_apply(unflatten(p), x_test), (params_vec,), (v,))
+            inv_ggn, _info = jax.scipy.sparse.linalg.cg(ggn_fun, Jtv, tol=0.1)
+            out = jvp_fn(inv_ggn)
+            return (jax.flatten_util.ravel_pytree(out)[0])
+        
+        return logpdf(y_flat, mean=mean_flat, cov=cov_vp)
+    return eval_logprob

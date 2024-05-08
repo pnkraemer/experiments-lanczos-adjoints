@@ -105,7 +105,7 @@ def tree_random_normal_like(rng_key, target, n_samples: Optional[int] = None):
 
 
 @partial(
-    jax.jit, static_argnames=("model_fn", "likelihood", "computation_type", "n_samples")
+    jax.jit, static_argnames=("computation_type", "n_samples")
 )
 def hutchinson_diagonal(
     gvp_fn,
