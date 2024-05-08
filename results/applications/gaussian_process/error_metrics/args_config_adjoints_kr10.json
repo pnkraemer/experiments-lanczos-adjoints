@@ -1,0 +1,13 @@
+{
+    "name_of_file": "gp_train",
+    "seed": 1,
+    "num_points": -1,
+    "num_epochs": 100,
+    "cg_tol": 1.0,
+    "cg_maxiter": 10,
+    "gp_method": "adjoints",
+    "montecarlo_num_samples": 10,
+    "matvec_num_batches": 1,
+    "slq_krylov_depth": 10,
+    "dataset": "airquality"
+}

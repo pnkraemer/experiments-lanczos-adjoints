@@ -30,7 +30,7 @@ def save_parser(directory, args):
         with open(
             f"{directory}/args_config_"
             + args.gp_method
-            + f"_kr{args.slq_krylov_depth!s}.json",
+            + f"_kr{args.krylov_depth}.json",
             "w",
         ) as f:
             json.dump(vars(args), f, indent=4)
@@ -86,7 +86,7 @@ def init_params_as_gpytorch(X, y):
     return ((lengthscale, outputscale), noise)
 
 
-def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
+def gp_select(which: GP_METHODS_ARGS, X, y, key, args):
     """Selects a GP given one methods we are interested in"""
 
     # todo: ideally, additionally to the reference, we should pass
@@ -107,31 +107,31 @@ def gp_select(which: GP_METHODS_ARGS, X, y, key, solver_args):
         if which == "naive":
             logpdf_fun = gp.logpdf_cholesky()
         elif which == "adjoints":
-            num_batches = solver_args["num_batches"]
-            num_samples = solver_args["num_samples"]
-            krylov_depth = solver_args["krylov_depth"]
             # num_batches ---> 1 and larger samples as possible.
             # begin to split batches and lower samples if memory issues
             # krylov_depth upper bounded by num. of points
             # (roughly the num of eigens)
 
             x_like = jnp.ones((_X.shape[0],), dtype=float)
-            sampler = hutchinson.sampler_rademacher(
-                x_like, num=num_samples
-            )  # make an option for normal?
+            sampler = hutchinson.sampler_rademacher(x_like, num=args.mc_samples)
+
             logpdf_fun = gp.logpdf_lanczos(
-                krylov_depth, sampler, slq_batch_num=num_batches
+                args.krylov_depth,
+                slq_batch_num=args.slq_batch_num,
+                checkpoint=args.lanczos_checkpoint,
+                cg_tol=args.cg_tol,
+                cg_maxiter=args.cg_maxiter,
+                slq_sampler=sampler,
             )
 
         # THIS GUY FOR SMALL DATA REGIME
         # gram_matvec = (
         #     gp.gram_matvec_full_batch()
         # )  # I chose this one, but any other could be possible
+
         # THIS GUY FOR SMALL DATA REGIME
-        gram_matvec = (
-            gp.gram_matvec_map_over_batch(batch_size=args_solver["num_batches"])
-            # gp.gram_matvec_map()
-            # gp.gram_matvec_full_batch()
+        gram_matvec = gp.gram_matvec_map_over_batch(
+            num_batches=args.matvec_batch_num, checkpoint=args.matvec_checkpoint
         )
 
         # Set up a GP model
@@ -200,14 +200,19 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
         # for LANCZOS we need to specify the key
         def mll_lanczos(params, key, inputs, targets):
             p1, p2 = unflatten(params)
-            return -loss(inputs, targets, key, params_prior=p1, params_likelihood=p2)
+            val, info = loss(
+                inputs, targets, key, params_prior=p1, params_likelihood=p2
+            )
+            return -val, info
 
         if which == "naive":
             value_and_grad_gp = jax.jit(jax.value_and_grad(mll, argnums=0))
             value, _grad = value_and_grad_gp(p_opt, inputs=X, targets=y)
         elif which == "adjoints":
-            value_and_grad_gp = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0))
-            value, _grad = value_and_grad_gp(p_opt, key, inputs=X, targets=y)
+            value_and_grad_gp = jax.jit(
+                jax.value_and_grad(mll_lanczos, argnums=0, has_aux=True)
+            )
+            (value, aux), _grad = value_and_grad_gp(p_opt, key, inputs=X, targets=y)
 
         progressbar = tqdm.tqdm(range(args.num_epochs))
         progressbar.set_description(f"loss: {value:.3F}")
@@ -223,7 +228,9 @@ def gp_train(which: GP_METHODS_ARGS, reference, num_epochs):
                     value, grads = value_and_grad_gp(p_opt, inputs=X, targets=y)
                 elif which == "adjoints":
                     key, subkey = jax.random.split(key, num=2)
-                    value, grads = value_and_grad_gp(p_opt, subkey, inputs=X, targets=y)
+                    (value, aux), grads = value_and_grad_gp(
+                        p_opt, subkey, inputs=X, targets=y
+                    )
 
                 updates, state = optimizer.update(grads, state)
                 p_opt = optax.apply_updates(p_opt, updates)
@@ -287,14 +294,26 @@ if __name__ == "__main__":
     parser.add_argument("--num_points", "-n", type=int, default=-1)
     parser.add_argument("--num_epochs", "-e", type=int, default=100)
     parser.add_argument("--gp_method", "-gpm", type=str, default="gpytorch")
-    parser.add_argument("--slq_num_batches", "-sb", type=int, default=100)
-    parser.add_argument("--slq_krylov_depth", "-kry", type=int, default=5)
-    parser.add_argument("--slq_num_samples", "-s", type=int, default=1)  # higher?
+    parser.add_argument("--mc_samples", "-mcs", type=int, default=5)
+    parser.add_argument("--matvec_batch_num", "-b", type=int, default=100)
+    parser.add_argument("--krylov_depth", "-kry", type=int, default=20)
+    parser.add_argument("--slq_batch_num", "-slqb", type=int, default=10)
+    parser.add_argument("--slq_samples_num", "-slqs", type=int, default=1)
+    parser.add_argument("--matvec_checkpoint", "-mvc", type=bool, default=True)
+    parser.add_argument("--lanczos_checkpoint", "-lc", type=bool, default=False)
+    parser.add_argument("--cg_tol", "-cgt", type=float, default=1e-2)
+    parser.add_argument("--cg_maxiter", "-cgi", type=int, default=1_000)
     parser.add_argument(
         "--dataset", "-data", type=str, default="concrete_compressive_strength"
     )
     args = parser.parse_args()
     print(args, "\n")
+
+    # Training the GP with different methods/matrix-solvers
+    # cg_tol = 1e-2  # include in logpdf_lanczos (play around with this value)
+    # cg_maxiter = 1_000  # include in logpdf_lanczos
+    # lanczos_maxiter = 20  # krylov_depth
+    # trace_samples = 10  # slq_num_batches (set slq_num_samples to 1)
 
     # Initialise the random number generator
     key_ = jax.random.PRNGKey(args.seed)
@@ -305,27 +324,22 @@ if __name__ == "__main__":
         args.dataset, args.seed
     )
 
-    # Select GP method with solver args dict (for lanczos)
-    args_solver = {
-        "num_batches": args.slq_num_batches,
-        "krylov_depth": args.slq_krylov_depth,
-        "num_samples": args.slq_num_samples,
-    }
-    reference = gp_select(args.gp_method, X_train, y_train, key_solver, args_solver)
+    # Select GP method:
+    reference = gp_select(args.gp_method, X_train, y_train, key_solver, args)
 
     # Training the GP with different methods/matrix-solvers
-    cg_tol = 1e-2  # include in logpdf_lanczos (play around with this value)
-    cg_maxiter = 1_000  # include in logpdf_lanczos
-    lanczos_maxiter = 20  # krylov_depth
-    trace_samples = 10  # slq_num_batches (set slq_num_samples to 1)
+    cg_tol = args.cg_tol  # include in logpdf_lanczos (play around with this value)
+    cg_maxiter = args.cg_maxiter  # include in logpdf_lanczos
+    lanczos_maxiter = args.krylov_depth  # krylov_depth
+    trace_samples = args.slq_batch_num  # slq_num_batches (set slq_num_samples to 1)
 
     # https://docs.gpytorch.ai/en/stable/settings.html
     with (
         gpytorch.settings.cg_tolerance(cg_tol),
         gpytorch.settings.deterministic_probes(False),
         gpytorch.settings.eval_cg_tolerance(cg_tol),
-        gpytorch.settings.fast_computation(
-            log_prob=True, covar_root_decomposition=True, fast_solves=True
+        gpytorch.settings.fast_computations(
+            log_prob=True, covar_root_decomposition=True
         ),
         gpytorch.settings.lazily_evaluate_kernels(state=True),
         gpytorch.settings.linalg_dtypes(default=torch.float32),
