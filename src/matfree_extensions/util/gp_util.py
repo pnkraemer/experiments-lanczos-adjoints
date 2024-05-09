@@ -237,79 +237,7 @@ def logpdf_cholesky() -> Callable:
     return logpdf
 
 
-# todo: rename slq_* to mc_* to indicate monte carlo sampling?
-def logpdf_lanczos(
-    krylov_depth,
-    /,
-    slq_sampler: Callable,
-    *,
-    slq_batch_num: int,
-    checkpoint: bool,
-    cg_tol: float,
-    cg_maxiter: int | None = None,  # same as in jax.scipy.sparse.cg
-) -> Callable:
-    """Construct a logpdf function that uses CG and Lanczos.
-
-    Vocabulary:
-        "CG" = "Conjugate gradient solver"
-        "Lanczos" = The "Lanczos" iteration
-        "SLQ" = "Stochastic Lanczos quadrature"
-        (which combines Monte Carlo estimation with the Lanczos iteration)
-
-    If this logpdf is plugged into mll_exact(), the returned mll function
-    evaluates as mll(x, y, key, params_prior=...)
-    instead of mll(x, y, params_prior=...)
-
-    The estimator uses slq_batch_num*slq_sample_num samples for SLQ.
-    Use a single batch and increase slq_sample_num until memory limits occur.
-    Then, increase the number of batches while keeping the batch size maximal.
-
-    Parameters
-    ----------
-    krylov_depth
-        Depth of the Krylov space. Read this as:
-        "Number of matrix-vector products" we want to use.
-    slq_sampler
-        Monte Carlo sampler for stochastic Lanczos quadrature.
-        For instance, matfree.hutchinson.sampler_rademacher().
-    slq_batch_num
-        How many batches to use for Monte Carlo sampling
-        This wraps around `slq_sampler`, so it multiplies
-        however many samples slq_sampler generates.
-        All batches are compute sequentially.
-    checkpoint
-        Whether to checkpoint each SLQ batch.
-        Checkpoint increases memory efficiency but also runtime.
-        Usually, we set this to `False`.
-    cg_tol
-        Tolerance to use for each conjugate gradients solve.
-        For instance, GPyTorch uses `cg_tol=1.0` for
-        Gaussian process hyperparameter calibration.
-    cg_maxiter
-        Maximum number of iterations for each conjugate
-        gradients solve.
-    """
-
-    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
-        A, _info = problem
-        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
-        return result, info
-
-    def logdet(problem: tuple[Callable, dict], /, key):
-        A, _info = problem
-
-        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
-        estimate = hutchinson.hutchinson(integrand, slq_sampler)
-
-        # Memory-efficient reverse-mode derivatives
-        #  See gram_matvec_map_over_batch().
-        if checkpoint:
-            estimate = jax.checkpoint(estimate)
-
-        keys = jax.random.split(key, num=slq_batch_num)
-        values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0)
-
+def logpdf_krylov(solve: Callable, logdet: Callable):
     def logpdf(y, *params_logdet, mean, cov):
         # Log-determinant
         logdet_ = logdet(cov, *params_logdet) / 2
@@ -325,9 +253,39 @@ def logpdf_lanczos(
     return logpdf
 
 
-def logpdf_lanczos_reuse(
-    krylov_depth, /, slq_sampler: Callable, slq_batch_num
-) -> Callable:
+def krylov_solve_cg(*, tol, maxiter):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, _info = problem
+        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter)
+        return result, info
+
+    return solve
+
+
+def krylov_logdet_slq(
+    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool
+):
+    def logdet(problem: tuple[Callable, dict], /, key):
+        A, _info = problem
+
+        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
+        estimate = hutchinson.hutchinson(integrand, sample)
+
+        # Memory-efficient reverse-mode derivatives
+        #  See gram_matvec_map_over_batch().
+        if checkpoint:
+            estimate = jax.checkpoint(estimate)
+
+        keys = jax.random.split(key, num=num_batches)
+        values = jax.lax.map(lambda k: estimate(k), keys)
+        return jnp.mean(values, axis=0)
+
+    return logdet
+
+
+def krylov_logdet_slq_vjp_reuse(
+    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool
+):
     """Construct a logpdf function that uses CG and Lanczos for the forward pass.
 
     This method returns an algorithm similar to logpdf_lanczos_reuse;
@@ -352,33 +310,22 @@ def logpdf_lanczos_reuse(
     }
     """
 
-    def solve(problem: tuple[Callable, dict], b: jax.Array):
+    def logdet(problem: tuple[Callable, dict], /, key):
         A, _info = problem
-        result, info = jax.scipy.sparse.linalg.cg(A, b)
-        return result, info
 
-    def logdet(problem: tuple[Callable, dict], key):
-        A, _info = problem
         integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
-        estimate = hutchinson.hutchinson(integrand, slq_sampler)
+        estimate = hutchinson.hutchinson(integrand, sample)
 
-        keys = jax.random.split(key, num=slq_batch_num)
+        # Memory-efficient reverse-mode derivatives
+        #  See gram_matvec_map_over_batch().
+        if checkpoint:
+            estimate = jax.checkpoint(estimate)
+
+        keys = jax.random.split(key, num=num_batches)
         values = jax.lax.map(lambda k: estimate(k), keys)
         return jnp.mean(values, axis=0)
 
-    def logpdf(y, *params_logdet, mean, cov):
-        # Log-determinant
-        logdet_ = logdet(cov, *params_logdet) / 2
-
-        # Mahalanobis norm
-        tmp, info = solve(cov, y - mean)
-        mahalanobis = jnp.dot(y - mean, tmp)
-
-        # Combine the terms
-        (n,) = jnp.shape(mean)
-        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
-
-    return logpdf
+    return logdet
 
 
 def mean_zero() -> Callable:
