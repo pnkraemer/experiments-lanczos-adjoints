@@ -38,18 +38,22 @@ from matfree import test_util
 
 def cholesky_partial(rank):
     def estimate(matrix):
-        A = matrix.copy()
-        R = jnp.zeros((rank, len(A)))
-        mask = jnp.triu(jnp.ones_like(R), 1)
+        L = jnp.zeros((len(matrix), rank))
 
-        for k, idx in enumerate(mask):
-            diag_k = jnp.sqrt(A[k, k])
-            R = R.at[k, k].set(diag_k)
-            R = R.at[k].set(idx * A[k] / diag_k)
-            R = R.at[k, k].set(diag_k)
-            for j in range(k + 1, len(A)):
-                A = A.at[j, j:].set(A[j, j:] - R[k, j] * R[k, j:])
-        return R
+        body = makebody(matrix)
+        L = jax.lax.fori_loop(0, rank, body, L)
+        return L.T
+
+    def makebody(matrix):
+        def body(i, L):
+            l_ii = jnp.sqrt(matrix[i, i] - jnp.dot(L[i], L[i]))
+
+            l_ji = matrix[:, i] - L @ L[i, :]
+            l_ji /= l_ii
+
+            return L.at[:, i].set(l_ji)
+
+        return body
 
     return estimate
 
@@ -64,10 +68,8 @@ def test_full(n=5):
     cholesky_p = cholesky_partial(n)
     approximation = cholesky_p(cov)
 
-    print(approximation)
-    print()
-    print(reference)
-    assert jnp.allclose(approximation, reference)
+    tol = jnp.finfo(approximation.dtype).eps
+    assert jnp.allclose(approximation, reference, atol=tol, rtol=tol)
 
 
 def test_partial(n=4, rank=2):
