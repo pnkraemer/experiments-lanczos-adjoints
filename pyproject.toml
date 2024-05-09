@@ -43,6 +43,7 @@ experiments = [
     "flax",
     "jinja2",  # for pandas.DataFrame.to_latex()
     "laplace-torch",
+    "tree-math",
 ]
 
 
