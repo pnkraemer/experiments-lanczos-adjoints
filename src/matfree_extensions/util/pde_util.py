@@ -346,6 +346,8 @@ def sampler_lanczos(*, mean, cov_matvec, num, lanczos_rank):
 
         (Q, tridiag), _ = tridiag(eps)
         K = _dense_tridiag(*tridiag)
+
+        # Compute H^(1/2) via eigh()
         (w, v) = jnp.linalg.eigh(K)
         w = jnp.maximum(0.0, w)  # clamp to allow sqrts
         factor = (v * jnp.sqrt(w[..., None, :])) @ v.T
