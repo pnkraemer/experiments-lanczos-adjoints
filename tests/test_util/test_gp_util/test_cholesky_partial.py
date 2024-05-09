@@ -38,14 +38,17 @@ from matfree import test_util
 
 def cholesky_partial(rank):
     def estimate(matrix):
-        R = jnp.zeros_like(matrix)
-        R = jnp.zeros((rank, len(matrix)))
+        A = matrix.copy()
+        R = jnp.zeros((rank, len(A)))
+        mask = jnp.triu(jnp.ones_like(R), 1)
 
-        for k in range(rank):
-            R = R.at[k, k].set(jnp.sqrt(matrix[k, k]))
-            R = R.at[k, k + 1 :].set(matrix[k, k + 1 :] / R[k, k])
-            for j in range(k + 1, len(matrix)):
-                matrix = matrix.at[j, j:].set(matrix[j, j:] - R[k, j] * R[k, j:])
+        for k, idx in enumerate(mask):
+            diag_k = jnp.sqrt(A[k, k])
+            R = R.at[k, k].set(diag_k)
+            R = R.at[k].set(idx * A[k] / diag_k)
+            R = R.at[k, k].set(diag_k)
+            for j in range(k + 1, len(A)):
+                A = A.at[j, j:].set(A[j, j:] - R[k, j] * R[k, j:])
         return R
 
     return estimate
