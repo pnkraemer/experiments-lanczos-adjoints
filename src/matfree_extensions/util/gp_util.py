@@ -29,7 +29,7 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
         def prior(x):
             mean = mean_fun(x)
             cov_matvec = functools.partial(make_matvec, x, x)
-            return mean, cov_matvec
+            return mean, (cov_matvec, {})
 
         return prior
 
@@ -167,7 +167,8 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
         noise = _softplus(raw_noise)
 
         def likelihood(mean, cov):
-            return mean, lambda v: cov(v) + noise * v
+            matvec, aux = cov
+            return mean, (lambda v: matvec(v) + noise * v, aux)
 
         return likelihood
 
@@ -195,9 +196,10 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
 def logpdf_scipy_stats() -> Callable:
     """Construct a logpdf function that wraps jax.scipy.stats."""
 
-    def logpdf(y, /, *, mean, cov: Callable):
+    def logpdf(y, /, *, mean, cov: tuple[Callable, dict]):
         # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov)(mean)
+        matvec, _info = cov
+        cov_matrix = jax.jacfwd(matvec)(mean)
 
         _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
         return _logpdf_fun(y, mean=mean, cov=cov_matrix), {}
@@ -208,9 +210,10 @@ def logpdf_scipy_stats() -> Callable:
 def logpdf_cholesky() -> Callable:
     """Construct a logpdf function that relies on a Cholesky decomposition."""
 
-    def logpdf(y, /, *, mean, cov: Callable):
+    def logpdf(y, /, *, mean, cov: tuple[Callable, dict]):
         # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov)(mean)
+        matvec, _info = cov
+        cov_matrix = jax.jacfwd(matvec)(mean)
 
         # Cholesky-decompose
         cholesky = jnp.linalg.cholesky(cov_matrix)
@@ -287,11 +290,14 @@ def logpdf_lanczos(
         gradients solve.
     """
 
-    def solve(A: Callable, /, b):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, _info = problem
         result, info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
         return result, info
 
-    def logdet(A: Callable, /, key):
+    def logdet(problem: tuple[Callable, dict], /, key):
+        A, _info = problem
+
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
@@ -346,11 +352,13 @@ def logpdf_lanczos_reuse(
     }
     """
 
-    def solve(A: Callable, b):
+    def solve(problem: tuple[Callable, dict], b: jax.Array):
+        A, _info = problem
         result, info = jax.scipy.sparse.linalg.cg(A, b)
         return result, info
 
-    def logdet(A: Callable, key):
+    def logdet(problem: tuple[Callable, dict], key):
+        A, _info = problem
         integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, slq_sampler)
 
