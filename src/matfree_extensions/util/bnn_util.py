@@ -513,13 +513,39 @@ def logpdf_cholesky() -> Callable:
 
         # Log-determinant
         logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
-
         # Mahalanobis norm
 
         def solve_triangular(A, b):
             return jax.scipy.linalg.solve_triangular(A, b, lower=True, trans=False)
 
         tmp = solve_triangular(cholesky, y - mean)
+        mahalanobis = jnp.dot(tmp, tmp)
+
+        # Combine the terms
+        (n,) = jnp.shape(mean)
+
+        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), {}
+
+    return logpdf
+
+
+def logpdf_eigh() -> Callable:
+    """Construct a logpdf function that uses a symmetric eigendecomposition."""
+
+    def logpdf(y, /, *, mean, cov: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov)(mean)
+
+        # Compute H^(1/2) via eigh()
+        (w, v) = jnp.linalg.eigh(cov_matrix)
+        # w = jnp.maximum(0.0, w)  # clamp to allow sqrts
+
+        # Log-determinant
+        logdet = jnp.sum(jnp.log(w)) / 2
+
+        # Mahalanobis norm
+        factor = (v * jnp.sqrt(1 / w[..., None, :])) @ v.T
+        tmp = factor @ (y - mean)
         mahalanobis = jnp.dot(tmp, tmp)
 
         # Combine the terms

@@ -14,6 +14,11 @@ def case_logpdf_cholesky():
     return bnn_util.logpdf_cholesky()
 
 
+@pytest_cases.case
+def case_logpdf_eigh():
+    return bnn_util.logpdf_eigh()
+
+
 @pytest_cases.parametrize_with_cases("implementation", ".")
 def test_value_versus_cholesky(implementation: Callable, n=10):
     key = jax.random.PRNGKey(1)
