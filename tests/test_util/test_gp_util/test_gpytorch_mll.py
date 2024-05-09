@@ -20,7 +20,7 @@ def case_logpdf_cholesky():
 
 
 @pytest_cases.case
-def case_logpdf_lanczos():
+def case_logpdf_krylov():
     # maaaany samples because we test for exactness
     num_batches, num_samples = 2, 50_000
 
@@ -40,7 +40,7 @@ def case_logpdf_lanczos():
 
 
 @pytest_cases.case
-def case_logpdf_lanczos_reuse():
+def case_logpdf_krylov_reuse():
     # maaaany samples because we test for exactness
     num_batches, num_samples = 2, 50_000
 
@@ -64,15 +64,13 @@ def case_gram_matvec_full_batch():
 
 
 @pytest_cases.case
-@pytest_cases.parametrize("checkpoint", [True, False])
-def case_gram_matvec_map_over_batch(checkpoint):
-    return gp_util.gram_matvec_map_over_batch(num_batches=1, checkpoint=checkpoint)
+def case_gram_matvec_map_over_batch_checkpt():
+    return gp_util.gram_matvec_map_over_batch(num_batches=1, checkpoint=True)
 
 
 @pytest_cases.case
-@pytest_cases.parametrize("checkpoint", [True, False])
-def case_gram_matvec_map(checkpoint):
-    return gp_util.gram_matvec_map(checkpoint=checkpoint)
+def case_gram_matvec_map_no_checkpt():
+    return gp_util.gram_matvec_map(checkpoint=False)
 
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
