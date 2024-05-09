@@ -523,74 +523,74 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def cholesky_partial(rank):
+def cholesky_partial(matrix_element: Callable, n, rank: int):
     """Construct a partial Cholesky factorisation."""
+    body = _cholesky_partial_makebody(matrix_element)
 
-    def estimate(matrix):
-        L = jnp.zeros((len(matrix), rank))
-
-        body = makebody(matrix)
-        return jax.lax.fori_loop(0, rank, body, L)
-
-    def makebody(matrix):
-        def body(i, L):
-            l_ii = jnp.sqrt(matrix[i, i] - jnp.dot(L[i], L[i]))
-
-            l_ji = matrix[:, i] - L @ L[i, :]
-            l_ji /= l_ii
-
-            return L.at[:, i].set(l_ji)
-
-        return body
-
-    return estimate
+    L = jnp.zeros((n, rank))
+    return jax.lax.fori_loop(0, rank, body, L)
 
 
-def cholesky_partial_pivot(rank):
+def _cholesky_partial_makebody(matrix_element: Callable):
+    def body(i, L):
+        element = matrix_element(i, i)
+        l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
+
+        idx = jnp.arange(len(L))
+        column = jax.vmap(matrix_element, in_axes=(0, None))(idx, i)
+        l_ji = column - L @ L[i, :]
+        l_ji /= l_ii
+
+        return L.at[:, i].set(l_ji)
+
+    return body
+
+
+def cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
     """Construct a partial Cholesky factorisation with pivoting."""
+    body = _cholesky_partial_pivot_body(matrix_element)
 
-    def estimate(matrix):
-        L = jnp.zeros((len(matrix), rank))
-        P = jnp.arange(len(matrix))
+    L = jnp.zeros((n, rank))
+    P = jnp.arange(n)
 
-        body = makebody()
-        init = (L, P, matrix)
-        (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
-        return L, P
+    init = (L, P, P)
+    (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
+    return L, P
 
-    def makebody():
-        def body(i, carry):
-            L, P, matrix = carry
 
-            # Access the matrix
-            diagonal = jnp.diag(matrix)
+def _cholesky_partial_pivot_body(matrix_element: Callable):
+    def body(i, carry):
+        L, P, P_matrix = carry
 
-            # Find the largest entry for the residuals
-            residual_diag = diagonal - jax.vmap(jnp.dot)(L, L)
-            res = jnp.abs(residual_diag)
-            k = jnp.argmax(res)
+        # Access the matrix
+        idx = jnp.arange(len(L))
+        diagonal = jax.vmap(matrix_element)(P_matrix[idx], P_matrix[idx])
+        # diagonal = jnp.diag(matrix)
 
-            # Pivot [pivot!!! pivot!!! pivot!!! :)]
-            matrix = _swap_rows(matrix, i, k)
-            matrix = _swap_cols(matrix, i, k)
-            L = _swap_rows(L, i, k)
-            P = _swap_rows(P, i, k)
+        # Find the largest entry for the residuals
+        residual_diag = diagonal - jax.vmap(jnp.dot)(L, L)
+        res = jnp.abs(residual_diag)
+        k = jnp.argmax(res)
 
-            # Access the matrix
-            element, column = matrix[i, i], matrix[:, i]
+        # Pivot [pivot!!! pivot!!! pivot!!! :)]
+        P_matrix = _swap_cols(P_matrix, i, k)
+        L = _swap_rows(L, i, k)
+        P = _swap_rows(P, i, k)
 
-            # Perform a Cholesky step
-            l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
-            l_ji = column - L @ L[i, :]
-            l_ji /= l_ii
+        # Access the matrix
+        element = matrix_element(P_matrix[i], P_matrix[i])
+        column = jax.vmap(matrix_element, in_axes=(0, None))(P_matrix[idx], P_matrix[i])
 
-            # Update the estimate
-            L = L.at[:, i].set(l_ji)
-            return L, P, matrix
+        # Perform a Cholesky step
+        l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
+        l_ji = column - L @ L[i, :]
+        l_ji /= l_ii
 
-        return body
+        # Update the estimate
+        L = L.at[:, i].set(l_ji)
+        return L, P, P_matrix
 
-    return estimate
+    return body
 
 
 def _swap_cols(arr, i, j):
