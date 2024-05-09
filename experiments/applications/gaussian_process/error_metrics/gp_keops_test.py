@@ -85,12 +85,12 @@ training_iter = 50
 # with (gpytorch.settings.max_preconditioner_size(500),gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.verbose_linalg(True)):
 # with gpytorch.settings.verbose_linalg(True):
 # with gpytorch.settings.verbose_linalg(True), gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_preconditioner_size(250), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.linalg_dtypes(default=torch.float32):
-with linear_operator.settings.max_preconditioner_size(160), \
-     linear_operator.settings.cg_tolerance(1.), \
-     linear_operator.settings.num_trace_samples(15), \
-     linear_operator.settings.max_lanczos_quadrature_iterations(15), \
-     linear_operator.settings.max_cg_iterations(15), \
-     linear_operator.settings.verbose_linalg(True):
+with gpytorch.settings.max_preconditioner_size(200), \
+     gpytorch.settings.cg_tolerance(1e0), \
+     gpytorch.settings.num_trace_samples(15), \
+     gpytorch.settings.max_lanczos_quadrature_iterations(15), \
+     gpytorch.settings.max_cg_iterations(1000), \
+     gpytorch.settings.verbose_linalg(True):
     for i in range(training_iter):
         start_time = time.time()
         # Zero gradients from previous iteration
