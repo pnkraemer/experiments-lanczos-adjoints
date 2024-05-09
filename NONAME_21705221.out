@@ -1,0 +1,81 @@
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 3: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 4: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 6: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 7: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 8: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 9: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 10: BSUB: command not found
+/zhome/e8/8/160625/.lsbatch/1715174170.21705221.shell: line 11: BSUB: command not found
+/zhome/e8/8/160625/arnoldi-adjoints/matfree-extensions
+Loaded module: cuda/12.4
+[KeOps] Warning : Cuda libraries were not detected on the system or could not be loaded ; using cpu only mode
+Namespace(name_of_file='gp_train', seed=1, num_points=-1, num_epochs=5, gp_method='adjoints', mc_samples=1, matvec_batch_num=100, krylov_depth=3, slq_batch_num=5, slq_samples_num=1, matvec_checkpoint=True, lanczos_checkpoint=True, cg_tol=1.0, cg_maxiter=1000, dataset='airquality')
+
+N_train: 305000
+Traceback (most recent call last):
+  File "/zhome/e8/8/160625/arnoldi-adjoints/matfree-extensions/experiments/applications/gaussian_process/error_metrics/gp_train_and_runtimes.py", line 327, in <module>
+    (X_train, y_train), (X_test, y_test) = data_util.load_uci_data(
+  File "/zhome/e8/8/160625/arnoldi-adjoints/matfree-extensions/src/matfree_extensions/util/data_util.py", line 116, in load_uci_data
+    inputs_train, targets_train, inputs_test, targets_test = uci_preprocessing(
+  File "/zhome/e8/8/160625/arnoldi-adjoints/matfree-extensions/src/matfree_extensions/util/data_util.py", line 79, in uci_preprocessing
+    X_train = X[:N_train, :].contiguous().to(device)
+  File "/zhome/e8/8/160625/arnoldi-adjoints/adjoints/lib/python3.10/site-packages/torch/cuda/__init__.py", line 302, in _lazy_init
+    torch._C._cuda_init()
+RuntimeError: Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU and installed a driver from http://www.nvidia.com/Download/index.aspx
+
+------------------------------------------------------------
+Sender: LSF System <lsfadmin@hpc.dtu.dk>
+Subject: Job 21705221: <NONAME> in cluster <dcc> Exited
+
+Job <NONAME> was submitted from host <n-62-30-2> by user <pabmo> in cluster <dcc> at Wed May  8 15:16:10 2024
+Job was executed on host(s) <n-62-31-2>, in queue <hpc>, as user <pabmo> in cluster <dcc> at Wed May  8 15:16:11 2024
+</zhome/e8/8/160625> was used as the home directory.
+</zhome/e8/8/160625/arnoldi-adjoints/matfree-extensions> was used as the working directory.
+Started at Wed May  8 15:16:11 2024
+Terminated at Wed May  8 15:16:31 2024
+Results reported at Wed May  8 15:16:31 2024
+
+Your job looked like:
+
+------------------------------------------------------------
+# LSBATCH: User input
+#!/bin/sh
+### General options
+BSUB -q gpuv100
+BSUB -J train_gp
+### do we need more than one core?
+BSUB -n 4
+BSUB -gpu "num=1:mode=exclusive_process"
+BSUB -W 24:00
+BSUB -R "rusage[mem=32GB]"
+BSUB -o gpu_%J.out
+BSUB -e gpu_%J.err
+
+pwd
+### Load the cuda module
+module load cuda/12.4
+### /appl/cuda/11.6.0/samples/bin/x86_64/linux/release/deviceQuery
+
+source ../adjoints/bin/activate
+export CUDA_VISIBLE_DEVICES=0,1
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+
+python experiments/applications/gaussian_process/error_metrics/gp_train_and_runtimes.py -gpm adjoints -kry 3 -e 5 -data airquality -lc True -mcs 1 -b 100 --slq_samples_num 1 --slq_batch_num 5 -cgt 1.0
+------------------------------------------------------------
+
+Exited with exit code 1.
+
+Resource usage summary:
+
+    CPU time :                                   7.61 sec.
+    Max Memory :                                 215 MB
+    Average Memory :                             210.00 MB
+    Total Requested Memory :                     1024.00 MB
+    Delta Memory :                               809.00 MB
+    Max Swap :                                   -
+    Max Processes :                              4
+    Max Threads :                                5
+    Run time :                                   26 sec.
+    Turnaround time :                            21 sec.
+
+The output (if any) is above this job summary.

@@ -10,6 +10,7 @@ from matfree import hutchinson
 from tqdm import tqdm
 
 from matfree_extensions import lanczos
+from matfree_extensions.util.bnn_baselines import exact_diagonal
 
 # TODO: Decide if we abbreviate metric in function names
 
@@ -131,6 +132,8 @@ def loss_calibration(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
     return loss
 
 
+
+
 # todo: move to gp? (And rename gp.py appropriately, of course)
 #  laplace-torch calls this Laplace.log_prob(normalized=True)
 def loss_log_prob_like_in_redux(*, ggn_fun, hyperparam_unconstrain, logdet_fun):
@@ -156,13 +159,23 @@ def solver_logdet_dense():
     return logdet
 
 
+def slq_log_clipped(*, clip_value=1.0):
+    def log(x):
+        eps = jnp.finfo(x.dtype).eps
+        x_clipped = jnp.where(x < eps, clip_value, x)
+        return jnp.log(x_clipped)
+
+    return log
+
+
 # todo: move to gp? (And rename gp.py appropriately, of course)
 def solver_logdet_slq(*, lanczos_rank, slq_num_samples, slq_num_batches):
     def logdet(M: jax.Array, key: jax.random.PRNGKey):
         x_like = jnp.ones((len(M),), dtype=float)
         sampler = hutchinson.sampler_rademacher(x_like, num=slq_num_samples)
 
-        integrand = lanczos.integrand_spd(jnp.log, lanczos_rank, lambda v: M @ v)
+        matfun = slq_log_clipped()
+        integrand = lanczos.integrand_spd(matfun, lanczos_rank, lambda v: M @ v)
         estimate = hutchinson.hutchinson(integrand, sampler)
 
         keys = jax.random.split(key, num=slq_num_batches)
@@ -260,9 +273,14 @@ def ggn_vp_parallel(*, loss_single, model_fun, param_unflatten):
 
             # Big models(except ConvNext) return a tuple (logits, model_state)
             # Hence: model_pred = lambda p: model_fun(p, x)[0]
-            preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
-            _, vjp_fn = jax.vjp(model_pred, params)
 
+            # preds, Jv = jax.jvp(model_pred, (params,), (v_like_params,))
+            # _, vjp_fn = jax.vjp(model_pred, params)
+
+            preds, jvp_fn = jax.linearize(model_pred, params)
+            vjp_fn = jax.linear_transpose(jvp_fn, params)
+
+            Jv = jvp_fn(v_like_params)
             H = jax.vmap(jax.hessian(loss_single, argnums=0))(preds, y)
             HJv = jnp.einsum("boi, bi->bo", H, Jv)
             return vjp_fn(HJv)[0]
@@ -391,6 +409,28 @@ def img_to_patch(x, patch_size, flatten_channels=True):
     return x
 
 
+def callibration_loss_diagonal(
+    model_apply, unflatten, hyperparam_unconstrain, num_classes, n_params
+):
+    get_diag_fn = functools.partial(
+        exact_diagonal,
+        model_fn=model_apply,
+        output_dim=num_classes,
+        likelihood="Classification",
+    )
+
+    def loss(log_alpha, params_vec, img):
+        alpha = hyperparam_unconstrain(log_alpha)
+        diag = get_diag_fn(unflatten(params_vec), img)
+        diag_vec = jax.flatten_util.ravel_pytree(diag)[0]
+        logdet = jnp.sum(jnp.log(diag_vec + alpha))
+        log_prior = jnp.log(alpha) * n_params - alpha * jnp.dot(params_vec, params_vec)
+        log_marginal = log_prior - logdet
+        return -log_marginal
+
+    return loss
+
+
 def callibration_loss(model_apply, unflatten, hyperparam_unconstrain, n_params):
     ggn_fun = ggn_vp_parallel(
         loss_single=loss_training_cross_entropy_single,
@@ -461,3 +501,58 @@ def get_model_apply_fn(model_name, model_apply, batch_stats=None, rng=None):
         raise ValueError
 
     return model_fn
+
+
+
+def logpdf_cholesky() -> Callable:
+    """Construct a logpdf function that relies on a Cholesky decomposition."""
+
+    def logpdf(y, /, *, mean, cov: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov)(mean)
+
+        cov_matrix += 1e-4 * jnp.eye(*cov_matrix.shape)
+        
+        # Cholesky-decompose
+        cholesky = jnp.linalg.cholesky(cov_matrix)
+
+        # Log-determinant
+        logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
+
+        # Mahalanobis norm
+
+        def solve_triangular(A, b):
+            return jax.scipy.linalg.solve_triangular(A, b, lower=True, trans=False)
+
+        tmp = solve_triangular(cholesky, y - mean)
+        mahalanobis = jnp.dot(tmp, tmp)
+
+        # Combine the terms
+        (n,) = jnp.shape(mean)
+
+        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), {}
+
+    return logpdf
+
+
+
+def predictive_posterior_loglikelihood(*, model_apply, unflatten, logpdf, ggn_fun):
+    def eval_logprob(params_vec, x_test, y_test):
+        # p(y| x, theta) = N(y | f(x, theta), J_* H^-1 J_*^T)
+        mean_pred, jvp_fn = jax.linearize(lambda p: model_apply(unflatten(p), x_test), params_vec)
+        vjp_fn = jax.linear_transpose(jvp_fn, params_vec)
+        y_flat, unflat = jax.flatten_util.ravel_pytree(y_test)
+        mean_flat, _unflat = jax.flatten_util.ravel_pytree(mean_pred)
+
+        # logpdf = bnn_util.logpdf_lanczos(num_matvecs, slq_sampler=sampler, slq_batch_num=3, checkpoint=False, cg_tol=1e-1)
+        def cov_vp(v_):
+            v = unflat(v_)
+
+            Jtv, = vjp_fn(v)
+            # _, jvp = jax.jvp(lambda p: model_apply(unflatten(p), x_test), (params_vec,), (v,))
+            inv_ggn, _info = jax.scipy.sparse.linalg.cg(ggn_fun, Jtv, tol=0.1)
+            out = jvp_fn(inv_ggn)
+            return (jax.flatten_util.ravel_pytree(out)[0])
+        
+        return logpdf(y_flat, mean=mean_flat, cov=cov_vp)
+    return eval_logprob
