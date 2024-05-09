@@ -37,6 +37,31 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
     return parametrise
 
 
+def model_precondition(
+    mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable, precondition
+) -> Callable:
+    """Construct a Gaussian process model."""
+
+    def parametrise(**kernel_params):
+        kfun = kernel_fun(**kernel_params)
+        make_matvec = gram_matvec(kfun)
+
+        def prior(x):
+            mean = mean_fun(x)
+            cov_matvec = functools.partial(make_matvec, x, x)
+
+            def matrix_element(i, j):
+                return kfun(x[i], x[j])
+
+            # This overfits to diagonal+lowrank preconditioners
+            matvec_p = precondition(matrix_element)
+            return mean, (cov_matvec, {"precondition": matvec_p})
+
+        return prior
+
+    return parametrise
+
+
 # todo: call this gram_matvec_sequential()?
 def gram_matvec_map(*, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
@@ -278,6 +303,23 @@ def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
     return solve
 
 
+def krylov_solve_cg_lineax_precondition(*, atol, rtol, max_steps):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, info = problem
+
+        spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
+        op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
+        solver = lineax.CG(atol=atol, rtol=rtol, max_steps=max_steps)
+
+        P = info["precondition"]
+        precon = lineax.FunctionLinearOperator(P, b, tags=spd_tag)
+        options = {"preconditioner": precon}
+        solution = lineax.linear_solve(op, b, solver=solver, options=options)
+        return solution.value, solution.stats
+
+    return solve
+
+
 def krylov_logdet_slq(
     krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool = False
 ):
@@ -494,16 +536,20 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def precon_cholesky_partial(matrix_element: Callable, n, rank: int):
+def low_rank_cholesky(n: int, rank: int):
     """Compute a partial Cholesky factorisation."""
-    body = _cholesky_partial_makebody(matrix_element, n)
-    # todo: handle parametrised matrix_element functions
 
-    L = jnp.zeros((n, rank))
-    return jax.lax.fori_loop(0, rank, body, L)
+    def call(matrix_element: Callable):
+        body = _low_rank_cholesky_body(matrix_element, n)
+        # todo: handle parametrised matrix_element functions
+
+        L = jnp.zeros((n, rank))
+        return jax.lax.fori_loop(0, rank, body, L)
+
+    return call
 
 
-def _cholesky_partial_makebody(matrix_element: Callable, n: int):
+def _low_rank_cholesky_body(matrix_element: Callable, n: int):
     idx = jnp.arange(n)
 
     def matrix_column(i):
@@ -523,20 +569,24 @@ def _cholesky_partial_makebody(matrix_element: Callable, n: int):
     return body
 
 
-def precon_cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
+def low_rank_cholesky_pivot(n: int, rank: int):
     """Compute a partial Cholesky factorisation with pivoting."""
-    body = _cholesky_partial_pivot_body(matrix_element, n)
 
-    # todo: handle parametrised matrix_element functions
-    L = jnp.zeros((n, rank))
-    P = jnp.arange(n)
+    def call(matrix_element: Callable):
+        body = _low_rank_cholesky_pivot_body(matrix_element, n)
 
-    init = (L, P, P)
-    (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
-    return L, P
+        # todo: handle parametrised matrix_element functions
+        L = jnp.zeros((n, rank))
+        P = jnp.arange(n)
+
+        init = (L, P, P)
+        (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
+        return _pivot_invert(L, P)
+
+    return call
 
 
-def _cholesky_partial_pivot_body(matrix_element: Callable, n: int):
+def _low_rank_cholesky_pivot_body(matrix_element: Callable, n: int):
     idx = jnp.arange(n)
 
     def matrix_element_p(i, j, *, permute):
@@ -592,6 +642,23 @@ def _swap_rows(arr, i, j):
     return arr.at[j].set(ai)
 
 
-def precon_pivot_invert(arr, pivot, /):
+def _pivot_invert(arr, pivot, /):
     """Invert and apply a pivoting array to a matrix."""
     return arr[jnp.argsort(pivot)]
+
+
+def precondition_low_rank(low_rank, small_value):
+    """Turn a low-rank approximation into a preconditioner."""
+
+    def precon(matrix, /):
+        chol = low_rank(matrix)
+        tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
+
+        def matvec(v):
+            tmp1 = v
+            tmp2 = chol.T @ v
+            return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
+
+        return matvec
+
+    return precon
