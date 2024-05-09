@@ -2,6 +2,7 @@ import os.path
 import urllib.request
 
 import gpytorch
+import linear_operator
 import torch
 from scipy.io import loadmat
 
@@ -13,6 +14,12 @@ if not os.path.isfile("../3droad.mat"):
 
 data = torch.Tensor(loadmat("../3droad.mat")["data"])
 
+
+
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
+
+device = "cuda:0"
 
 N = data.shape[0]
 # make train/val/test
@@ -48,7 +55,7 @@ class ExactGPModel(gpytorch.models.ExactGP):
         self.mean_module = gpytorch.means.ConstantMean()
 
         self.covar_module = gpytorch.kernels.ScaleKernel(
-            gpytorch.kernels.keops.MaternKernel(nu=2.5)
+            gpytorch.kernels.keops.RBFKernel()
         )
 
     def forward(self, x):
@@ -67,7 +74,7 @@ likelihood.train()
 # Use the adam optimizer
 optimizer = torch.optim.Adam(
     model.parameters(), lr=0.1
-)  # Includes GaussianLikelihood parameters
+)
 
 # "Loss" for GPs - the marginal log likelihood
 mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
@@ -75,24 +82,33 @@ mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 import time
 
 training_iter = 50
-for i in range(training_iter):
-    start_time = time.time()
-    # Zero gradients from previous iteration
-    optimizer.zero_grad()
-    # Output from model
-    output = model(train_x)
-    # Calc loss and backprop gradients
-    loss = -mll(output, train_y)
-    loss.backward()
-    print(
-        "Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f"
-        % (
-            i + 1,
-            training_iter,
-            loss.item(),
-            model.covar_module.base_kernel.lengthscale.item(),
-            model.likelihood.noise.item(),
+# with (gpytorch.settings.max_preconditioner_size(500),gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.verbose_linalg(True)):
+# with gpytorch.settings.verbose_linalg(True):
+# with gpytorch.settings.verbose_linalg(True), gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_preconditioner_size(250), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.linalg_dtypes(default=torch.float32):
+with gpytorch.settings.max_preconditioner_size(200), \
+     gpytorch.settings.cg_tolerance(1e0), \
+     gpytorch.settings.num_trace_samples(15), \
+     gpytorch.settings.max_lanczos_quadrature_iterations(15), \
+     gpytorch.settings.max_cg_iterations(1000), \
+     gpytorch.settings.verbose_linalg(True):
+    for i in range(training_iter):
+        start_time = time.time()
+        # Zero gradients from previous iteration
+        optimizer.zero_grad()
+        # Output from model
+        output = model(train_x)
+        # Calc loss and backprop gradients
+        loss = -mll(output, train_y)
+        loss.backward()
+        print(
+            "Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f"
+            % (
+                i + 1,
+                training_iter,
+                loss.item(),
+                model.covar_module.base_kernel.lengthscale.item(),
+                model.likelihood.noise.item(),
+            )
         )
-    )
-    optimizer.step()
-    print(time.time() - start_time)
+        optimizer.step()
+        print(time.time() - start_time)

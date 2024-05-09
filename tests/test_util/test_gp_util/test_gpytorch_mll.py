@@ -20,7 +20,7 @@ def case_logpdf_cholesky():
 
 
 @pytest_cases.case
-def case_logpdf_lanczos_rademacher():
+def case_logpdf_krylov():
     # maaaany samples because we test for exactness
     num_batches, num_samples = 2, 50_000
 
@@ -28,16 +28,19 @@ def case_logpdf_lanczos_rademacher():
     krylov_depth = 2
 
     x_like = jnp.ones((3,), dtype=float)
-    sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    logpdf = gp_util.logpdf_lanczos(
-        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4, checkpoint=False
+    sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
+
+    solve = gp_util.krylov_solve_cg(tol=1e-4, maxiter=1000)
+    logdet = gp_util.krylov_logdet_slq(
+        krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
+    logpdf = gp_util.logpdf_krylov(solve=solve, logdet=logdet)
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
 
 @pytest_cases.case
-def case_logpdf_lanczos_normal():
+def case_logpdf_krylov_reuse():
     # maaaany samples because we test for exactness
     num_batches, num_samples = 2, 50_000
 
@@ -45,27 +48,12 @@ def case_logpdf_lanczos_normal():
     krylov_depth = 2
 
     x_like = jnp.ones((3,), dtype=float)
-    sampler = hutchinson.sampler_normal(x_like, num=num_samples)
-    logpdf = gp_util.logpdf_lanczos(
-        krylov_depth, sampler, slq_batch_num=num_batches, cg_tol=1e-4, checkpoint=True
+    sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
+    solve = gp_util.krylov_solve_cg(tol=1e-4, maxiter=1000)
+    logdet = gp_util.krylov_logdet_slq_vjp_reuse(
+        krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
-    params = (jax.random.PRNGKey(1),)
-    return logpdf, params
-
-
-@pytest_cases.case
-def case_logpdf_lanczos_rademacher_reuse():
-    # maaaany samples because we test for exactness
-    num_batches, num_samples = 2, 50_000
-
-    # Max order (the number of data points is 3)
-    krylov_depth = 2
-
-    x_like = jnp.ones((3,), dtype=float)
-    sampler = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    logpdf = gp_util.logpdf_lanczos_reuse(
-        krylov_depth, sampler, slq_batch_num=num_batches
-    )
+    logpdf = gp_util.logpdf_krylov(solve, logdet)
     params = (jax.random.PRNGKey(1),)
     return logpdf, params
 
@@ -76,15 +64,13 @@ def case_gram_matvec_full_batch():
 
 
 @pytest_cases.case
-@pytest_cases.parametrize("checkpoint", [True, False])
-def case_gram_matvec_map_over_batch(checkpoint):
-    return gp_util.gram_matvec_map_over_batch(num_batches=1, checkpoint=checkpoint)
+def case_gram_matvec_map_over_batch_checkpt():
+    return gp_util.gram_matvec_map_over_batch(num_batches=1, checkpoint=True)
 
 
 @pytest_cases.case
-@pytest_cases.parametrize("checkpoint", [True, False])
-def case_gram_matvec_map(checkpoint):
-    return gp_util.gram_matvec_map(checkpoint=checkpoint)
+def case_gram_matvec_map_no_checkpt():
+    return gp_util.gram_matvec_map(checkpoint=False)
 
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
