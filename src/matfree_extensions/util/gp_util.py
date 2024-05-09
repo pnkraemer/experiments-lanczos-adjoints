@@ -290,6 +290,17 @@ def krylov_solve_cg(*, tol, maxiter):
     return solve
 
 
+def krylov_solve_cg_precondition(*, tol, maxiter):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, info = problem
+        result, info = jax.scipy.sparse.linalg.cg(
+            A, b, tol=tol, maxiter=maxiter, M=info["precondition"]
+        )
+        return result, info
+
+    return solve
+
+
 def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
     def solve(problem: tuple[Callable, dict], /, b: jax.Array):
         A, _info = problem

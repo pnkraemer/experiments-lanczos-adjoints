@@ -1,25 +1,17 @@
-#!/bin/sh
-### General options
+#!/bin/bash
 #BSUB -q gpuv100
-#BSUB -J train_gp
-### do we need more than one core?
-#BSUB -n 4
+#BSUB -J gp_jax
+#BSUB -n 8
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
-###BSUB -R "rusage[mem=12GB]"
-#BSUB -R "rusage[mem=2GB]"
-#BSUB -B
-#BSUB -N
-#BSUB -o gpu_%J.out
-#BSUB -e gpu_%J.err
+#BSUB -R "select[gpu32gb]"
+#BSUB -R "rusage[mem=10GB]"
+#BSUB -R "span[hosts=1]"
+#BSUB -o gp_jax-%J.out
+#BSUB -e gp_jax-%J.err
 
-pwd
 ### Load the cuda module
-module load cuda/11.6
-/appl/cuda/11.6.0/samples/bin/x86_64/linux/release/deviceQuery
-
+module load cuda/12.4
 source ../adjoints/bin/activate
-export CUDA_VISIBLE_DEVICES=0,1
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
 
-python experiments/applications/gaussian_process/error_metrics/gp_train_and_runtimes.py -gpm adjoints -kry 1 -sb 1_000 -e 5 -data airquality
+python experiments/applications/gaussian_process/error_metrics/gp_jax_test.py
