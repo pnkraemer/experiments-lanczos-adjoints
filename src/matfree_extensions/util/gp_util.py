@@ -525,19 +525,24 @@ def _assert_shapes(x, y, shape_in):
 
 def cholesky_partial(matrix_element: Callable, n, rank: int):
     """Compute a partial Cholesky factorisation."""
-    body = _cholesky_partial_makebody(matrix_element)
+    body = _cholesky_partial_makebody(matrix_element, n)
 
     L = jnp.zeros((n, rank))
     return jax.lax.fori_loop(0, rank, body, L)
 
 
-def _cholesky_partial_makebody(matrix_element: Callable):
+def _cholesky_partial_makebody(matrix_element: Callable, n: int):
+    idx = jnp.arange(n)
+
+    def matrix_column(i):
+        fun = jax.vmap(matrix_element, in_axes=(0, None))
+        return fun(idx, i)
+
     def body(i, L):
         element = matrix_element(i, i)
         l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
 
-        idx = jnp.arange(len(L))
-        column = jax.vmap(matrix_element, in_axes=(0, None))(idx, i)
+        column = matrix_column(i)
         l_ji = column - L @ L[i, :]
         l_ji /= l_ii
 
@@ -548,7 +553,7 @@ def _cholesky_partial_makebody(matrix_element: Callable):
 
 def cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
     """Compute a partial Cholesky factorisation with pivoting."""
-    body = _cholesky_partial_pivot_body(matrix_element)
+    body = _cholesky_partial_pivot_body(matrix_element, n)
 
     L = jnp.zeros((n, rank))
     P = jnp.arange(n)
@@ -558,14 +563,25 @@ def cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
     return L, P
 
 
-def _cholesky_partial_pivot_body(matrix_element: Callable):
+def _cholesky_partial_pivot_body(matrix_element: Callable, n: int):
+    idx = jnp.arange(n)
+
+    def matrix_element_p(i, j, *, permute):
+        return matrix_element(permute[i], permute[j])
+
+    def matrix_column_p(i, *, permute):
+        fun = jax.vmap(matrix_element, in_axes=(0, None))
+        return fun(permute[idx], permute[i])
+
+    def matrix_diagonal_p(*, permute):
+        fun = jax.vmap(matrix_element)
+        return fun(permute[idx], permute[idx])
+
     def body(i, carry):
         L, P, P_matrix = carry
 
         # Access the matrix
-        idx = jnp.arange(len(L))
-        diagonal = jax.vmap(matrix_element)(P_matrix[idx], P_matrix[idx])
-        # diagonal = jnp.diag(matrix)
+        diagonal = matrix_diagonal_p(permute=P_matrix)
 
         # Find the largest entry for the residuals
         residual_diag = diagonal - jax.vmap(jnp.dot)(L, L)
@@ -578,8 +594,8 @@ def _cholesky_partial_pivot_body(matrix_element: Callable):
         P = _swap_rows(P, i, k)
 
         # Access the matrix
-        element = matrix_element(P_matrix[i], P_matrix[i])
-        column = jax.vmap(matrix_element, in_axes=(0, None))(P_matrix[idx], P_matrix[i])
+        element = matrix_element_p(i, i, permute=P_matrix)
+        column = matrix_column_p(i, permute=P_matrix)
 
         # Perform a Cholesky step
         l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))

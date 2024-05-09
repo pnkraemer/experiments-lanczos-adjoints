@@ -1,4 +1,4 @@
-"""Fool around."""
+"""Test the partial Cholesky decompositions."""
 
 from typing import Callable
 
