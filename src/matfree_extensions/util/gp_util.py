@@ -521,3 +521,72 @@ def _assert_shapes(x, y, shape_in):
         error = f"The shape {jnp.shape(x)} of the first argument "
         error += "does not match 'shape_in'={shape_in}"
         raise ValueError(error)
+
+
+def cholesky_partial(rank):
+    """Construct a partial Cholesky factorisation."""
+
+    def estimate(matrix):
+        L = jnp.zeros((len(matrix), rank))
+
+        body = makebody(matrix)
+        return jax.lax.fori_loop(0, rank, body, L)
+
+    def makebody(matrix):
+        def body(i, L):
+            l_ii = jnp.sqrt(matrix[i, i] - jnp.dot(L[i], L[i]))
+
+            l_ji = matrix[:, i] - L @ L[i, :]
+            l_ji /= l_ii
+
+            return L.at[:, i].set(l_ji)
+
+        return body
+
+    return estimate
+
+
+def cholesky_partial_pivot(rank):
+    """Construct a partial Cholesky factorisation with pivoting."""
+
+    def estimate(matrix):
+        L = jnp.zeros((len(matrix), rank))
+        P = jnp.arange(len(matrix))
+        for i in range(rank):
+            # Find the largest entry for the residuals
+            residual = matrix - L @ L.T
+            res = jnp.abs(jnp.diag(residual))
+            k = jnp.argmax(res)
+
+            # Pivot (pivot!!! pivot!!! pivot!!!)
+            matrix = _swap_rows(matrix, i, k)
+            matrix = _swap_cols(matrix, i, k)
+            L = _swap_rows(L, i, k)
+            P = _swap_rows(P, i, k)
+
+            # Perform a Cholesky step
+            l_ii = jnp.sqrt(matrix[i, i] - jnp.dot(L[i], L[i]))
+            l_ji = matrix[:, i] - L @ L[i, :]
+            l_ji /= l_ii
+
+            # Update the estimate
+            L = L.at[:, i].set(l_ji)
+
+        return L, P
+
+    return estimate
+
+
+def _swap_cols(arr, i, j):
+    return _swap_rows(arr.T, i, j).T
+
+
+def _swap_rows(arr, i, j):
+    ai, aj = arr[i], arr[j]
+    arr = arr.at[i].set(aj)
+    return arr.at[j].set(ai)
+
+
+def pivot_apply_inverse(arr, pivot, /):
+    """Invert and apply a pivoting array to a matrix."""
+    return arr[jnp.argsort(pivot)]
