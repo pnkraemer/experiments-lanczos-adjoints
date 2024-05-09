@@ -5,6 +5,7 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
+import lineax
 from matfree import hutchinson
 
 from matfree_extensions import lanczos
@@ -29,7 +30,32 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
         def prior(x):
             mean = mean_fun(x)
             cov_matvec = functools.partial(make_matvec, x, x)
-            return mean, cov_matvec
+            return mean, (cov_matvec, {})
+
+        return prior
+
+    return parametrise
+
+
+def model_precondition(
+    mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable, precondition
+) -> Callable:
+    """Construct a Gaussian process model."""
+
+    def parametrise(**kernel_params):
+        kfun = kernel_fun(**kernel_params)
+        make_matvec = gram_matvec(kfun)
+
+        def prior(x):
+            mean = mean_fun(x)
+            cov_matvec = functools.partial(make_matvec, x, x)
+
+            def matrix_element(i, j):
+                return kfun(x[i], x[j])
+
+            # This overfits to diagonal+lowrank preconditioners
+            matvec_p = precondition(matrix_element)
+            return mean, (cov_matvec, {"precondition": matvec_p})
 
         return prior
 
@@ -37,7 +63,7 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
 
 
 # todo: call this gram_matvec_sequential()?
-def gram_matvec_map(*, checkpoint: bool):
+def gram_matvec_map(*, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by row-wise mapping.
@@ -75,7 +101,7 @@ def gram_matvec_map(*, checkpoint: bool):
 
 # todo: call this gram_matvec_partitioned()?
 # todo: rename num_batches to num_partitions?
-def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
+def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
@@ -130,7 +156,7 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
     return matvec
 
 
-# todo: call this gram_matvec()?
+# todo: Rename to gram_matvec()?
 def gram_matvec_full_batch():
     """Turn a covariance function into a gram-matrix vector product.
 
@@ -167,7 +193,8 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
         noise = _softplus(raw_noise)
 
         def likelihood(mean, cov):
-            return mean, lambda v: cov(v) + noise * v
+            matvec, aux = cov
+            return mean, (lambda v: matvec(v) + noise * v, aux)
 
         return likelihood
 
@@ -175,6 +202,8 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
     return parametrise, p
 
 
+# todo: rename to lml,
+#  because it is a log-marginal-likelihood, not a marginal-log-likelihood
 def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
@@ -195,9 +224,10 @@ def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Cal
 def logpdf_scipy_stats() -> Callable:
     """Construct a logpdf function that wraps jax.scipy.stats."""
 
-    def logpdf(y, /, *, mean, cov: Callable):
+    def logpdf(y, /, *, mean, cov: tuple[Callable, dict]):
         # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov)(mean)
+        matvec, _info = cov
+        cov_matrix = jax.jacfwd(matvec)(mean)
 
         _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
         return _logpdf_fun(y, mean=mean, cov=cov_matrix), {}
@@ -208,9 +238,10 @@ def logpdf_scipy_stats() -> Callable:
 def logpdf_cholesky() -> Callable:
     """Construct a logpdf function that relies on a Cholesky decomposition."""
 
-    def logpdf(y, /, *, mean, cov: Callable):
+    def logpdf(y, /, *, mean, cov: tuple[Callable, dict]):
         # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov)(mean)
+        matvec, _info = cov
+        cov_matrix = jax.jacfwd(matvec)(mean)
 
         # Cholesky-decompose
         cholesky = jnp.linalg.cholesky(cov_matrix)
@@ -234,79 +265,10 @@ def logpdf_cholesky() -> Callable:
     return logpdf
 
 
-# todo: rename slq_* to mc_* to indicate monte carlo sampling?
-def logpdf_lanczos(
-    krylov_depth,
-    /,
-    slq_sampler: Callable,
-    *,
-    slq_batch_num: int,
-    checkpoint: bool,
-    cg_tol: float,
-    cg_maxiter: int | None = None,  # same as in jax.scipy.sparse.cg
-) -> Callable:
-    """Construct a logpdf function that uses CG and Lanczos.
-
-    Vocabulary:
-        "CG" = "Conjugate gradient solver"
-        "Lanczos" = The "Lanczos" iteration
-        "SLQ" = "Stochastic Lanczos quadrature"
-        (which combines Monte Carlo estimation with the Lanczos iteration)
-
-    If this logpdf is plugged into mll_exact(), the returned mll function
-    evaluates as mll(x, y, key, params_prior=...)
-    instead of mll(x, y, params_prior=...)
-
-    The estimator uses slq_batch_num*slq_sample_num samples for SLQ.
-    Use a single batch and increase slq_sample_num until memory limits occur.
-    Then, increase the number of batches while keeping the batch size maximal.
-
-    Parameters
-    ----------
-    krylov_depth
-        Depth of the Krylov space. Read this as:
-        "Number of matrix-vector products" we want to use.
-    slq_sampler
-        Monte Carlo sampler for stochastic Lanczos quadrature.
-        For instance, matfree.hutchinson.sampler_rademacher().
-    slq_batch_num
-        How many batches to use for Monte Carlo sampling
-        This wraps around `slq_sampler`, so it multiplies
-        however many samples slq_sampler generates.
-        All batches are compute sequentially.
-    checkpoint
-        Whether to checkpoint each SLQ batch.
-        Checkpoint increases memory efficiency but also runtime.
-        Usually, we set this to `False`.
-    cg_tol
-        Tolerance to use for each conjugate gradients solve.
-        For instance, GPyTorch uses `cg_tol=1.0` for
-        Gaussian process hyperparameter calibration.
-    cg_maxiter
-        Maximum number of iterations for each conjugate
-        gradients solve.
-    """
-
-    def solve(A: Callable, /, b):
-        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=cg_tol, maxiter=cg_maxiter)
-        return result, info
-
-    def logdet(A: Callable, /, key):
-        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
-        estimate = hutchinson.hutchinson(integrand, slq_sampler)
-
-        # Memory-efficient reverse-mode derivatives
-        #  See gram_matvec_map_over_batch().
-        if checkpoint:
-            estimate = jax.checkpoint(estimate)
-
-        keys = jax.random.split(key, num=slq_batch_num)
-        values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0) / 2
-
+def logpdf_krylov(solve: Callable, logdet: Callable):
     def logpdf(y, *params_logdet, mean, cov):
         # Log-determinant
-        logdet_ = logdet(cov, *params_logdet)
+        logdet_ = logdet(cov, *params_logdet) / 2
 
         # Mahalanobis norm
         tmp, info = solve(cov, y - mean)
@@ -319,9 +281,69 @@ def logpdf_lanczos(
     return logpdf
 
 
-def logpdf_lanczos_reuse(
-    krylov_depth, /, slq_sampler: Callable, slq_batch_num
-) -> Callable:
+def krylov_solve_cg(*, tol, maxiter):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, _info = problem
+        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter)
+        return result, info
+
+    return solve
+
+
+def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, _info = problem
+
+        spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
+        op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
+        solver = lineax.CG(atol=atol, rtol=rtol, max_steps=max_steps)
+        solution = lineax.linear_solve(op, b, solver=solver)
+        return solution.value, solution.stats
+
+    return solve
+
+
+def krylov_solve_cg_lineax_precondition(*, atol, rtol, max_steps):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, info = problem
+
+        spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
+        op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
+        solver = lineax.CG(atol=atol, rtol=rtol, max_steps=max_steps)
+
+        P = info["precondition"]
+        precon = lineax.FunctionLinearOperator(P, b, tags=spd_tag)
+        options = {"preconditioner": precon}
+        solution = lineax.linear_solve(op, b, solver=solver, options=options)
+        return solution.value, solution.stats
+
+    return solve
+
+
+def krylov_logdet_slq(
+    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool = False
+):
+    def logdet(problem: tuple[Callable, dict], /, key):
+        A, _info = problem
+
+        integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
+        estimate = hutchinson.hutchinson(integrand, sample)
+
+        # Memory-efficient reverse-mode derivatives
+        #  See gram_matvec_map_over_batch().
+        if checkpoint:
+            estimate = jax.checkpoint(estimate)
+
+        keys = jax.random.split(key, num=num_batches)
+        values = jax.lax.map(lambda k: estimate(k), keys)
+        return jnp.mean(values, axis=0)
+
+    return logdet
+
+
+def krylov_logdet_slq_vjp_reuse(
+    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool
+):
     """Construct a logpdf function that uses CG and Lanczos for the forward pass.
 
     This method returns an algorithm similar to logpdf_lanczos_reuse;
@@ -346,31 +368,22 @@ def logpdf_lanczos_reuse(
     }
     """
 
-    def solve(A: Callable, b):
-        result, info = jax.scipy.sparse.linalg.cg(A, b)
-        return result, info
+    def logdet(problem: tuple[Callable, dict], /, key):
+        A, _info = problem
 
-    def logdet(A: Callable, key):
         integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
-        estimate = hutchinson.hutchinson(integrand, slq_sampler)
+        estimate = hutchinson.hutchinson(integrand, sample)
 
-        keys = jax.random.split(key, num=slq_batch_num)
+        # Memory-efficient reverse-mode derivatives
+        #  See gram_matvec_map_over_batch().
+        if checkpoint:
+            estimate = jax.checkpoint(estimate)
+
+        keys = jax.random.split(key, num=num_batches)
         values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0) / 2
+        return jnp.mean(values, axis=0)
 
-    def logpdf(y, *params_logdet, mean, cov):
-        # Log-determinant
-        logdet_ = logdet(cov, *params_logdet)
-
-        # Mahalanobis norm
-        tmp, info = solve(cov, y - mean)
-        mahalanobis = jnp.dot(y - mean, tmp)
-
-        # Combine the terms
-        (n,) = jnp.shape(mean)
-        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
-
-    return logpdf
+    return logdet
 
 
 def mean_zero() -> Callable:
@@ -521,3 +534,131 @@ def _assert_shapes(x, y, shape_in):
         error = f"The shape {jnp.shape(x)} of the first argument "
         error += "does not match 'shape_in'={shape_in}"
         raise ValueError(error)
+
+
+def low_rank_cholesky(n: int, rank: int):
+    """Compute a partial Cholesky factorisation."""
+
+    def call(matrix_element: Callable):
+        body = _low_rank_cholesky_body(matrix_element, n)
+        # todo: handle parametrised matrix_element functions
+
+        L = jnp.zeros((n, rank))
+        return jax.lax.fori_loop(0, rank, body, L)
+
+    return call
+
+
+def _low_rank_cholesky_body(matrix_element: Callable, n: int):
+    idx = jnp.arange(n)
+
+    def matrix_column(i):
+        fun = jax.vmap(matrix_element, in_axes=(0, None))
+        return fun(idx, i)
+
+    def body(i, L):
+        element = matrix_element(i, i)
+        l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
+
+        column = matrix_column(i)
+        l_ji = column - L @ L[i, :]
+        l_ji /= l_ii
+
+        return L.at[:, i].set(l_ji)
+
+    return body
+
+
+def low_rank_cholesky_pivot(n: int, rank: int):
+    """Compute a partial Cholesky factorisation with pivoting."""
+
+    def call(matrix_element: Callable):
+        body = _low_rank_cholesky_pivot_body(matrix_element, n)
+
+        # todo: handle parametrised matrix_element functions
+        L = jnp.zeros((n, rank))
+        P = jnp.arange(n)
+
+        init = (L, P, P)
+        (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
+        return _pivot_invert(L, P)
+
+    return call
+
+
+def _low_rank_cholesky_pivot_body(matrix_element: Callable, n: int):
+    idx = jnp.arange(n)
+
+    def matrix_element_p(i, j, *, permute):
+        return matrix_element(permute[i], permute[j])
+
+    def matrix_column_p(i, *, permute):
+        fun = jax.vmap(matrix_element, in_axes=(0, None))
+        return fun(permute[idx], permute[i])
+
+    def matrix_diagonal_p(*, permute):
+        fun = jax.vmap(matrix_element)
+        return fun(permute[idx], permute[idx])
+
+    def body(i, carry):
+        L, P, P_matrix = carry
+
+        # Access the matrix
+        diagonal = matrix_diagonal_p(permute=P_matrix)
+
+        # Find the largest entry for the residuals
+        residual_diag = diagonal - jax.vmap(jnp.dot)(L, L)
+        res = jnp.abs(residual_diag)
+        k = jnp.argmax(res)
+
+        # Pivot [pivot!!! pivot!!! pivot!!! :)]
+        P_matrix = _swap_cols(P_matrix, i, k)
+        L = _swap_rows(L, i, k)
+        P = _swap_rows(P, i, k)
+
+        # Access the matrix
+        element = matrix_element_p(i, i, permute=P_matrix)
+        column = matrix_column_p(i, permute=P_matrix)
+
+        # Perform a Cholesky step
+        l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
+        l_ji = column - L @ L[i, :]
+        l_ji /= l_ii
+
+        # Update the estimate
+        L = L.at[:, i].set(l_ji)
+        return L, P, P_matrix
+
+    return body
+
+
+def _swap_cols(arr, i, j):
+    return _swap_rows(arr.T, i, j).T
+
+
+def _swap_rows(arr, i, j):
+    ai, aj = arr[i], arr[j]
+    arr = arr.at[i].set(aj)
+    return arr.at[j].set(ai)
+
+
+def _pivot_invert(arr, pivot, /):
+    """Invert and apply a pivoting array to a matrix."""
+    return arr[jnp.argsort(pivot)]
+
+
+def precondition_low_rank(low_rank, small_value):
+    """Turn a low-rank approximation into a preconditioner."""
+
+    def precon(matrix, /):
+        chol = low_rank(matrix)
+        tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
+
+        def matvec(v):
+            tmp1 = v
+            tmp2 = chol.T @ v
+            return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
+
+        return matvec
+
+    return precon
