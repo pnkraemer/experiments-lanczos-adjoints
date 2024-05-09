@@ -308,11 +308,11 @@ def logpdf_lanczos(
 
         keys = jax.random.split(key, num=slq_batch_num)
         values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0) / 2
+        return jnp.mean(values, axis=0)
 
     def logpdf(y, *params_logdet, mean, cov):
         # Log-determinant
-        logdet_ = logdet(cov, *params_logdet)
+        logdet_ = logdet(cov, *params_logdet) / 2
 
         # Mahalanobis norm
         tmp, info = solve(cov, y - mean)
@@ -364,11 +364,11 @@ def logpdf_lanczos_reuse(
 
         keys = jax.random.split(key, num=slq_batch_num)
         values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0) / 2
+        return jnp.mean(values, axis=0)
 
     def logpdf(y, *params_logdet, mean, cov):
         # Log-determinant
-        logdet_ = logdet(cov, *params_logdet)
+        logdet_ = logdet(cov, *params_logdet) / 2
 
         # Mahalanobis norm
         tmp, info = solve(cov, y - mean)
@@ -531,7 +531,7 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def cholesky_partial(matrix_element: Callable, n, rank: int):
+def precon_cholesky_partial(matrix_element: Callable, n, rank: int):
     """Compute a partial Cholesky factorisation."""
     body = _cholesky_partial_makebody(matrix_element, n)
     # todo: handle parametrised matrix_element functions
@@ -560,7 +560,7 @@ def _cholesky_partial_makebody(matrix_element: Callable, n: int):
     return body
 
 
-def cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
+def precon_cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
     """Compute a partial Cholesky factorisation with pivoting."""
     body = _cholesky_partial_pivot_body(matrix_element, n)
 
@@ -629,6 +629,6 @@ def _swap_rows(arr, i, j):
     return arr.at[j].set(ai)
 
 
-def pivot_apply_inverse(arr, pivot, /):
+def precon_pivot_invert(arr, pivot, /):
     """Invert and apply a pivoting array to a matrix."""
     return arr[jnp.argsort(pivot)]

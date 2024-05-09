@@ -9,34 +9,34 @@ from matfree import test_util
 from matfree_extensions.util import gp_util
 
 
-def case_cholesky_partial():
+def case_precon_cholesky_partial():
     """Construct a partial Cholesky factorisation.
 
-    Return a function whose API looks like that of cholesky_partial_pivot,
+    Return a function whose API looks like that of precon_cholesky_partial_pivot,
     so we only write a single test suite.
     """
 
-    def cholesky_incomplete_pretend_pivoting(fun, n, rank):
-        x = gp_util.cholesky_partial(fun, n, rank)
+    def precon_cholesky_partial_pretend_pivoting(fun, n, rank):
+        x = gp_util.precon_cholesky_partial(fun, n, rank)
         return x, jnp.arange(n)
 
-    return cholesky_incomplete_pretend_pivoting
+    return precon_cholesky_partial_pretend_pivoting
 
 
-def case_cholesky_partial_pivot():
+def case_precon_cholesky_partial_pivot():
     """Construct a partial Cholesky factorisation with pivoting."""
-    return gp_util.cholesky_partial_pivot
+    return gp_util.precon_cholesky_partial_pivot
 
 
 @pytest_cases.parametrize_with_cases("cholesky", ".")
-def test_full_rank_partial_cholesky_matches_full_cholesky(cholesky, n=5):
+def test_full_rank_partial_precon_cholesky_matches_full_cholesky(cholesky, n=5):
     key = jax.random.PRNGKey(2)
 
     cov_eig = 1.0 + jax.random.uniform(key, shape=(n,), dtype=float)
     cov = test_util.symmetric_matrix_from_eigenvalues(cov_eig)
 
     approximation, piv = cholesky(lambda i, j: cov[i, j], n, n)
-    approximation_p = gp_util.pivot_apply_inverse(approximation, piv)
+    approximation_p = gp_util.precon_pivot_invert(approximation, piv)
 
     tol = jnp.finfo(approximation.dtype).eps
     assert jnp.allclose(approximation_p @ approximation_p.T, cov, atol=tol, rtol=tol)
@@ -64,9 +64,9 @@ def test_pivoting_improves_the_estimate(n=10, rank=5):
     def element(i, j):
         return cov[i, j]
 
-    nopivot = gp_util.cholesky_partial(element, n, rank)
-    pivot, p = gp_util.cholesky_partial_pivot(element, n, rank)
-    pivot = gp_util.pivot_apply_inverse(pivot, p)
+    nopivot = gp_util.precon_cholesky_partial(element, n, rank)
+    pivot, p = gp_util.precon_cholesky_partial_pivot(element, n, rank)
+    pivot = gp_util.precon_pivot_invert(pivot, p)
 
     error_nopivot = jnp.linalg.norm(cov - nopivot @ nopivot.T)
     error_pivot = jnp.linalg.norm(cov - pivot @ pivot.T)
