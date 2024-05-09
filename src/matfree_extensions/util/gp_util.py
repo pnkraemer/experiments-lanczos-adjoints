@@ -526,6 +526,7 @@ def _assert_shapes(x, y, shape_in):
 def cholesky_partial(matrix_element: Callable, n, rank: int):
     """Compute a partial Cholesky factorisation."""
     body = _cholesky_partial_makebody(matrix_element, n)
+    # todo: handle parametrised matrix_element functions
 
     L = jnp.zeros((n, rank))
     return jax.lax.fori_loop(0, rank, body, L)
@@ -555,6 +556,7 @@ def cholesky_partial_pivot(matrix_element: Callable, n, rank: int):
     """Compute a partial Cholesky factorisation with pivoting."""
     body = _cholesky_partial_pivot_body(matrix_element, n)
 
+    # todo: handle parametrised matrix_element functions
     L = jnp.zeros((n, rank))
     P = jnp.arange(n)
 
