@@ -5,6 +5,7 @@ from typing import Callable
 
 import jax
 import jax.numpy as jnp
+import lineax
 from matfree import hutchinson
 
 from matfree_extensions import lanczos
@@ -37,7 +38,7 @@ def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Ca
 
 
 # todo: call this gram_matvec_sequential()?
-def gram_matvec_map(*, checkpoint: bool):
+def gram_matvec_map(*, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by row-wise mapping.
@@ -75,7 +76,7 @@ def gram_matvec_map(*, checkpoint: bool):
 
 # todo: call this gram_matvec_partitioned()?
 # todo: rename num_batches to num_partitions?
-def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
+def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
@@ -130,7 +131,7 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool):
     return matvec
 
 
-# todo: call this gram_matvec()?
+# todo: Rename to gram_matvec()?
 def gram_matvec_full_batch():
     """Turn a covariance function into a gram-matrix vector product.
 
@@ -264,8 +265,21 @@ def krylov_solve_cg(*, tol, maxiter):
     return solve
 
 
+def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
+    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
+        A, _info = problem
+
+        spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
+        op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
+        solver = lineax.CG(atol=atol, rtol=rtol, max_steps=max_steps)
+        solution = lineax.linear_solve(op, b, solver=solver)
+        return solution.value, solution.stats
+
+    return solve
+
+
 def krylov_logdet_slq(
-    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool
+    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool = False
 ):
     def logdet(problem: tuple[Callable, dict], /, key):
         A, _info = problem
