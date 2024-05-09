@@ -176,6 +176,8 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
     return parametrise, p
 
 
+# todo: rename to lml,
+#  because it is a log-marginal-likelihood, not a marginal-log-likelihood
 def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
