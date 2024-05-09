@@ -552,13 +552,22 @@ def cholesky_partial_pivot(rank):
     def estimate(matrix):
         L = jnp.zeros((len(matrix), rank))
         P = jnp.arange(len(matrix))
-        for i in range(rank):
+
+        body = makebody()
+        init = (L, P, matrix)
+        (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
+        return (L, P)
+
+    def makebody():
+        def body(i, carry):
+            L, P, matrix = carry
+
             # Find the largest entry for the residuals
             residual = matrix - L @ L.T
             res = jnp.abs(jnp.diag(residual))
             k = jnp.argmax(res)
 
-            # Pivot (pivot!!! pivot!!! pivot!!!)
+            # Pivot [pivot!!! pivot!!! pivot!!! :)]
             matrix = _swap_rows(matrix, i, k)
             matrix = _swap_cols(matrix, i, k)
             L = _swap_rows(L, i, k)
@@ -571,8 +580,9 @@ def cholesky_partial_pivot(rank):
 
             # Update the estimate
             L = L.at[:, i].set(l_ji)
+            return L, P, matrix
 
-        return L, P
+        return body
 
     return estimate
 
