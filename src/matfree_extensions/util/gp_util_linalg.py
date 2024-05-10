@@ -173,7 +173,6 @@ def low_rank_cholesky(n: int, rank: int):
     @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
     def call_backend(matrix_element: Callable, *params):
         body = _low_rank_cholesky_body(matrix_element, n, *params)
-        # todo: handle parametrised matrix_element functions
 
         L = jnp.zeros((n, rank))
         return jax.lax.fori_loop(0, rank, body, L)
@@ -226,7 +225,6 @@ def low_rank_cholesky_pivot(n: int, rank: int):
     def call_backend(matrix_element: Callable, *params):
         body = _low_rank_cholesky_pivot_body(matrix_element, n, *params)
 
-        # todo: handle parametrised matrix_element functions
         L = jnp.zeros((n, rank))
         P = jnp.arange(n)
 
