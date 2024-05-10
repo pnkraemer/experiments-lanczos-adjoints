@@ -50,6 +50,9 @@ def model_precondition(
             mean = mean_fun(x)
             cov_matvec = functools.partial(make_matvec, x, x)
 
+            # todo: currently, we build the preconditioner only
+            #  with the prior covariance in mind.
+            #  But the likelihood is also important!
             def matrix_element(i, j):
                 return kfun(x[i], x[j])
 
@@ -432,7 +435,7 @@ def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
 
             # Shift by epsilon to guarantee differentiable sqrts
             # (Clamping is not enough because |x| is
-            # not differentiable at zero
+            # not differentiable at zero)
             epsilon = jnp.finfo(scaled).eps
             sqrt = jnp.sqrt(scaled + epsilon)
             return outputscale * (1 + sqrt) * jnp.exp(-sqrt)
@@ -472,7 +475,7 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
 
             # Shift by epsilon to guarantee differentiable sqrts
             # (Clamping is not enough because |x| is
-            # not differentiable at zero
+            # not differentiable at zero)
             epsilon = jnp.finfo(scaled).eps
             sqrt = jnp.sqrt(scaled + epsilon)
             return outputscale * jnp.exp(-sqrt)
@@ -585,6 +588,18 @@ def low_rank_cholesky(n: int, rank: int):
         L = jnp.zeros((n, rank))
         return jax.lax.fori_loop(0, rank, body, L)
 
+    # # Todo: uncomment
+    # # Ensure that no one ever differentiates through here :)
+    #
+    # def fwd(matrix_element):
+    #     return call(matrix_element), None
+    #
+    # def bwd(_matrix_element, _cache, _vjp_incoming):
+    #     raise RuntimeError
+    #
+    # call = jax.custom_vjp(call, nondiff_argnums=[0])
+    # call.defvjp(fwd, bwd)
+
     return call
 
 
@@ -621,6 +636,19 @@ def low_rank_cholesky_pivot(n: int, rank: int):
         init = (L, P, P)
         (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
         return _pivot_invert(L, P)
+
+    # Todo: uncomment
+    #
+    # # Ensure that no one ever differentiates through here :)
+    #
+    # def fwd(matrix_element):
+    #     return call(matrix_element), None
+    #
+    # def bwd(_matrix_element, _cache, _vjp_incoming):
+    #     raise RuntimeError
+    #
+    # call = jax.custom_vjp(call, nondiff_argnums=[0])
+    # call.defvjp(fwd, bwd)
 
     return call
 
