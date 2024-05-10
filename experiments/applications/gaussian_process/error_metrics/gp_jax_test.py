@@ -27,11 +27,13 @@ print(jnp.shape(data))
 
 # Choose parameters
 # Memory consumption: ~ num_data**2 * num_matvecs * num_samples / num_partitions
+# todo: give cg fewer partitions than slq, because cg does not track batched samples!
 num_data = 400_000
 num_matvecs = 10
+num_matvecs_cg_eval = 10  # todo: pass to mll_test (currently this arg is not used)
 num_samples_batched = 1
 num_samples_sequential = 10
-num_partitions = 200
+num_partitions = 200  
 rank_precon = 500
 small_value = 1e-4
 
