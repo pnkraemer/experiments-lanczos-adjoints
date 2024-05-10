@@ -1,5 +1,6 @@
 """Linear algebra for Gaussian processes and Gram matrices."""
 
+import warnings
 from typing import Callable
 
 import jax
@@ -313,6 +314,9 @@ def krylov_solve_pcg(*, tol, maxiter):
 
 
 def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
+    msg = "Lineax's CG is not differentiable. Use for debugging only."
+    warnings.warn(msg, stacklevel=1)
+
     def solve(A: Callable, /, b: jax.Array):
         spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
         op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
@@ -324,6 +328,11 @@ def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
 
 
 def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
+    msg = "Preconditioning with lineax is potentially broken."
+    warnings.warn(msg, stacklevel=1)
+    msg = "Lineax's CG is not differentiable. Use for debugging only."
+    warnings.warn(msg, stacklevel=1)
+
     def solve(A: Callable, /, b: jax.Array, P: Callable):
         spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
         op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)

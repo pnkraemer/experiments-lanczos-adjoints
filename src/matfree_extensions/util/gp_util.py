@@ -90,13 +90,15 @@ def mll_exact_p(
 
         # Build matvec
         cov = gram_matvec(kernel_)
-        idx = jnp.arange(len(inputs))
 
         def cov_matvec(v):
+            idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
         # Evaluate the log-pdf
-        value, info = logpdf_p(targets, *p_logpdf, mean=mean_, cov=cov_matvec, P=precon)
+        value, info = logpdf_p(
+            targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec, P=precon
+        )
 
         # Normalise by the number of data points because GPyTorch does
         return value / len(inputs), info
@@ -165,12 +167,12 @@ def logpdf_krylov(solve: Callable, logdet: Callable):
 def logpdf_krylov_p(solve_p: Callable, logdet: Callable):
     """Evaluate a logpdf via preconditioned Krylov methods."""
 
-    def logpdf(y, *params_logdet, mean, cov, P: Callable):
+    def logpdf(y, *params_logdet, mean, cov_matvec, P: Callable):
         # Log-determinant
-        logdet_ = logdet(cov, *params_logdet) / 2
+        logdet_ = logdet(cov_matvec, *params_logdet) / 2
 
         # Mahalanobis norm
-        tmp, info = solve_p(cov, y - mean, P=P)
+        tmp, info = solve_p(cov_matvec, y - mean, P=P)
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms
