@@ -72,7 +72,7 @@ def test_preconditioning_reduces_cg_iteration_count(
     "low_rank", [gp_util.low_rank_cholesky_pivot, gp_util.low_rank_cholesky]
 )
 def test_preconditioning_is_differentiable(
-    low_rank, n=100, rank=5, tol=1e-4, maxiter=100
+    low_rank, n=100, rank=2, tol=1e-4, maxiter=100
 ):
     # Set up a testproblem
     xs = jnp.linspace(0, 1, num=n)
@@ -114,10 +114,8 @@ def test_preconditioning_is_differentiable(
     value_and_grad = jax.value_and_grad(fun, has_aux=True)
     (value, info), grad = value_and_grad(p_flat, xs, ys, jax.random.PRNGKey(2))
 
-    print(value)
-    print(info)
-    print(grad)
-    assert False
+    assert not jnp.isnan(value), value
+    assert not jnp.any(jnp.isnan(grad)), grad
 
 
 #

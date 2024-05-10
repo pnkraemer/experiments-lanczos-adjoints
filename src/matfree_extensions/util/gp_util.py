@@ -11,11 +11,6 @@ from matfree import hutchinson
 from matfree_extensions import lanczos
 
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
-#
-# todo: if we implememt GP models as kernel(p, x),
-#   and if model() expects a covariance_matvec function,
-#   then we can unify the API with that in BNN_utils and we gain
-#   a lot of functionality.
 
 
 # todo: if we rename this to model_gp, we could
@@ -23,18 +18,15 @@ from matfree_extensions import lanczos
 def model(mean_fun: Callable, kernel_fun: Callable, gram_matvec: Callable) -> Callable:
     """Construct a Gaussian process model."""
 
-    def parametrise(**kernel_params):
-        kfun = kernel_fun(**kernel_params)
+    def call(x: jax.Array, params: dict):
+        kfun = kernel_fun(**params)
         make_matvec = gram_matvec(kfun)
 
-        def prior(x):
-            mean = mean_fun(x)
-            cov_matvec = functools.partial(make_matvec, x, x)
-            return mean, (cov_matvec, {})
+        mean = mean_fun(x)
+        cov_matvec = functools.partial(make_matvec, x, x)
+        return mean, (cov_matvec, {})
 
-        return prior
-
-    return parametrise
+    return call
 
 
 def model_precondition(
@@ -42,27 +34,24 @@ def model_precondition(
 ) -> Callable:
     """Construct a Gaussian process model."""
 
-    def parametrise(**kernel_params):
-        kfun = kernel_fun(**kernel_params)
+    def call(x: jax.Array, params: dict):
+        kfun = kernel_fun(**params)
         make_matvec = gram_matvec(kfun)
 
-        def prior(x):
-            mean = mean_fun(x)
-            cov_matvec = functools.partial(make_matvec, x, x)
+        mean = mean_fun(x)
+        cov_matvec = functools.partial(make_matvec, x, x)
 
-            # todo: currently, we build the preconditioner only
-            #  with the prior covariance in mind.
-            #  But the likelihood is also important!
-            def matrix_element(i, j):
-                return kfun(x[i], x[j])
+        # todo: currently, we build the preconditioner only
+        #  with the prior covariance in mind.
+        #  But the likelihood is also important!
+        def matrix_element(i, j):
+            return kfun(x[i], x[j])
 
-            # This overfits to diagonal+lowrank preconditioners
-            matvec_p = precondition(matrix_element)
-            return mean, (cov_matvec, {"precondition": matvec_p})
+        # This overfits to diagonal+lowrank preconditioners
+        matvec_p = precondition(matrix_element)
+        return mean, (cov_matvec, {"precondition": matvec_p})
 
-        return prior
-
-    return parametrise
+    return call
 
 
 # todo: call this gram_matvec_sequential()?
@@ -191,15 +180,13 @@ def gram_matrix(fun: Callable, /) -> Callable:
 def likelihood_gaussian() -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def parametrise(*, raw_noise):
+    def parametrise(mean, cov, params):
         # Apply a soft-plus because GPyTorch does
+        raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
 
-        def likelihood(mean, cov):
-            matvec, aux = cov
-            return mean, (lambda v: matvec(v) + noise * v, aux)
-
-        return likelihood
+        matvec, aux = cov
+        return mean, (lambda v: matvec(v) + noise * v, aux)
 
     p = {"raw_noise": jnp.empty(())}
     return parametrise, p
@@ -210,16 +197,16 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
 def mll_exact(prior: Callable, likelihood: Callable, *, logpdf: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
-    def mll(x, y, *params_logdet, params_prior: dict, params_likelihood: dict):
+    def mll(inputs, targets, *p_logpdf, params_prior: dict, params_likelihood: dict):
         # Evaluate the marginal data likelihood
-        mean, cov = prior(**params_prior)(x)
-        mean_, cov_ = likelihood(**params_likelihood)(mean, cov)
+        mean, cov = prior(inputs, params=params_prior)
+        mean_, cov_ = likelihood(mean, cov, params=params_likelihood)
 
         # Evaluate the log-pdf
-        value, info = logpdf(y, *params_logdet, mean=mean_, cov=cov_)
+        value, info = logpdf(targets, *p_logpdf, mean=mean_, cov=cov_)
 
         # Normalise by the number of data points because GPyTorch does
-        return value / len(x), info
+        return value / len(inputs), info
 
     return mll
 
