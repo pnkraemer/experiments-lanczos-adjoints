@@ -319,6 +319,54 @@ def _softplus(x, beta=1.0, threshold=20.0):
     )
 
 
+def condition(prior, likelihood, *, solve: Callable, gram_matvec: Callable):
+    def posterior(xs, *, inputs, targets, params_prior: dict, params_likelihood: dict):
+        # Compute (K + s^2 I)^{-1} y
+        k_inv_times_y, _info = _representer_weights(
+            inputs,
+            targets,
+            params_prior=params_prior,
+            params_likelihood=params_likelihood,
+        )
+
+        # Evaluate the mean at the new gridpoint
+        mean_posterior = _mean(
+            xs, weights=k_inv_times_y, inputs=inputs, params_prior=params_prior
+        )
+
+        # Eventually, we might replace the "None" with a covariance...
+        return mean_posterior, None
+
+    def _representer_weights(inputs, targets, params_prior, params_likelihood):
+        mean, kernel_prior = prior(inputs, params=params_prior)
+        mean_, kernel_likelihood = likelihood(
+            mean, kernel_prior, params=params_likelihood
+        )
+
+        # Build matvec for likelihood
+
+        def cov_matvec_likelihood(v):
+            cov = gram_matvec(kernel_likelihood)
+
+            i = jnp.arange(len(inputs))
+            return cov(i, i, v)
+
+        return solve(cov_matvec_likelihood, targets - mean_)
+
+    def _mean(xs, /, weights, *, inputs, params_prior):
+        prior_mean, kernel_prior = prior(xs, params=params_prior)
+
+        def cov_matvec_prior(v):
+            cov = gram_matvec(kernel_prior)
+            i = jnp.arange(len(xs))
+            j = jnp.arange(len(inputs))
+            return cov(i, j, v)
+
+        return prior_mean + cov_matvec_prior(weights)
+
+    return posterior
+
+
 def _assert_shapes(x, y, shape_in):
     if jnp.shape(x) != jnp.shape(y):
         error = "The arguments have different shapes: "
