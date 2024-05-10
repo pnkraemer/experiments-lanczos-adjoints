@@ -2,7 +2,6 @@ import os.path
 import urllib.request
 
 import gpytorch
-import linear_operator
 import torch
 from scipy.io import loadmat
 
@@ -13,7 +12,6 @@ if not os.path.isfile("../3droad.mat"):
     )
 
 data = torch.Tensor(loadmat("../3droad.mat")["data"])
-
 
 
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -72,9 +70,7 @@ model.train()
 likelihood.train()
 
 # Use the adam optimizer
-optimizer = torch.optim.Adam(
-    model.parameters(), lr=0.1
-)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 
 # "Loss" for GPs - the marginal log likelihood
 mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
@@ -85,12 +81,13 @@ training_iter = 50
 # with (gpytorch.settings.max_preconditioner_size(500),gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.verbose_linalg(True)):
 # with gpytorch.settings.verbose_linalg(True):
 # with gpytorch.settings.verbose_linalg(True), gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_preconditioner_size(250), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.linalg_dtypes(default=torch.float32):
-with gpytorch.settings.max_preconditioner_size(200), \
-     gpytorch.settings.cg_tolerance(1e0), \
-     gpytorch.settings.num_trace_samples(15), \
-     gpytorch.settings.max_lanczos_quadrature_iterations(15), \
-     gpytorch.settings.max_cg_iterations(1000), \
-     gpytorch.settings.verbose_linalg(True):
+with gpytorch.settings.max_preconditioner_size(200), gpytorch.settings.cg_tolerance(
+    1e0
+), gpytorch.settings.num_trace_samples(
+    15
+), gpytorch.settings.max_lanczos_quadrature_iterations(
+    15
+), gpytorch.settings.max_cg_iterations(1000), gpytorch.settings.verbose_linalg(True):
     for i in range(training_iter):
         start_time = time.time()
         # Zero gradients from previous iteration

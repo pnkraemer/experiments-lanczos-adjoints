@@ -559,6 +559,15 @@ def precondition_low_rank(low_rank, small_value):
             tmp2 = chol.T @ v
             return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
 
+        # todo: differentiate MLL, and then uncomment and see what happens
+        # def matvec_fwd(v):
+        #     return matvec(v), None
+        # def matvec_bwd(cache, vjp_incoming):
+        #     raise RuntimeError
+        #
+        # matvec = jax.custom_vjp(matvec)
+        # matvec.defvjp(matvec_fwd, matvec_bwd)
+
         return matvec
 
     return precon
