@@ -2,6 +2,7 @@
 
 from typing import Callable
 
+import jax
 import jax.numpy as jnp
 from matfree import test_util
 
@@ -12,17 +13,22 @@ def test_sth():
     b = jnp.arange(1.0, 10.0)
     solution = jnp.linalg.solve(A, b)
 
-    solve = cg_fixed(lambda v: A @ v, len(A))
-    approximation = solve(b, jnp.zeros_like(b))
+    solve = cg_fixed(len(A))
+    approximation, _info = solve(lambda v: A @ v, b)
     assert jnp.allclose(approximation, solution)
 
 
-def cg_fixed(A: Callable, num_matvecs: int, /):
-    return pcg_fixed(A, num_matvecs, lambda v: v)
+def cg_fixed(num_matvecs: int, /):
+    return pcg_fixed(num_matvecs, lambda v: v)
 
 
-def pcg_fixed(A: Callable, num_matvecs: int, M: Callable, /):
-    def pcg(b, x):
+def pcg_fixed(num_matvecs: int, M: Callable, /):
+    def pcg(A: Callable, b: jax.Array):
+        return jax.lax.custom_linear_solve(A, b, pcg_impl, symmetric=True, has_aux=True)
+
+    def pcg_impl(A: Callable, b):
+        x = jnp.zeros_like(b)
+
         r = b - A(x)
         z = M(r)
         p = z
@@ -38,6 +44,6 @@ def pcg_fixed(A: Callable, num_matvecs: int, M: Callable, /):
             z = M(r)
             b = jnp.dot(r, z) / jnp.dot(rold, zold)
             p = z + b * p
-        return x
+        return x, {"residual": r}
 
     return pcg
