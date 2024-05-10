@@ -5,10 +5,10 @@ import urllib.request
 import jax
 import jax.numpy as jnp
 import optax
+import scipy.io
 import tqdm
 from matfree import hutchinson
 from matfree_extensions.util import data_util, exp_util, gp_util, gp_util_linalg
-from scipy.io import loadmat
 
 
 def root_mean_square_error(x, *, target):
@@ -22,10 +22,18 @@ if not os.path.isfile("../3droad.mat"):
         "https://www.dropbox.com/s/f6ow1i59oqx05pl/3droad.mat?dl=1", "../3droad.mat"
     )
 
-data = jnp.asarray(loadmat("../3droad.mat")["data"])
+data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
 
-N = 100
-data_sampled = data[:N, :-1], data[:N, -1]
+# Choose parameters
+num_matvecs = 3
+num_samples = 1
+num_partitions = 1
+rank_precon = 10
+small_value = 1e-4
+num_data = 1000
+
+
+data_sampled = data[:num_data, :-1], data[:num_data, -1]
 train, test = data_util.split_train_test(*data_sampled, train=0.9)
 (train_x, train_y), (test_x, test_y) = train, test
 
@@ -46,13 +54,6 @@ k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
 prior = gp_util.model(gp_util.mean_zero(), k)
 likelihood, p_likelihood = gp_util.likelihood_gaussian()
 
-
-# Choose parameters
-num_matvecs = 3
-num_samples = 1
-num_partitions = 1
-rank_precon = 10
-small_value = 1e-4
 
 # Set up matrix-free linear algebra
 gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
@@ -161,9 +162,10 @@ print("A priori CG error:", cg_error)
 print("A-priori RMSE:", rmse)
 print("A-priori NLL:", nll)
 
+
+print()
 optimizer = optax.adam(learning_rate=0.1)
 state = optimizer.init(p_opt)
-
 progressbar = tqdm.tqdm(range(50))
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
@@ -213,6 +215,7 @@ for _ in progressbar:
     except KeyboardInterrupt:
         break
 end = time.perf_counter()
+print()
 
 # Complete the data collection
 loss_timestamps = jnp.asarray(loss_timestamps)
