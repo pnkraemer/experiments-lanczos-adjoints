@@ -348,3 +348,12 @@ def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0, n_samples_per_class
         collate_fn=numpy_collate_fn,
     )
     # return train_loader
+
+
+def split_train_test(inputs, targets, *, train=0.9):
+    num_data = len(inputs)
+    num_train = int(train * num_data)
+
+    train_set = inputs[:num_train], targets[:num_train]
+    test_set = inputs[num_train:], targets[num_train:]
+    return train_set, test_set
