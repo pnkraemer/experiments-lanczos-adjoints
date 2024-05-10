@@ -1,5 +1,6 @@
 """Linear algebra for Gaussian processes and Gram matrices."""
 
+import functools
 import warnings
 from typing import Callable
 
@@ -164,30 +165,37 @@ def precondition_low_rank(low_rank, small_value):
 def low_rank_cholesky(n: int, rank: int):
     """Compute a partial Cholesky factorisation."""
 
-    def call(matrix_element: Callable):
-        body = _low_rank_cholesky_body(matrix_element, n)
+    def cholesky(matrix_element: Callable):
+        i, j = 0, 0
+        element, aux_args = jax.closure_convert(matrix_element, i, j)
+        return call_backend(element, *aux_args)
+
+    @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
+    def call_backend(matrix_element: Callable, *params):
+        body = _low_rank_cholesky_body(matrix_element, n, *params)
         # todo: handle parametrised matrix_element functions
 
         L = jnp.zeros((n, rank))
         return jax.lax.fori_loop(0, rank, body, L)
 
-    # # Todo: uncomment
-    # # Ensure that no one ever differentiates through here :)
-    #
-    # def fwd(matrix_element):
-    #     return call(matrix_element), None
-    #
-    # def bwd(_matrix_element, _cache, _vjp_incoming):
-    #     raise RuntimeError
-    #
-    # call = jax.custom_vjp(call, nondiff_argnums=[0])
-    # call.defvjp(fwd, bwd)
+    # Ensure that no one ever differentiates through here
 
-    return call
+    def fwd(*args):
+        return call_backend(*args), None
+
+    def bwd(*_args):
+        raise RuntimeError
+
+    call_backend.defvjp(fwd, bwd)
+
+    return cholesky
 
 
-def _low_rank_cholesky_body(matrix_element: Callable, n: int):
+def _low_rank_cholesky_body(fn: Callable, n: int, *args):
     idx = jnp.arange(n)
+
+    def matrix_element(i, j):
+        return fn(i, j, *args)
 
     def matrix_column(i):
         fun = jax.vmap(matrix_element, in_axes=(0, None))
@@ -209,8 +217,14 @@ def _low_rank_cholesky_body(matrix_element: Callable, n: int):
 def low_rank_cholesky_pivot(n: int, rank: int):
     """Compute a partial Cholesky factorisation with pivoting."""
 
-    def call(matrix_element: Callable):
-        body = _low_rank_cholesky_pivot_body(matrix_element, n)
+    def cholesky(matrix_element: Callable):
+        i, j = 0, 0
+        element, aux_args = jax.closure_convert(matrix_element, i, j)
+        return call_backend(element, *aux_args)
+
+    @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
+    def call_backend(matrix_element: Callable, *params):
+        body = _low_rank_cholesky_pivot_body(matrix_element, n, *params)
 
         # todo: handle parametrised matrix_element functions
         L = jnp.zeros((n, rank))
@@ -220,24 +234,24 @@ def low_rank_cholesky_pivot(n: int, rank: int):
         (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
         return _pivot_invert(L, P)
 
-    # Todo: uncomment
-    #
-    # # Ensure that no one ever differentiates through here :)
-    #
-    # def fwd(matrix_element):
-    #     return call(matrix_element), None
-    #
-    # def bwd(_matrix_element, _cache, _vjp_incoming):
-    #     raise RuntimeError
-    #
-    # call = jax.custom_vjp(call, nondiff_argnums=[0])
-    # call.defvjp(fwd, bwd)
+    # Ensure that no one ever differentiates through here
 
-    return call
+    def fwd(*args):
+        return call_backend(*args), None
+
+    def bwd(*_args):
+        raise RuntimeError
+
+    call_backend.defvjp(fwd, bwd)
+
+    return cholesky
 
 
-def _low_rank_cholesky_pivot_body(matrix_element: Callable, n: int):
+def _low_rank_cholesky_pivot_body(fn: Callable, n: int, *args):
     idx = jnp.arange(n)
+
+    def matrix_element(i, j):
+        return fn(i, j, *args)
 
     def matrix_element_p(i, j, *, permute):
         return matrix_element(permute[i], permute[j])
