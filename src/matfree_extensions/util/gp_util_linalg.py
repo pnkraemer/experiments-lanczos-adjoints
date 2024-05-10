@@ -361,16 +361,16 @@ def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
 def krylov_solve_cg_fixed_step(num_matvecs: int, /):
     pcg_solve = krylov_solve_pcg_fixed_step(num_matvecs)
 
-    def pc(A: Callable, b: jax.Array):
+    def cg(A: Callable, b: jax.Array):
         return pcg_solve(A, b, lambda v: v)
 
-    return krylov_solve_pcg_fixed_step(num_matvecs, lambda v: v)
+    return cg
 
 
 def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
     def pcg(A: Callable, b: jax.Array, P: Callable):
         return jax.lax.custom_linear_solve(
-            A, b, lambda *a: pcg_impl(*a, P=P), symmetric=True, has_aux=True
+            A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
         )
 
     def pcg_impl(A: Callable, b, P):
