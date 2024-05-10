@@ -9,8 +9,10 @@ import jax.numpy as jnp
 from matfree import hutchinson
 from tqdm import tqdm
 
+# jax.config.update("jax_disable_jit", True)
+
 from matfree_extensions import lanczos
-from matfree_extensions.util.bnn_baselines import exact_diagonal
+from matfree_extensions.util.bnn_baselines import exact_diagonal, hutchinson_diagonal
 
 # TODO: Decide if we abbreviate metric in function names
 
@@ -23,9 +25,9 @@ def model_mlp(*, out_dims, activation: Callable):
         @flax.linen.compact
         def __call__(self, x):
             x = x.reshape((x.shape[0], -1))
-            x = flax.linen.Dense(5)(x)
+            x = flax.linen.Dense(100)(x)
             x = self.activation(x)
-            x = flax.linen.Dense(5)(x)
+            x = flax.linen.Dense(50)(x)
             x = self.activation(x)
             x = flax.linen.Dense(5)(x)
             x = self.activation(x)
@@ -410,17 +412,37 @@ def img_to_patch(x, patch_size, flatten_channels=True):
 def callibration_loss_diagonal(
     model_apply, unflatten, hyperparam_unconstrain, num_classes, n_params
 ):
+    # get_diag_fn = functools.partial(
+    #     exact_diagonal,
+    #     model_fn=model_apply,
+    #     output_dim=num_classes,
+    #     likelihood="classification",
+    # )
+    gvp_fn = ggn_vp_parallel(
+                loss_single=loss_training_cross_entropy_single,
+                model_fun=model_apply,
+                param_unflatten=unflatten,
+            )
+    key = jax.random.PRNGKey(0)
     get_diag_fn = functools.partial(
-        exact_diagonal,
-        model_fn=model_apply,
-        output_dim=num_classes,
-        likelihood="Classification",
-    )
+                    hutchinson_diagonal,
+                    n_samples=50,
+                    key=key,
+                    computation_type="serial",
+                    num_levels=3
+                )
 
-    def loss(log_alpha, params_vec, img):
+    def loss(log_alpha, params_vec, img, label):
         alpha = hyperparam_unconstrain(log_alpha)
-        diag = get_diag_fn(unflatten(params_vec), img)
+        gvp_fn_batch = jax.tree_util.Partial(
+                                gvp_fn,
+                                params_vec=params_vec,
+                                x_batch=img,
+                                y_batch=label
+                            )
+        diag = get_diag_fn(gvp_fn=gvp_fn_batch, params=unflatten(params_vec))
         diag_vec = jax.flatten_util.ravel_pytree(diag)[0]
+        diag_vec = jnp.where(diag_vec < 1e-4, 0.0, diag_vec)
         logdet = jnp.sum(jnp.log(diag_vec + alpha))
         log_prior = jnp.log(alpha) * n_params - alpha * jnp.dot(params_vec, params_vec)
         log_marginal = log_prior - logdet
@@ -541,6 +563,7 @@ def logpdf_eigh() -> Callable:
         # w = jnp.maximum(0.0, w)  # clamp to allow sqrts
 
         # Log-determinant
+        w = jnp.where(w < 1e-4, 1.0, w)
         logdet = jnp.sum(jnp.log(w)) / 2
 
         # Mahalanobis norm

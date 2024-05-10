@@ -335,7 +335,7 @@ def ImageNet1k_loaders(batch_size: int = 128, seed: int = 0, n_samples_per_class
     )
     if n_samples_per_class is not None:
         set_seed(seed)
-        n_data = n_samples_per_class * n_classes
+        n_data = int(n_samples_per_class * n_classes)
         train_dataset, _ = torch.utils.data.random_split(
             train_dataset, [n_data, len(train_dataset) - n_data]
         )

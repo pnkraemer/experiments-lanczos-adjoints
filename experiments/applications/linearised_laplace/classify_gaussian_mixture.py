@@ -199,6 +199,19 @@ key, subkey = jax.random.split(key)
 samples_params = sample_fun(subkey, unconstrain(log_alpha), variables, x_train, y_train)
 
 
+# Linearized Laplace(no sampling)
+v_flat, unflat = jax.flatten_util.ravel_pytree(variables)
+
+def GGN(v):
+    out = ggn_fun(unconstrain(log_alpha), v, x_train, y_train) @ v
+    return out
+
+logpdf_ = bnn_util.logpdf_eigh()
+eval_logprob = bnn_util.predictive_posterior_loglikelihood(model_apply=model_apply, ggn_fun=GGN, unflatten=unflatten, logpdf=logpdf_)
+test_ll = (eval_logprob)(v_flat, x_train, y_train)
+
+print(test_ll)
+breakpoint()
 # Predict (in-distribution)
 samples_logits = jax.vmap(lambda s: model_linear(s, variables, x_train))(samples_params)
 

@@ -129,7 +129,7 @@ def hutchinson_diagonal(
                 key = key_list[n]
                 eps = tree_random_normal_like(key, control_variate)
                 c_v = tm.Vector(control_variate) * tm.Vector(eps)
-                gvp = gvp_fn(eps)
+                gvp = gvp_fn(jax.flatten_util.ravel_pytree(eps)[0])
                 new_diag = (
                     tm.Vector(eps) * (tm.Vector(gvp) - c_v) + tm.Vector(control_variate)
                 ).tree
@@ -146,7 +146,7 @@ def hutchinson_diagonal(
             def single_eps_diag(key):
                 eps = tree_random_normal_like(key, control_variate)
                 c_v = tm.Vector(control_variate) * tm.Vector(eps)
-                gvp = gvp_fn(eps)
+                gvp = gvp_fn(jax.flatten_util.ravel_pytree(eps)[0])
                 return (
                     tm.Vector(eps) * (tm.Vector(gvp) - c_v) + tm.Vector(control_variate)
                 ).tree
