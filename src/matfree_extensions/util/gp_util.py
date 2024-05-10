@@ -547,6 +547,23 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
+def precondition_low_rank(low_rank, small_value):
+    """Turn a low-rank approximation into a preconditioner."""
+
+    def precon(matrix, /):
+        chol = low_rank(matrix)
+        tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
+
+        def matvec(v):
+            tmp1 = v
+            tmp2 = chol.T @ v
+            return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
+
+        return matvec
+
+    return precon
+
+
 def low_rank_cholesky(n: int, rank: int):
     """Compute a partial Cholesky factorisation."""
 
@@ -656,20 +673,3 @@ def _swap_rows(arr, i, j):
 def _pivot_invert(arr, pivot, /):
     """Invert and apply a pivoting array to a matrix."""
     return arr[jnp.argsort(pivot)]
-
-
-def precondition_low_rank(low_rank, small_value):
-    """Turn a low-rank approximation into a preconditioner."""
-
-    def precon(matrix, /):
-        chol = low_rank(matrix)
-        tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
-
-        def matvec(v):
-            tmp1 = v
-            tmp2 = chol.T @ v
-            return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
-
-        return matvec
-
-    return precon
