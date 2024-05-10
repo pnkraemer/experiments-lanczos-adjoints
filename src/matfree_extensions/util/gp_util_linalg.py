@@ -359,26 +359,33 @@ def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
 
 
 def krylov_solve_cg_fixed_step(num_matvecs: int, /):
+    pcg_solve = krylov_solve_pcg_fixed_step(num_matvecs)
+
+    def pc(A: Callable, b: jax.Array):
+        return pcg_solve(A, b, lambda v: v)
+
     return krylov_solve_pcg_fixed_step(num_matvecs, lambda v: v)
 
 
-def krylov_solve_pcg_fixed_step(num_matvecs: int, M: Callable, /):
-    def pcg(A: Callable, b: jax.Array):
-        return jax.lax.custom_linear_solve(A, b, pcg_impl, symmetric=True, has_aux=True)
+def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
+    def pcg(A: Callable, b: jax.Array, P: Callable):
+        return jax.lax.custom_linear_solve(
+            A, b, lambda *a: pcg_impl(*a, P=P), symmetric=True, has_aux=True
+        )
 
-    def pcg_impl(A: Callable, b):
+    def pcg_impl(A: Callable, b, P):
         x = jnp.zeros_like(b)
 
         r = b - A(x)
-        z = M(r)
+        z = P(r)
         p = z
 
-        body_fun = make_body(A)
+        body_fun = make_body(A, P)
         init = (x, p, r, z)
         x, p, r, z = jax.lax.fori_loop(0, num_matvecs, body_fun, init_val=init)
         return x, {"residual": r}
 
-    def make_body(A):
+    def make_body(A, P):
         def body_fun(_i, state):
             x, p, r, z = state
             Ap = A(p)
@@ -389,7 +396,7 @@ def krylov_solve_pcg_fixed_step(num_matvecs: int, M: Callable, /):
             r = r - a * Ap
 
             zold = z
-            z = M(r)
+            z = P(r)
             b = jnp.dot(r, z) / jnp.dot(rold, zold)
             p = z + b * p
             return x, p, r, z
@@ -406,8 +413,13 @@ def krylov_logdet_slq(
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, sample)
 
+        # If a single batch, we never checkpoint.
+        if num_batches == 1:
+            return estimate(key)
+
         # Memory-efficient reverse-mode derivatives
         #  See gram_matvec_map_over_batch().
+
         if checkpoint:
             estimate = jax.checkpoint(estimate)
 
