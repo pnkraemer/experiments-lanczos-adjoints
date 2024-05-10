@@ -11,7 +11,7 @@ def test_cg_fixed():
     b = jnp.arange(1.0, 10.0)
     solution = jnp.linalg.solve(A, b)
 
-    solve = gp_util_linalg.krylov_solve_cg_fixed(len(A))
+    solve = gp_util_linalg.krylov_solve_cg_fixed_step(len(A))
     approximation, _info = solve(lambda v: A @ v, b)
     assert jnp.allclose(approximation, solution)
 
@@ -23,7 +23,7 @@ def test_cg_fixed_num_matvecs_improves_error():
 
     error = 100.0
     for n in range(len(A)):
-        solve = gp_util_linalg.krylov_solve_cg_fixed(n)
+        solve = gp_util_linalg.krylov_solve_cg_fixed_step(n)
         _approximation, info = solve(lambda v: A @ v, b)
 
         error_now = jnp.linalg.norm(info["residual"])

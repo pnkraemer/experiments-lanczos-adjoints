@@ -88,7 +88,7 @@ def test_preconditioning_is_differentiable(
     v_like = xs
     sample = hutchinson.sampler_normal(v_like, num=10)
     logdet = gp_util_linalg.krylov_logdet_slq(5, sample=sample, num_batches=1)
-    solve_p = gp_util_linalg.krylov_solve_pcg(tol=tol, maxiter=maxiter)
+    solve_p = gp_util_linalg.krylov_solve_pcg_jax(tol=tol, maxiter=maxiter)
     gram_matvec = gp_util_linalg.gram_matvec_full_batch()
     logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
 
@@ -137,7 +137,7 @@ def test_preconditioning_small_value_does_not_affect_the_solution(
     v_like = xs
     sample = hutchinson.sampler_normal(v_like, num=10)
     logdet = gp_util_linalg.krylov_logdet_slq(5, sample=sample, num_batches=1)
-    solve = gp_util_linalg.krylov_solve_pcg(tol=tol, maxiter=maxiter)
+    solve = gp_util_linalg.krylov_solve_pcg_jax(tol=tol, maxiter=maxiter)
     logpdf_fun = gp_util.logpdf_krylov_p(solve_p=solve, logdet=logdet)
     gram_matvec = gp_util_linalg.gram_matvec_full_batch()
     low_rank_impl = low_rank(n, rank=rank)

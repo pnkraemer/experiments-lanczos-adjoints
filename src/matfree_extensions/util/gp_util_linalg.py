@@ -309,7 +309,7 @@ def _pivot_invert(arr, pivot, /):
     return arr[jnp.argsort(pivot)]
 
 
-def krylov_solve_cg(*, tol, maxiter):
+def krylov_solve_cg_jax(*, tol, maxiter):
     def solve(A: Callable, /, b: jax.Array):
         result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter)
         return result, info
@@ -317,7 +317,7 @@ def krylov_solve_cg(*, tol, maxiter):
     return solve
 
 
-def krylov_solve_pcg(*, tol, maxiter):
+def krylov_solve_pcg_jax(*, tol, maxiter):
     def solve(A: Callable, /, b: jax.Array, P: Callable):
         result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter, M=P)
         return result, info
@@ -358,11 +358,11 @@ def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
     return solve
 
 
-def krylov_solve_cg_fixed(num_matvecs: int, /):
-    return krylov_solve_pcg_fixed(num_matvecs, lambda v: v)
+def krylov_solve_cg_fixed_step(num_matvecs: int, /):
+    return krylov_solve_pcg_fixed_step(num_matvecs, lambda v: v)
 
 
-def krylov_solve_pcg_fixed(num_matvecs: int, M: Callable, /):
+def krylov_solve_pcg_fixed_step(num_matvecs: int, M: Callable, /):
     def pcg(A: Callable, b: jax.Array):
         return jax.lax.custom_linear_solve(A, b, pcg_impl, symmetric=True, has_aux=True)
 

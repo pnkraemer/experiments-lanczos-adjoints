@@ -30,7 +30,7 @@ def case_logpdf_krylov():
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
 
-    solve = gp_util_linalg.krylov_solve_cg(tol=1e-4, maxiter=1000)
+    solve = gp_util_linalg.krylov_solve_cg_jax(tol=1e-4, maxiter=1000)
     logdet = gp_util_linalg.krylov_logdet_slq(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
@@ -49,7 +49,7 @@ def case_logpdf_krylov_reuse():
 
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    solve = gp_util_linalg.krylov_solve_cg(tol=1e-4, maxiter=1000)
+    solve = gp_util_linalg.krylov_solve_cg_jax(tol=1e-4, maxiter=1000)
     logdet = gp_util_linalg.krylov_logdet_slq_vjp_reuse(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
