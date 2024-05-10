@@ -29,7 +29,7 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
 def likelihood_gaussian() -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def parametrise(mean, lazy_kernel_prior, params):
+    def call(mean: jax.Array, lazy_kernel_prior: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
@@ -40,7 +40,7 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
         return mean, lazy_kernel
 
     p = {"raw_noise": jnp.empty(())}
-    return parametrise, p
+    return call, p
 
 
 # todo: rename to lml,
@@ -56,10 +56,14 @@ def mll_exact(
         mean_, kernel_ = likelihood(mean, kernel, params=params_likelihood)
 
         # Build matvec
-        cov_matvec = gram_matvec(kernel_, len(inputs))
+        cov = gram_matvec(kernel_)
+        idx = jnp.arange(len(inputs))
+
+        def cov_matvec(v):
+            return cov(idx, idx, v)
 
         # Evaluate the log-pdf
-        value, info = logpdf(targets, *p_logpdf, mean=mean_, cov=cov_matvec)
+        value, info = logpdf(targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec)
 
         # Normalise by the number of data points because GPyTorch does
         return value / len(inputs), info
@@ -85,7 +89,11 @@ def mll_exact_precondition(
         precon = precondition(kernel_)
 
         # Build matvec
-        cov_matvec = gram_matvec(kernel_, len(inputs))
+        cov = gram_matvec(kernel_)
+        idx = jnp.arange(len(inputs))
+
+        def cov_matvec(v):
+            return cov(idx, idx, v)
 
         # Evaluate the log-pdf
         value, info = logpdf_p(targets, *p_logpdf, mean=mean_, cov=cov_matvec, P=precon)
@@ -99,10 +107,9 @@ def mll_exact_precondition(
 def logpdf_scipy_stats() -> Callable:
     """Construct a logpdf function that wraps jax.scipy.stats."""
 
-    def logpdf(y, /, *, mean, cov: tuple[Callable, dict]):
+    def logpdf(y, /, *, mean, cov_matvec: Callable):
         # Materialise the covariance matrix
-        matvec, _info = cov
-        cov_matrix = jax.jacfwd(matvec)(mean)
+        cov_matrix = jax.jacfwd(cov_matvec)(mean)
 
         _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
         return _logpdf_fun(y, mean=mean, cov=cov_matrix), {}
@@ -113,10 +120,9 @@ def logpdf_scipy_stats() -> Callable:
 def logpdf_cholesky() -> Callable:
     """Construct a logpdf function that relies on a Cholesky decomposition."""
 
-    def logpdf(y, /, *, mean, cov: tuple[Callable, dict]):
+    def logpdf(y, /, *, mean, cov_matvec: Callable):
         # Materialise the covariance matrix
-        matvec, _info = cov
-        cov_matrix = jax.jacfwd(matvec)(mean)
+        cov_matrix = jax.jacfwd(cov_matvec)(mean)
 
         # Cholesky-decompose
         cholesky = jnp.linalg.cholesky(cov_matrix)
@@ -141,12 +147,12 @@ def logpdf_cholesky() -> Callable:
 
 
 def logpdf_krylov(solve: Callable, logdet: Callable):
-    def logpdf(y, *params_logdet, mean, cov):
+    def logpdf(y, *params_logdet, mean, cov_matvec: Callable):
         # Log-determinant
-        logdet_ = logdet(cov, *params_logdet) / 2
+        logdet_ = logdet(cov_matvec, *params_logdet) / 2
 
         # Mahalanobis norm
-        tmp, info = solve(cov, y - mean)
+        tmp, info = solve(cov_matvec, y - mean)
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms

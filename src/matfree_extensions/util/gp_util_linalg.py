@@ -76,26 +76,26 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool = True):
     """
 
     def matvec(fun: Callable) -> Callable:
-        def matvec_map(x, y, v):
-            num, *shape = jnp.shape(x)
+        def matvec_map(i, j, v):
+            num, *shape = jnp.shape(i)
             if num % num_batches != 0:
                 msg = f"num_batches = {num_batches} does not divide dataset size {num}."
                 raise ValueError(msg)
 
-            mv = matvec_single(y, v)
+            mv = matvec_single(j, v)
             if checkpoint:
                 mv = jax.checkpoint(mv)
 
-            x_batched = jnp.reshape(x, (num_batches, num // num_batches, *shape))
+            x_batched = jnp.reshape(i, (num_batches, num // num_batches, *shape))
             mapped = jax.lax.map(mv, x_batched)
             return jnp.reshape(mapped, (-1,))
 
         matvec_dense = gram_matvec_full_batch()
         matvec_dense_f = matvec_dense(fun)
 
-        def matvec_single(y, v):
+        def matvec_single(j, v):
             def mv(x_batched):
-                return matvec_dense_f(x_batched, y, v)
+                return matvec_dense_f(x_batched, j, v)
 
             return mv
 
@@ -116,15 +116,10 @@ def gram_matvec_full_batch():
     even if the matrix does not fit (but usually not).
     """
 
-    def matvec(fun: Callable, nrows) -> Callable:
-        idx = jnp.arange(nrows, dtype=int)
-        matvec_fun = matvec_(fun)
-        return lambda v: matvec_fun(idx, idx, v)
-
-    def matvec_(fun):
+    def matvec(fun):
         def matvec_y(i, j, v: jax.Array):
-            fun_y = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
-            return fun_y(i, j) @ v
+            fun_j_batched = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
+            return fun_j_batched(i, j) @ v
 
         return jax.vmap(matvec_y, in_axes=(0, None, None), out_axes=0)
 
@@ -302,8 +297,7 @@ def _pivot_invert(arr, pivot, /):
 
 
 def krylov_solve_cg(*, tol, maxiter):
-    def solve(problem: tuple[Callable, dict], /, b: jax.Array):
-        A, _info = problem
+    def solve(A: Callable, /, b: jax.Array):
         result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter)
         return result, info
 
@@ -389,9 +383,7 @@ def krylov_logdet_slq_vjp_reuse(
     }
     """
 
-    def logdet(problem: tuple[Callable, dict], /, key):
-        A, _info = problem
-
+    def logdet(A: Callable, /, key):
         integrand = lanczos.integrand_spd_custom_vjp_reuse(jnp.log, krylov_depth, A)
         estimate = hutchinson.hutchinson(integrand, sample)
 

@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import pytest_cases
 import torch
 from matfree import hutchinson
-from matfree_extensions.util import gp_util
+from matfree_extensions.util import gp_util, gp_util_linalg
 
 
 @pytest_cases.case
@@ -30,8 +30,8 @@ def case_logpdf_krylov():
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
 
-    solve = gp_util.krylov_solve_cg(tol=1e-4, maxiter=1000)
-    logdet = gp_util.krylov_logdet_slq(
+    solve = gp_util_linalg.krylov_solve_cg(tol=1e-4, maxiter=1000)
+    logdet = gp_util_linalg.krylov_logdet_slq(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
     logpdf = gp_util.logpdf_krylov(solve=solve, logdet=logdet)
@@ -49,8 +49,8 @@ def case_logpdf_krylov_reuse():
 
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    solve = gp_util.krylov_solve_cg(tol=1e-4, maxiter=1000)
-    logdet = gp_util.krylov_logdet_slq_vjp_reuse(
+    solve = gp_util_linalg.krylov_solve_cg(tol=1e-4, maxiter=1000)
+    logdet = gp_util_linalg.krylov_logdet_slq_vjp_reuse(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
     logpdf = gp_util.logpdf_krylov(solve, logdet)
@@ -60,17 +60,17 @@ def case_logpdf_krylov_reuse():
 
 @pytest_cases.case
 def case_gram_matvec_full_batch():
-    return gp_util.gram_matvec_full_batch()
+    return gp_util_linalg.gram_matvec_full_batch()
 
 
 @pytest_cases.case
 def case_gram_matvec_map_over_batch_checkpt():
-    return gp_util.gram_matvec_map_over_batch(num_batches=1, checkpoint=True)
+    return gp_util_linalg.gram_matvec_map_over_batch(num_batches=1, checkpoint=True)
 
 
 @pytest_cases.case
 def case_gram_matvec_map_no_checkpt():
-    return gp_util.gram_matvec_map(checkpoint=False)
+    return gp_util_linalg.gram_matvec_map(checkpoint=False)
 
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
@@ -85,9 +85,11 @@ def test_mll_exact(logpdf, gram_matvec):
 
     # Set up a GP model
     k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp_util.model(gp_util.mean_zero(), k, gram_matvec=gram_matvec)
+    prior = gp_util.model(gp_util.mean_zero(), k)
     likelihood, p_likelihood = gp_util.likelihood_gaussian()
-    loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf_fun)
+    loss = gp_util.mll_exact(
+        prior, likelihood, logpdf=logpdf_fun, gram_matvec=gram_matvec
+    )
 
     # Ensure that the parameters match
     p_prior["raw_lengthscale"] = lengthscale.squeeze()
