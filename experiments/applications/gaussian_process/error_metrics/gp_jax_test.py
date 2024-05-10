@@ -19,12 +19,12 @@ if not os.path.isfile("../3droad.mat"):
 data = jnp.asarray(loadmat("../3droad.mat")["data"])
 
 N = data.shape[0]
-N = 50_000
+N = 300_000
 
 # make train/val/test
 n_train = int(0.8 * N)
 train_x, train_y = data[:n_train, :-1], data[:n_train, -1]
-test_x, test_y = data[n_train:, :-1], data[n_train:, -1]
+test_x, test_y = data[n_train:N, :-1], data[n_train:N, -1]
 
 # normalize features
 mean = train_x.mean(axis=-2, keepdims=True)
@@ -36,6 +36,9 @@ test_x = (test_x - mean) / std
 mean, std = train_y.mean(), train_y.std()
 train_y = (train_y - mean) / std
 test_y = (test_y - mean) / std
+print(test_x.shape)
+print(test_y.shape)
+
 
 
 # Set up a model
@@ -45,9 +48,9 @@ likelihood, p_likelihood = gp_util.likelihood_gaussian()
 
 
 # Choose parameters
-num_matvecs = 20
+num_matvecs = 10
 num_samples = 1
-num_partitions = 10
+num_partitions = 50
 rank_preconditioner = 1
 
 
@@ -55,7 +58,7 @@ rank_preconditioner = 1
 v_like = jnp.ones((n_train,), dtype=float)
 sample = hutchinson.sampler_normal(v_like, num=num_samples)
 logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=1)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs)
+solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
 logpdf_fun = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
 
 
@@ -72,7 +75,7 @@ loss = gp_util.mll_exact_p(
 
 p_opt, unflatten = jax.flatten_util.ravel_pytree([p_prior, p_likelihood])
 
-
+@jax.jit
 def mll_lanczos(params, key, inputs, targets):
     p1, p2 = unflatten(params)
     val, info = loss(inputs, targets, key, params_prior=p1, params_likelihood=p2)
@@ -111,32 +114,66 @@ t1 = time.perf_counter()
 print((t1 - t0) / 1)
 
 
+# Test loss
+v_like = jnp.ones((len(test_x),), dtype=float)
+sample = hutchinson.sampler_normal(v_like, num=num_samples)
+logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=1)
+solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+logpdf_fun = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
+cholesky_partial = gp_util_linalg.low_rank_cholesky_pivot(
+    len(test_x), rank=rank_preconditioner
+)
+P = gp_util_linalg.precondition_low_rank(cholesky_partial, small_value=1e-4)
+gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
+loss_test = gp_util.mll_exact_p(
+    prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
+)
+
+@jax.jit
+def mll_lanczos_test(params, key, inputs, targets):
+    p1, p2 = unflatten(params)
+    val, info = loss_test(inputs, targets, key, params_prior=p1, params_likelihood=p2)
+    return -val, info
+
+
+key, subkey = jax.random.split(key, num=2)
+(test_nll, _aux) = mll_lanczos_test(p_opt, key, inputs=test_x, targets=test_y)
+
 progressbar = tqdm.tqdm(range(100))
 error = jnp.linalg.norm(aux["residual"] / value, ord=jnp.inf)
-progressbar.set_description(f"loss: {value:.3F}, cg_error: {error:.3F}")
+progressbar.set_description(f"loss: {value:.3F}, test-nll: {test_nll:.3F}, cg_error: {error:.3e}")
 start = time.perf_counter()
 
 loss_curve = [float(value)]
 loss_timestamps = [0.0]
+test_nlls = [test_nll]
 cg_errors = [float(error)]
 
 for _ in progressbar:
     try:
+
+        # value and grad
         key, subkey = jax.random.split(key, num=2)
         (value, aux), grads = value_and_grad_gp(
             p_opt, subkey, inputs=train_x, targets=train_y
         )
+        cg_error = jnp.linalg.norm(aux["residual"] / (1e-6 + value), ord=jnp.inf)
 
-        error = jnp.linalg.norm(aux["residual"] / value, ord=jnp.inf)
-
+        # Optimiser step
         updates, state = optimizer.update(grads, state)
         p_opt = optax.apply_updates(p_opt, updates)
-        progressbar.set_description(f"loss: {value:.3F}, cg_error: {error:.3F}")
 
+        # Test NLL
+        key, subkey = jax.random.split(key, num=2)
+        (test_nll, _aux) = mll_lanczos_test(p_opt, key, inputs=test_x, targets=test_y)
+
+        # Save values
         current = time.perf_counter()
         loss_curve.append(float(value))
         cg_errors.append(float(error))
+        test_nlls.append(float(test_nll))
         loss_timestamps.append(current - start)
+        progressbar.set_description(f"loss: {value:.3F}, test-nll: {test_nll:.3f}, cg_error: {error:.3e}")
 
     except KeyboardInterrupt:
         break

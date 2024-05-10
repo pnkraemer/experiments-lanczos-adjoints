@@ -361,16 +361,25 @@ def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
 def krylov_solve_cg_fixed_step(num_matvecs: int, /):
     pcg_solve = krylov_solve_pcg_fixed_step(num_matvecs)
 
-    def pc(A: Callable, b: jax.Array):
+    def cg(A: Callable, b: jax.Array):
         return pcg_solve(A, b, lambda v: v)
 
-    return krylov_solve_pcg_fixed_step(num_matvecs, lambda v: v)
+    return cg
+
+
+def krylov_solve_cg_fixed_step_reortho(num_matvecs: int, /):
+    pcg_solve = krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+
+    def cg(A: Callable, b: jax.Array):
+        return pcg_solve(A, b, lambda v: v)
+
+    return cg
 
 
 def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
     def pcg(A: Callable, b: jax.Array, P: Callable):
         return jax.lax.custom_linear_solve(
-            A, b, lambda *a: pcg_impl(*a, P=P), symmetric=True, has_aux=True
+            A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
         )
 
     def pcg_impl(A: Callable, b, P):
@@ -400,6 +409,55 @@ def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
             b = jnp.dot(r, z) / jnp.dot(rold, zold)
             p = z + b * p
             return x, p, r, z
+
+        return body_fun
+
+    return pcg
+
+
+def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
+    def pcg(A: Callable, b: jax.Array, P: Callable):
+        # return pcg_impl(A, b, P)
+        return jax.lax.custom_linear_solve(
+            A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
+        )
+
+    def pcg_impl(A: Callable, b, P):
+        x = jnp.zeros_like(b)
+
+        r = b - A(x)
+        z = P(r)
+        p = z
+
+        Q = jnp.zeros((len(b), num_matvecs))
+
+        body_fun = make_body(A, P)
+        init = (Q, x, p, r, z)
+        Q, x, p, r, z = jax.lax.fori_loop(0, num_matvecs, body_fun, init_val=init)
+        return x, {"residual": r, "Q": Q}
+
+    def make_body(A, P):
+        def body_fun(i, state):
+            Q, x, p, r, z = state
+
+            # Reorthogonalise
+            r = r - Q @ (Q.T @ r)
+            u = r / jnp.linalg.norm(r)
+            Q = Q.at[:, i].set(u)
+
+            # Proceed as usual
+            Ap = A(p)
+            a = jnp.dot(r, z) / (p.T @ Ap)
+            x = x + a * p
+
+            rold = r
+            r = r - a * Ap
+
+            zold = z
+            z = P(r)
+            b = jnp.dot(r, z) / jnp.dot(rold, zold)
+            p = z + b * p
+            return Q, x, p, r, z
 
         return body_fun
 

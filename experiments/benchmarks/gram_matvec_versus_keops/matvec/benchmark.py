@@ -1,13 +1,5 @@
 """Compare the efficiency of GPyTorch+KeOps to gp.gram_matvec_map()."""
 
-# todo: plot the results
-
-# todo: collect memory consumption
-
-# todo: understand how to benchmark memory in torch
-
-# todo: submit as a script
-#  (I think the memory stats might be contaminated by other processes)
 
 import argparse
 import os
