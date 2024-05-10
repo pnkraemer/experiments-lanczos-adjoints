@@ -1,6 +1,5 @@
 """Compare the efficiency of GPyTorch+KeOps to gp.gram_matvec_map()."""
 
-
 import argparse
 import os
 import time

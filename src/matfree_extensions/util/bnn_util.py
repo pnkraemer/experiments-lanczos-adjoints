@@ -10,9 +10,8 @@ from matfree import hutchinson
 from tqdm import tqdm
 
 # jax.config.update("jax_disable_jit", True)
-
 from matfree_extensions import lanczos
-from matfree_extensions.util.bnn_baselines import exact_diagonal, hutchinson_diagonal
+from matfree_extensions.util.bnn_baselines import hutchinson_diagonal
 
 # TODO: Decide if we abbreviate metric in function names
 
@@ -419,27 +418,24 @@ def callibration_loss_diagonal(
     #     likelihood="classification",
     # )
     gvp_fn = ggn_vp_parallel(
-                loss_single=loss_training_cross_entropy_single,
-                model_fun=model_apply,
-                param_unflatten=unflatten,
-            )
+        loss_single=loss_training_cross_entropy_single,
+        model_fun=model_apply,
+        param_unflatten=unflatten,
+    )
     key = jax.random.PRNGKey(0)
     get_diag_fn = functools.partial(
-                    hutchinson_diagonal,
-                    n_samples=50,
-                    key=key,
-                    computation_type="serial",
-                    num_levels=3
-                )
+        hutchinson_diagonal,
+        n_samples=50,
+        key=key,
+        computation_type="serial",
+        num_levels=3,
+    )
 
     def loss(log_alpha, params_vec, img, label):
         alpha = hyperparam_unconstrain(log_alpha)
         gvp_fn_batch = jax.tree_util.Partial(
-                                gvp_fn,
-                                params_vec=params_vec,
-                                x_batch=img,
-                                y_batch=label
-                            )
+            gvp_fn, params_vec=params_vec, x_batch=img, y_batch=label
+        )
         diag = get_diag_fn(gvp_fn=gvp_fn_batch, params=unflatten(params_vec))
         diag_vec = jax.flatten_util.ravel_pytree(diag)[0]
         diag_vec = jnp.where(diag_vec < 1e-4, 0.0, diag_vec)

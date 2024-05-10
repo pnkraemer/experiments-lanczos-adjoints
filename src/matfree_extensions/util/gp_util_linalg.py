@@ -441,7 +441,7 @@ def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
             Q, x, p, r, z = state
 
             # Reorthogonalise
-            r = r - Q @ (Q.T @ r)
+            r = r - (Q @ (Q.T @ P(r)))
             u = r / jnp.linalg.norm(r)
             Q = Q.at[:, i].set(u)
 

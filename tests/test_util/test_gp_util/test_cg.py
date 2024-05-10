@@ -31,7 +31,36 @@ def test_cg_fixed_reortho():
     solve = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(num_matvecs)
     _approximation, info = solve(lambda v: A @ v, b)
     Q = info["Q"]
-    assert jnp.allclose(Q.T @ Q, jnp.eye(num_matvecs), atol=1e-4, rtol=1e-4)
+
+    diff = Q.T @ Q - jnp.diag(jnp.diag(Q.T @ Q))
+    eps = jnp.finfo(diff.dtype).eps
+    assert jnp.amax(jnp.abs(diff)) < 10 * eps, diff
+
+
+def test_pcg_fixed_reortho():
+    eigvals = jnp.arange(1.0, 10.0)
+    A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+    b = jnp.arange(1.0, 10.0)
+    solution = jnp.linalg.solve(A, b)
+
+    # Build a preconditioner (any matrix)
+    eigvals = jnp.arange(1.0, 2.0, step=1.0 / len(A))
+    P = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+
+    # Assert that PCG computes the correct solution
+    num_matvecs = len(A)
+    solve = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+    approximation, info = solve(lambda v: A @ v, b, lambda v: P @ v)
+    assert jnp.allclose(approximation, solution, rtol=1e-3)
+
+    # Assert that PCG yields P-orthogonal vectors
+    num_matvecs = len(A) // 2
+    solve = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+    _approximation, info = solve(lambda v: A @ v, b, lambda v: P @ v)
+    Q = info["Q"]
+    diff = Q.T @ P @ Q - jnp.diag(jnp.diag(Q.T @ P @ Q))
+    eps = jnp.finfo(diff.dtype).eps
+    assert jnp.amax(jnp.abs(diff)) < 100 * eps, diff
 
 
 def test_cg_fixed_num_matvecs_improves_error():
