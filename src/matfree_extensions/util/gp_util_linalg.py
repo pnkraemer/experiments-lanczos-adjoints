@@ -358,6 +358,47 @@ def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
     return solve
 
 
+def krylov_solve_cg_fixed(num_matvecs: int, /):
+    return krylov_solve_pcg_fixed(num_matvecs, lambda v: v)
+
+
+def krylov_solve_pcg_fixed(num_matvecs: int, M: Callable, /):
+    def pcg(A: Callable, b: jax.Array):
+        return jax.lax.custom_linear_solve(A, b, pcg_impl, symmetric=True, has_aux=True)
+
+    def pcg_impl(A: Callable, b):
+        x = jnp.zeros_like(b)
+
+        r = b - A(x)
+        z = M(r)
+        p = z
+
+        body_fun = make_body(A)
+        init = (x, p, r, z)
+        x, p, r, z = jax.lax.fori_loop(0, num_matvecs, body_fun, init_val=init)
+        return x, {"residual": r}
+
+    def make_body(A):
+        def body_fun(_i, state):
+            x, p, r, z = state
+            Ap = A(p)
+            a = jnp.dot(r, z) / (p.T @ Ap)
+            x = x + a * p
+
+            rold = r
+            r = r - a * Ap
+
+            zold = z
+            z = M(r)
+            b = jnp.dot(r, z) / jnp.dot(rold, zold)
+            p = z + b * p
+            return x, p, r, z
+
+        return body_fun
+
+    return pcg
+
+
 def krylov_logdet_slq(
     krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool = False
 ):
