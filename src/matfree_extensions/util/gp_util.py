@@ -56,10 +56,10 @@ def mll_exact(
         mean_, kernel_ = likelihood(mean, kernel, params=params_likelihood)
 
         # Build matvec
-        cov = gram_matvec(kernel_)
-        idx = jnp.arange(len(inputs))
-
+    
         def cov_matvec(v):
+            cov = gram_matvec(kernel_)
+            idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
         # Evaluate the log-pdf

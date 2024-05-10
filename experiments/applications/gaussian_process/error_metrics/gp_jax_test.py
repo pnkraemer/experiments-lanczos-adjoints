@@ -19,7 +19,7 @@ if not os.path.isfile("../3droad.mat"):
 data = jnp.asarray(loadmat("../3droad.mat")["data"])
 
 N = data.shape[0]
-N = 300_000
+N = 100_000
 
 # make train/val/test
 n_train = int(0.8 * N)
@@ -36,8 +36,6 @@ test_x = (test_x - mean) / std
 mean, std = train_y.mean(), train_y.std()
 train_y = (train_y - mean) / std
 test_y = (test_y - mean) / std
-print(test_x.shape)
-print(test_y.shape)
 
 
 
@@ -51,25 +49,20 @@ likelihood, p_likelihood = gp_util.likelihood_gaussian()
 num_matvecs = 10
 num_samples = 1
 num_partitions = 50
-rank_preconditioner = 1
 
 
 # Set up linear algebra
 v_like = jnp.ones((n_train,), dtype=float)
 sample = hutchinson.sampler_normal(v_like, num=num_samples)
 logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=1)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
-logpdf_fun = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
+solve = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(num_matvecs)
+logpdf_fun = gp_util.logpdf_krylov(solve=solve, logdet=logdet)
 
 
 # Set up a loss
-cholesky_partial = gp_util_linalg.low_rank_cholesky_pivot(
-    n_train, rank=rank_preconditioner
-)
-P = gp_util_linalg.precondition_low_rank(cholesky_partial, small_value=1e-4)
 gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
-loss = gp_util.mll_exact_p(
-    prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
+loss = gp_util.mll_exact(
+    prior, likelihood, logpdf=logpdf_fun, gram_matvec=gram_matvec
 )
 
 
@@ -96,7 +89,7 @@ for _ in range(1):
     (value, aux) = fun(p_opt, key, inputs=train_x, targets=train_y)
     value.block_until_ready()
 t1 = time.perf_counter()
-print((t1 - t0) / 1)
+print("Runtie value:", (t1 - t0) / 1)
 
 
 value_and_grad_gp = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0, has_aux=True))
@@ -111,23 +104,18 @@ for _ in range(1):
     value.block_until_ready()
     grad.block_until_ready()
 t1 = time.perf_counter()
-print((t1 - t0) / 1)
+print("RUntime value and Grad:", (t1 - t0) / 1)
 
 
-# Test loss
+# Test loss (double compute budget compared to training)
 v_like = jnp.ones((len(test_x),), dtype=float)
-sample = hutchinson.sampler_normal(v_like, num=num_samples)
-logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=1)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
-logpdf_fun = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-cholesky_partial = gp_util_linalg.low_rank_cholesky_pivot(
-    len(test_x), rank=rank_preconditioner
-)
-P = gp_util_linalg.precondition_low_rank(cholesky_partial, small_value=1e-4)
+sample = hutchinson.sampler_normal(v_like, num=2*num_samples)
+logdet = gp_util_linalg.krylov_logdet_slq(2*num_matvecs, sample=sample, num_batches=2*1)
+solve = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(2*num_matvecs)
+logpdf_fun = gp_util.logpdf_krylov(solve=solve, logdet=logdet)
 gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
-loss_test = gp_util.mll_exact_p(
-    prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
-)
+loss_test = gp_util.mll_exact(
+    prior, likelihood, logpdf=logpdf_fun, gram_matvec=gram_matvec)
 
 @jax.jit
 def mll_lanczos_test(params, key, inputs, targets):
@@ -136,10 +124,47 @@ def mll_lanczos_test(params, key, inputs, targets):
     return -val, info
 
 
+@jax.jit
+def rmse_test(params, train_inputs, train_targets, test_inputs, test_targets):
+    p1, p2 = unflatten(params)
+    mean, kernel_prior = prior(train_inputs, params=p1)
+    mean_, kernel_likelihood = likelihood(mean, kernel_prior, params=p2)
+
+    # Build matvec for likelihood
+
+    def cov_matvec_likelihood(v):
+        cov = gram_matvec(kernel_likelihood)
+        idx = jnp.arange(len(train_inputs))
+        return cov(idx, idx, v)
+
+
+    K_inv_times_y, _info = solve(cov_matvec_likelihood, train_targets)
+
+    # Build matvec for prior
+
+    mean, kernel_prior = prior(test_inputs, params=p1)
+    mean_, kernel_likelihood = likelihood(mean, kernel_prior, params=p2)
+
+
+    def cov_matvec_prior(v):
+        cov = gram_matvec(kernel_prior)
+        idx = jnp.arange(len(train_inputs))
+        idy = jnp.arange(len(test_inputs))
+        return cov(idy, idx, v)
+
+    reconstruction = cov_matvec_prior(K_inv_times_y)
+    return jnp.linalg.norm(reconstruction - test_targets)/jnp.sqrt(len(test_targets))
+
+
+rmse = rmse_test(p_opt, train_x, train_y, test_x, test_y)
+print("test rmse", rmse)
+
+
+
 key, subkey = jax.random.split(key, num=2)
 (test_nll, _aux) = mll_lanczos_test(p_opt, key, inputs=test_x, targets=test_y)
 
-progressbar = tqdm.tqdm(range(100))
+progressbar = tqdm.tqdm(range(50))
 error = jnp.linalg.norm(aux["residual"] / value, ord=jnp.inf)
 progressbar.set_description(f"loss: {value:.3F}, test-nll: {test_nll:.3F}, cg_error: {error:.3e}")
 start = time.perf_counter()
@@ -147,6 +172,7 @@ start = time.perf_counter()
 loss_curve = [float(value)]
 loss_timestamps = [0.0]
 test_nlls = [test_nll]
+test_rmses = [rmse]
 cg_errors = [float(error)]
 
 for _ in progressbar:
@@ -167,13 +193,17 @@ for _ in progressbar:
         key, subkey = jax.random.split(key, num=2)
         (test_nll, _aux) = mll_lanczos_test(p_opt, key, inputs=test_x, targets=test_y)
 
+        # Test RMSE
+        rmse = rmse_test(p_opt, train_x, train_y, test_x, test_y)
+
         # Save values
         current = time.perf_counter()
         loss_curve.append(float(value))
-        cg_errors.append(float(error))
+        cg_errors.append(float(cg_error))
+        test_rmses.append(float(rmse))
         test_nlls.append(float(test_nll))
         loss_timestamps.append(current - start)
-        progressbar.set_description(f"loss: {value:.3F}, test-nll: {test_nll:.3f}, cg_error: {error:.3e}")
+        progressbar.set_description(f"loss: {value:.3F}, test-nll: {test_nll:.3f}, test-rmse {rmse:.3f}, cg_error: {cg_error:.3e}")
 
     except KeyboardInterrupt:
         break
