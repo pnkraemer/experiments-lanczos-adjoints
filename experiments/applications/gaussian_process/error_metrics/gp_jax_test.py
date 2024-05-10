@@ -23,19 +23,27 @@ if not os.path.isfile("../3droad.mat"):
     )
 
 data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
+print(jnp.shape(data))
 
 # Choose parameters
-num_matvecs = 3
-num_samples = 1
-num_partitions = 1
-rank_precon = 10
+# Memory consumption: ~ num_data**2 * num_matvecs * num_samples / num_partitions
+num_data = 400_000
+num_matvecs = 10
+num_samples_batched = 1
+num_samples_sequential = 10
+num_partitions = 200
+rank_precon = 500
 small_value = 1e-4
-num_data = 1000
 
+print(f"\nPredicting ~ {num_data**2 * num_matvecs*num_samples_batched / num_partitions*32 / 8589934592} GB of memory\n")
 
+# todo: shuffle?
 data_sampled = data[:num_data, :-1], data[:num_data, -1]
-train, test = data_util.split_train_test(*data_sampled, train=0.9)
+train, test = data_util.split_train_test(*data_sampled, train=0.95)
 (train_x, train_y), (test_x, test_y) = train, test
+print("Train:", train_x.shape, train_y.shape)
+print("Test:", test_x.shape, test_y.shape)
+
 
 # Normalise features
 mean = train_x.mean(axis=-2, keepdims=True)
@@ -50,14 +58,15 @@ test_y = (test_y - mean) / std
 
 
 # Set up a model
-k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
+k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(3,), shape_out=())
 prior = gp_util.model(gp_util.mean_zero(), k)
 likelihood, p_likelihood = gp_util.likelihood_gaussian()
 
 
 # Set up matrix-free linear algebra
+# todo: why does solve_pcg_fixed_step_reortho nan out??
 gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs)
 
 # Initialise the parameters
 key = jax.random.PRNGKey(1)
@@ -73,8 +82,8 @@ def mll_lanczos(params, *p_logdet, inputs, targets):
 
     # SLQ depends on the input size, so we define it here
     v_like = jnp.ones((len(inputs),), dtype=float)
-    sample = hutchinson.sampler_rademacher(v_like, num=num_samples)
-    logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=1)
+    sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
+    logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=num_samples_sequential)
 
     # The preconditioner also depends on the inputs size
     low_rank = gp_util_linalg.low_rank_cholesky_pivot(len(inputs), rank_precon)
@@ -111,10 +120,8 @@ def mll_cholesky(params, inputs, targets):
 def predict_mean(params, x, inputs, targets):
     p1, p2 = unflatten(params)
 
-    def solve(matvec, vec):
-        matrix = jax.jacfwd(matvec)(vec)
-        return jnp.linalg.solve(matrix, vec), {}
-
+    # Use a Krylov solver with 2x as many steps
+    solve = gp_util_linalg.krylov_solve_cg_fixed_step(2*num_matvecs)
     posterior = gp_util.condition(
         prior, likelihood, gram_matvec=gram_matvec, solve=solve
     )
@@ -194,7 +201,7 @@ for _ in progressbar:
         updates, state = optimizer.update(grads, state)
         p_opt = optax.apply_updates(p_opt, updates)
 
-        # Test NLL and RMSE
+        # # Test NLL and RMSE
         predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
         rmse = root_mean_square_error(predicted, target=test_y)
         nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)

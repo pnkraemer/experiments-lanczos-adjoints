@@ -432,6 +432,21 @@ def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
         Q = jnp.zeros((len(b), num_matvecs))
 
         body_fun = make_body(A, P)
+
+        def body(i, state):
+            Q, x, p, r, z = state 
+
+            # If the error is small, we must not do anything
+            #  because reorthogonalisation involving zero errors
+            #  would lead to NaNs and everything implodes
+            error = jnp.linalg.norm(r) / jnp.sqrt(r.size)
+            small_value = jnp.sqrt(jnp.finfo(error.dtype).eps )
+            print(error)
+            print(small_value)
+            has_converged = error < small_value
+            return jax.lax.cond(has_converged, lambda j, s: s, body_fun,  i, state)
+
+
         init = (Q, x, p, r, z)
         Q, x, p, r, z = jax.lax.fori_loop(0, num_matvecs, body_fun, init_val=init)
         return x, {"residual": r, "Q": Q}
