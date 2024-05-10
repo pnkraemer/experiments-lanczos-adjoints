@@ -13,23 +13,23 @@ import jax.numpy as jnp
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
 
-    def call(x: jax.Array, params: dict):
+    def prior(x: jax.Array, params: dict):
         mean = mean_fun(x)
-        kfun = kernel_fun(**params)
+        kernel = kernel_fun(**params)
 
         def lazy_kernel(i: int, j: int) -> jax.Array:
-            return kfun(x[i], x[j])
+            return kernel(x[i], x[j])
 
         return mean, lazy_kernel
 
-    return call
+    return prior
 
 
 # Todo: Ask for a shape input to have lengthscales per dimension?
 def likelihood_gaussian() -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def call(mean: jax.Array, lazy_kernel_prior: Callable, params: dict):
+    def likelihood(mean: jax.Array, lazy_kernel_prior: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
@@ -40,7 +40,7 @@ def likelihood_gaussian() -> tuple[Callable, dict]:
         return mean, lazy_kernel
 
     p = {"raw_noise": jnp.empty(())}
-    return call, p
+    return likelihood, p
 
 
 # todo: rename to lml,
@@ -86,8 +86,6 @@ def mll_exact_p(
         mean, kernel = prior(inputs, params=params_prior)
         mean_, kernel_ = likelihood(mean, kernel, params=params_likelihood)
 
-        precon = precondition(kernel_)
-
         # Build matvec
         cov = gram_matvec(kernel_)
 
@@ -96,6 +94,7 @@ def mll_exact_p(
             return cov(idx, idx, v)
 
         # Evaluate the log-pdf
+        precon = precondition(kernel_)
         value, info = logpdf_p(
             targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec, P=precon
         )
