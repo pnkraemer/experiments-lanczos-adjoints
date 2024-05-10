@@ -37,13 +37,13 @@ def test_preconditioning_reduces_cg_iteration_count(
     loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf, gram_matvec=gram_matvec)
 
     # Precon:
-    solve_p = gp_util_linalg.krylov_solve_cg_lineax_precondition(
+    solve_p = gp_util_linalg.krylov_solve_pcg_lineax(
         atol=tol, rtol=tol, max_steps=max_steps
     )
-    logpdf_p = gp_util.logpdf_krylov_precondition(solve_p=solve_p, logdet=logdet)
+    logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
     low_rank_impl = low_rank(n, rank=rank)
     precon = gp_util_linalg.precondition_low_rank(low_rank_impl, small_value=1e-4)
-    loss_p = gp_util.mll_exact_precondition(
+    loss_p = gp_util.mll_exact_p(
         prior,
         likelihood,
         logpdf_p=logpdf_p,
@@ -85,14 +85,14 @@ def test_preconditioning_is_differentiable(
     v_like = xs
     sample = hutchinson.sampler_normal(v_like, num=10)
     logdet = gp_util_linalg.krylov_logdet_slq(5, sample=sample, num_batches=1)
-    solve_p = gp_util_linalg.krylov_solve_cg_precondition(tol=tol, maxiter=maxiter)
+    solve_p = gp_util_linalg.krylov_solve_pcg(tol=tol, maxiter=maxiter)
     gram_matvec = gp_util_linalg.gram_matvec_full_batch()
-    logpdf_p = gp_util.logpdf_krylov_precondition(solve_p=solve_p, logdet=logdet)
+    logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
 
     # Set up an MLL
     low_rank_impl = low_rank(n, rank=rank)
     precondition = gp_util_linalg.precondition_low_rank(low_rank_impl, small_value=1e-4)
-    loss = gp_util.mll_exact_precondition(
+    loss = gp_util.mll_exact_p(
         prior,
         likelihood,
         logpdf_p=logpdf_p,
@@ -140,7 +140,7 @@ def test_preconditioning_is_differentiable(
 #     # [PRECON] Set up a GP model
 #     low_rank_impl = low_rank(n, rank=rank)
 #     P = gp_util.precondition_low_rank(low_rank_impl, small_value=1e-4)
-#     prior = gp_util.model_precondition(
+#     prior = gp_util.model_p(
 #         gp_util.mean_zero(), k, gram_matvec=gram_matvec, precondition=P
 #     )
 #     loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf_fun)

@@ -304,7 +304,7 @@ def krylov_solve_cg(*, tol, maxiter):
     return solve
 
 
-def krylov_solve_cg_precondition(*, tol, maxiter):
+def krylov_solve_pcg(*, tol, maxiter):
     def solve(A: Callable, /, b: jax.Array, P: Callable):
         result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter, M=P)
         return result, info
@@ -323,7 +323,7 @@ def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
     return solve
 
 
-def krylov_solve_cg_lineax_precondition(*, atol, rtol, max_steps):
+def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
     def solve(A: Callable, /, b: jax.Array, P: Callable):
         spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
         op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)

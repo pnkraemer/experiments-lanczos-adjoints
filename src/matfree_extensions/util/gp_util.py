@@ -71,7 +71,7 @@ def mll_exact(
     return mll
 
 
-def mll_exact_precondition(
+def mll_exact_p(
     prior: Callable,
     likelihood: Callable,
     *,
@@ -162,7 +162,9 @@ def logpdf_krylov(solve: Callable, logdet: Callable):
     return logpdf
 
 
-def logpdf_krylov_precondition(solve_p: Callable, logdet: Callable):
+def logpdf_krylov_p(solve_p: Callable, logdet: Callable):
+    """Evaluate a logpdf via preconditioned Krylov methods."""
+
     def logpdf(y, *params_logdet, mean, cov, P: Callable):
         # Log-determinant
         logdet_ = logdet(cov, *params_logdet) / 2
