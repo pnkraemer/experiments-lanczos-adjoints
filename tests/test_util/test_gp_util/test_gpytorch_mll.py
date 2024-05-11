@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import pytest_cases
 import torch
 from matfree import hutchinson
+from matfree_extensions import low_rank
 from matfree_extensions.util import gp_util, gp_util_linalg
 
 
@@ -73,6 +74,12 @@ def case_gram_matvec_map_no_checkpt():
     return gp_util_linalg.gram_matvec_map(checkpoint=False)
 
 
+@pytest_cases.case
+def case_precon_partial_cholesky():
+    cholesky = low_rank.cholesky_partial(rank=2)
+    return low_rank.preconditioner(cholesky)
+
+
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
 @pytest_cases.parametrize_with_cases("gram_matvec", cases=".", prefix="case_gram_")
 def test_mll_exact(logpdf, gram_matvec):
@@ -86,10 +93,8 @@ def test_mll_exact(logpdf, gram_matvec):
     # Set up a GP model
     k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
     prior = gp_util.model(gp_util.mean_zero(), k)
-    likelihood, p_likelihood = gp_util.likelihood_gaussian()
-    loss = gp_util.mll_exact(
-        prior, likelihood, logpdf=logpdf_fun, gram_matvec=gram_matvec
-    )
+    likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf(gram_matvec, logpdf_fun)
+    loss = gp_util.mll_exact(prior, likelihood)
 
     # Ensure that the parameters match
     p_prior["raw_lengthscale"] = lengthscale.squeeze()

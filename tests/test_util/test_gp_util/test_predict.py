@@ -10,29 +10,27 @@ def test_predict_posterior(n=100):
     xs = jnp.linspace(0, 1, num=n)
     ys = jnp.linspace(0, 1, num=n)
 
-    # Set up: model
-    k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
-    prior = gp_util.model(gp_util.mean_zero(), k)
-    likelihood, p_likelihood = gp_util.likelihood_gaussian()
-    p_likelihood["raw_noise"] = -10.0
-
     # Set up linear algebra
-    gram_matvec = gp_util_linalg.gram_matvec_full_batch()
 
     def solve(A, b):
         matrix = jax.jacfwd(A)(b)
         return jnp.linalg.solve(matrix, b), {}
 
-    # Predict
-    posterior = gp_util.condition(
-        prior, likelihood, solve=solve, gram_matvec=gram_matvec
+    # Set up: model
+    k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
+    prior = gp_util.model(gp_util.mean_zero(), k)
+    gram_matvec = gp_util_linalg.gram_matvec_full_batch()
+    likelihood, p_likelihood = gp_util.likelihood_gaussian_condition(
+        gram_matvec, solve=solve
     )
-    mean, _lazy_kernel = posterior(
-        xs, inputs=xs, targets=ys, params_prior=p_prior, params_likelihood=p_likelihood
-    )
+    p_likelihood["raw_noise"] = -10.0
 
+    # Evaluate the posterior
+    posterior = gp_util.posterior_exact(prior, likelihood)
+    mean, _ = posterior(xs, ys, params_prior=p_prior, params_likelihood=p_likelihood)
     tol = jnp.sqrt(_softplus(p_likelihood["raw_noise"]))
-    assert jnp.allclose(mean, ys, atol=tol, rtol=tol)
+    posterior_mean, _ = mean(xs)
+    assert jnp.allclose(posterior_mean, ys, atol=tol, rtol=tol)
 
 
 def _softplus(x, beta=1.0, threshold=20.0):
