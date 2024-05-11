@@ -7,7 +7,7 @@ import jax
 import jax.numpy as jnp
 
 
-def preconditioner(cholesky: Callable, /, small_value: float) -> Callable:
+def preconditioner(cholesky: Callable, /) -> Callable:
     """Turn a low-rank approximation into a preconditioner.
 
     Choose small_value small enough so that small_value * I + L L^\top \approx A
@@ -32,16 +32,18 @@ def preconditioner(cholesky: Callable, /, small_value: float) -> Callable:
         assert n <= N, (N, n)
 
         @jax.custom_vjp
-        def solve(v):
+        def solve(v: jax.Array, s: float):
             # Scale
-            s = small_value
             U = chol / jnp.sqrt(s)
             V = chol.T / jnp.sqrt(s)
             v /= s
 
-            # Solve
+            # Cholesky decompose the capacitance matrix
+            # and solve the system
             eye_n = jnp.eye(n)
-            return v - U @ jnp.linalg.solve(eye_n + V @ U, V @ v)
+            chol_cap = jax.scipy.linalg.cho_factor(eye_n + V @ U)
+            sol = jax.scipy.linalg.cho_solve(chol_cap, V @ v)
+            return v - U @ sol
 
         # Ensure that no one ever differentiates through here
 
