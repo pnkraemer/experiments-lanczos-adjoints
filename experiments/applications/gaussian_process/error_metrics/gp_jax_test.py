@@ -43,7 +43,6 @@ memory_bytes = num_data**2 * num_matvecs * num_samples_batched / num_partitions 
 memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
-# todo: shuffle?
 key = jax.random.PRNGKey(1)
 key, subkey = jax.random.split(key, num=2)
 data_sampled = data[:num_data, :-1], data[:num_data, -1]

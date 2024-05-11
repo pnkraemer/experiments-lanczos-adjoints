@@ -6,6 +6,8 @@ from io import BytesIO
 from typing import Literal, get_args
 from zipfile import ZipFile
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import requests  # type: ignore
@@ -354,8 +356,8 @@ def split_train_test(key, /, inputs, targets, *, train=0.9):
     num_data = len(inputs)
 
     # Shuffle
-    # p = jax.random.permute(key, jnp.arange(len(num_data)))
-    # inputs, targets = inputs[p], targets[p]
+    p = jax.random.permutation(key, jnp.arange(num_data))
+    inputs, targets = inputs[p], targets[p]
 
     # Select subsets
     num_train = int(train * num_data)
