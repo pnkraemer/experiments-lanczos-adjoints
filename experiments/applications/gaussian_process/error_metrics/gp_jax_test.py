@@ -28,14 +28,14 @@ print(jnp.shape(data))
 # Choose parameters
 # Memory consumption: ~ num_data**2 * num_matvecs * num_samples / num_partitions
 # todo: give cg fewer partitions than slq, because cg does not track batched samples!
-num_data = 400_000
+num_data = 400
 num_matvecs = 10
 num_matvecs_cg_eval = 10  # todo: pass to mll_test (currently this arg is not used)
-num_samples_batched = 1
-num_samples_sequential = 10
-num_partitions = 200
-rank_precon = 500
-small_value = 1e-4
+num_samples_batched = 10
+num_samples_sequential = 1
+num_partitions = 1
+rank_precon = 1
+small_value = 1e-10
 
 
 memory_bytes = num_data**2 * num_matvecs * num_samples_batched / num_partitions * 32
@@ -71,7 +71,7 @@ likelihood, p_likelihood = gp_util.likelihood_gaussian()
 # Set up matrix-free linear algebra
 # todo: why does solve_pcg_fixed_step_reortho nan out??
 gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs)
+solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
 
 # Initialise the parameters
 key = jax.random.PRNGKey(1)
@@ -141,7 +141,9 @@ def predict_mean(params, x, inputs, targets):
 key, subkey = jax.random.split(key)
 (mll_train, aux) = mll_lanczos(p_opt, subkey, inputs=train_x, targets=train_y)
 mll_train.block_until_ready()
-cg_error = jnp.linalg.norm(aux["residual"]) / jnp.sqrt(len(aux["residual"]))
+print(aux)
+residual = aux["logpdf"]["residual"]
+cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
 # Benchmark the loss function
 t0 = time.perf_counter()
@@ -202,7 +204,8 @@ for _ in progressbar:
         (value, aux), grads = value_and_grad(
             p_opt, subkey, inputs=train_x, targets=train_y
         )
-        cg_error = jnp.linalg.norm(aux["residual"] / (1e-6 + value), ord=jnp.inf)
+        residual = aux["logpdf"]["residual"]
+        cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
         # Optimiser step
         updates, state = optimizer.update(grads, state)

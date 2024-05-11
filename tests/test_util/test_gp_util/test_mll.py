@@ -5,15 +5,15 @@ import jax.numpy as jnp
 import pytest
 import pytest_cases
 from matfree import hutchinson
+from matfree_extensions import low_rank
 from matfree_extensions.util import gp_util, gp_util_linalg
 
 
 @pytest_cases.parametrize(
-    "low_rank",
-    [gp_util_linalg.low_rank_cholesky_pivot, gp_util_linalg.low_rank_cholesky],
+    "cholesky", [low_rank.cholesky_partial_pivot, low_rank.cholesky_partial]
 )
 def test_preconditioning_reduces_cg_iteration_count(
-    low_rank, n=100, rank=5, tol=1e-4, max_steps=100
+    cholesky, n=100, rank=5, tol=1e-4, max_steps=100
 ):
     # Set up: data
     xs = jnp.linspace(0, 1, num=n)
@@ -44,8 +44,8 @@ def test_preconditioning_reduces_cg_iteration_count(
             atol=tol, rtol=tol, max_steps=max_steps
         )
     logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-    low_rank_impl = low_rank(n, rank=rank)
-    precon = gp_util_linalg.precondition_low_rank(low_rank_impl, small_value=1e-4)
+    cholesky_impl = cholesky(n, rank=rank)
+    precon = low_rank.precondition(cholesky_impl, small_value=1e-4)
     loss_p = gp_util.mll_exact_p(
         prior,
         likelihood,
@@ -69,11 +69,10 @@ def test_preconditioning_reduces_cg_iteration_count(
 
 
 @pytest_cases.parametrize(
-    "low_rank",
-    [gp_util_linalg.low_rank_cholesky_pivot, gp_util_linalg.low_rank_cholesky],
+    "cholesky", [low_rank.cholesky_partial_pivot, low_rank.cholesky_partial]
 )
 def test_preconditioning_is_differentiable(
-    low_rank, n=100, rank=2, tol=1e-4, maxiter=100
+    cholesky, n=100, rank=2, tol=1e-4, maxiter=100
 ):
     # Set up a testproblem
     xs = jnp.linspace(0, 1, num=n)
@@ -93,8 +92,8 @@ def test_preconditioning_is_differentiable(
     logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
 
     # Set up an MLL
-    low_rank_impl = low_rank(n, rank=rank)
-    precondition = gp_util_linalg.precondition_low_rank(low_rank_impl, small_value=1e-4)
+    cholesky_impl = cholesky(n, rank=rank)
+    precondition = low_rank.precondition(cholesky_impl, small_value=1e-4)
     loss = gp_util.mll_exact_p(
         prior,
         likelihood,
@@ -118,11 +117,10 @@ def test_preconditioning_is_differentiable(
 
 
 @pytest_cases.parametrize(
-    "low_rank",
-    [gp_util_linalg.low_rank_cholesky_pivot, gp_util_linalg.low_rank_cholesky],
+    "cholesky", [low_rank.cholesky_partial_pivot, low_rank.cholesky_partial]
 )
 def test_preconditioning_small_value_does_not_affect_the_solution(
-    low_rank, n=100, rank=1, tol=1e-5, maxiter=100
+    cholesky, n=100, rank=1, tol=1e-5, maxiter=100
 ):
     # Set up a testproblem
     xs = jnp.linspace(0, 1, num=n)
@@ -140,14 +138,14 @@ def test_preconditioning_small_value_does_not_affect_the_solution(
     solve = gp_util_linalg.krylov_solve_pcg_jax(tol=tol, maxiter=maxiter)
     logpdf_fun = gp_util.logpdf_krylov_p(solve_p=solve, logdet=logdet)
     gram_matvec = gp_util_linalg.gram_matvec_full_batch()
-    low_rank_impl = low_rank(n, rank=rank)
+    cholesky_impl = cholesky(n, rank=rank)
 
     # Set up two different value and gradient functions
-    P = gp_util_linalg.precondition_low_rank(low_rank_impl, small_value=1e-4)
+    P = low_rank.precondition(cholesky_impl, small_value=1e-4)
     loss1 = gp_util.mll_exact_p(
         prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
     )
-    P = gp_util_linalg.precondition_low_rank(low_rank_impl, small_value=1e0)
+    P = low_rank.precondition(cholesky_impl, small_value=1e0)
     loss2 = gp_util.mll_exact_p(
         prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
     )
