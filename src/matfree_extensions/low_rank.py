@@ -7,41 +7,41 @@ import jax
 import jax.numpy as jnp
 
 
-def preconditioner(cholesky, /, small_value):
+def preconditioner(cholesky: Callable, /, small_value: float) -> Callable:
     """Turn a low-rank approximation into a preconditioner."""
 
-    def precon(lazy_kernel, /):
+    def solve_with_preconditioner(lazy_kernel, /):
         chol, info = cholesky(lazy_kernel)
         tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
 
-        def matvec(v):
+        @jax.custom_vjp
+        def solve(v):
             tmp1 = v
             tmp2 = chol.T @ v
             return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
 
         # Ensure that no one ever differentiates through here
 
-        def matvec_fwd(v):
-            return matvec(v), None
+        def fwd(v):
+            return solve(v), None
 
-        def matvec_bwd(_cache, _vjp_incoming):
+        def bwd(_cache, _vjp_incoming):
             raise RuntimeError
 
-        matvec = jax.custom_vjp(matvec)
-        matvec.defvjp(matvec_fwd, matvec_bwd)
+        solve.defvjp(fwd, bwd)
 
-        return matvec, info
+        return solve, info
 
-    return precon
+    return solve_with_preconditioner
 
 
-def cholesky_partial(n: int, rank: int):
+def cholesky_partial(n: int, rank: int) -> Callable:
     """Compute a partial Cholesky factorisation."""
 
     def cholesky(lazy_kernel: Callable):
         i, j = 0, 0
         element, aux_args = jax.closure_convert(lazy_kernel, i, j)
-        return _cholesky(lazy_kernel, *aux_args)
+        return _cholesky(element, *aux_args)
 
     @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
     def _cholesky(lazy_kernel: Callable, *params):
@@ -85,7 +85,7 @@ def _cholesky_partial_body(fn: Callable, n: int, *args):
     return body
 
 
-def cholesky_partial_pivot(n: int, rank: int):
+def cholesky_partial_pivot(n: int, rank: int) -> Callable:
     """Compute a partial Cholesky factorisation with pivoting."""
     if rank > n:
         msg = f"Rank exceeds n: {rank} >= {n}."

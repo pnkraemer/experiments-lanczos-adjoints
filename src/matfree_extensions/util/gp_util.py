@@ -53,17 +53,17 @@ def mll_exact(
     def mll(inputs, targets, *p_logpdf, params_prior: dict, params_likelihood: dict):
         # Evaluate the marginal data likelihood
         mean, kernel = prior(inputs, params=params_prior)
-        mean_, kernel_ = likelihood(mean, kernel, params=params_likelihood)
+        mean, lazy_kernel = likelihood(mean, kernel, params=params_likelihood)
 
         # Build matvec
 
         def cov_matvec(v):
-            cov = gram_matvec(kernel_)
+            cov = gram_matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
         # Evaluate the log-pdf
-        value, info = logpdf(targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec)
+        value, info = logpdf(targets, *p_logpdf, mean=mean, cov_matvec=cov_matvec)
 
         # Normalise by the number of data points because GPyTorch does
         return value / len(inputs), {"logpdf": info}
@@ -71,6 +71,8 @@ def mll_exact(
     return mll
 
 
+# todo: if we build the preconditioner internally,
+#  GP-model constructors simplify a lot
 def mll_exact_p(
     prior: Callable,
     likelihood: Callable,
@@ -84,19 +86,19 @@ def mll_exact_p(
     def mll(inputs, targets, *p_logpdf, params_prior: dict, params_likelihood: dict):
         # Evaluate the marginal data likelihood
         mean, kernel = prior(inputs, params=params_prior)
-        mean_, kernel_ = likelihood(mean, kernel, params=params_likelihood)
+        mean, lazy_kernel = likelihood(mean, kernel, params=params_likelihood)
 
         # Build matvec
-        cov = gram_matvec(kernel_)
 
         def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
         # Evaluate the log-pdf
-        precon, info_p = precondition(kernel_)
+        precon, info_p = precondition(lazy_kernel)
         value, info_l = logpdf_p(
-            targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec, P=precon
+            targets, *p_logpdf, mean=mean, cov_matvec=cov_matvec, P=precon
         )
 
         # Normalise by the number of data points because GPyTorch does
