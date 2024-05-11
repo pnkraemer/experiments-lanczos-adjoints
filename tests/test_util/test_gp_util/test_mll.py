@@ -64,7 +64,7 @@ def test_preconditioning_reduces_cg_iteration_count(
     )
 
     # Compare values
-    assert info_p["num_steps"] < info["num_steps"]
+    assert info_p["logpdf"]["num_steps"] < info["logpdf"]["num_steps"]
     assert jnp.allclose(value_p, value, atol=1e-1, rtol=1e-1)
 
 

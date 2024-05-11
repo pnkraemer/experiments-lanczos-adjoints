@@ -33,11 +33,14 @@ num_matvecs = 10
 num_matvecs_cg_eval = 10  # todo: pass to mll_test (currently this arg is not used)
 num_samples_batched = 1
 num_samples_sequential = 10
-num_partitions = 200  
+num_partitions = 200
 rank_precon = 500
 small_value = 1e-4
 
-print(f"\nPredicting ~ {num_data**2 * num_matvecs*num_samples_batched / num_partitions*32 / 8589934592} GB of memory\n")
+memory_gb = (
+    num_data**2 * num_matvecs * num_samples_batched / num_partitions * 32 / 8589934592
+)
+print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
 # todo: shuffle?
 data_sampled = data[:num_data, :-1], data[:num_data, -1]
@@ -85,7 +88,9 @@ def mll_lanczos(params, *p_logdet, inputs, targets):
     # SLQ depends on the input size, so we define it here
     v_like = jnp.ones((len(inputs),), dtype=float)
     sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
-    logdet = gp_util_linalg.krylov_logdet_slq(num_matvecs, sample=sample, num_batches=num_samples_sequential)
+    logdet = gp_util_linalg.krylov_logdet_slq(
+        num_matvecs, sample=sample, num_batches=num_samples_sequential
+    )
 
     # The preconditioner also depends on the inputs size
     low_rank = gp_util_linalg.low_rank_cholesky_pivot(len(inputs), rank_precon)
@@ -123,7 +128,7 @@ def predict_mean(params, x, inputs, targets):
     p1, p2 = unflatten(params)
 
     # Use a Krylov solver with 2x as many steps
-    solve = gp_util_linalg.krylov_solve_cg_fixed_step(2*num_matvecs)
+    solve = gp_util_linalg.krylov_solve_cg_fixed_step(2 * num_matvecs)
     posterior = gp_util.condition(
         prior, likelihood, gram_matvec=gram_matvec, solve=solve
     )

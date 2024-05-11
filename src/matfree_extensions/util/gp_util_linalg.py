@@ -138,7 +138,7 @@ def precondition_low_rank(low_rank, small_value):
     """Turn a low-rank approximation into a preconditioner."""
 
     def precon(matrix, /):
-        chol = low_rank(matrix)
+        chol, info = low_rank(matrix)
         tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
 
         def matvec(v):
@@ -146,7 +146,7 @@ def precondition_low_rank(low_rank, small_value):
             tmp2 = chol.T @ v
             return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
 
-        # Ensure that no one ever differentiates through here :)
+        # Ensure that no one ever differentiates through here
 
         def matvec_fwd(v):
             return matvec(v), None
@@ -157,7 +157,7 @@ def precondition_low_rank(low_rank, small_value):
         matvec = jax.custom_vjp(matvec)
         matvec.defvjp(matvec_fwd, matvec_bwd)
 
-        return matvec
+        return matvec, info
 
     return precon
 
@@ -175,7 +175,7 @@ def low_rank_cholesky(n: int, rank: int):
         body = _low_rank_cholesky_body(matrix_element, n, *params)
 
         L = jnp.zeros((n, rank))
-        return jax.lax.fori_loop(0, rank, body, L)
+        return jax.lax.fori_loop(0, rank, body, L), {}
 
     # Ensure that no one ever differentiates through here
 
@@ -215,6 +215,9 @@ def _low_rank_cholesky_body(fn: Callable, n: int, *args):
 
 def low_rank_cholesky_pivot(n: int, rank: int):
     """Compute a partial Cholesky factorisation with pivoting."""
+    if rank > n:
+        msg = f"Rank exceeds n: {rank} >= {n}."
+        raise ValueError(msg)
 
     def cholesky(matrix_element: Callable):
         i, j = 0, 0
@@ -228,9 +231,9 @@ def low_rank_cholesky_pivot(n: int, rank: int):
         L = jnp.zeros((n, rank))
         P = jnp.arange(n)
 
-        init = (L, P, P)
-        (L, P, _matrix) = jax.lax.fori_loop(0, rank, body, init)
-        return _pivot_invert(L, P)
+        init = (L, P, P, True)
+        (L, P, _matrix, success) = jax.lax.fori_loop(0, rank, body, init)
+        return _pivot_invert(L, P), {"success": success}
 
     # Ensure that no one ever differentiates through here
 
@@ -263,7 +266,7 @@ def _low_rank_cholesky_pivot_body(fn: Callable, n: int, *args):
         return fun(permute[idx], permute[idx])
 
     def body(i, carry):
-        L, P, P_matrix = carry
+        L, P, P_matrix, success = carry
 
         # Access the matrix
         diagonal = matrix_diagonal_p(permute=P_matrix)
@@ -283,13 +286,18 @@ def _low_rank_cholesky_pivot_body(fn: Callable, n: int, *args):
         column = matrix_column_p(i, permute=P_matrix)
 
         # Perform a Cholesky step
-        l_ii = jnp.sqrt(element - jnp.dot(L[i], L[i]))
+        # (The first line could also be accessed via
+        #  residual_diag[k], but it might
+        #  be more readable to do it again)
+        l_ii_squared = element - jnp.dot(L[i], L[i])
+        l_ii = jnp.sqrt(l_ii_squared)
         l_ji = column - L @ L[i, :]
         l_ji /= l_ii
+        success = jnp.logical_and(success, l_ii_squared > 0.0)
 
         # Update the estimate
         L = L.at[:, i].set(l_ji)
-        return L, P, P_matrix
+        return L, P, P_matrix, success
 
     return body
 
@@ -397,6 +405,7 @@ def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
     def make_body(A, P):
         def body_fun(_i, state):
             x, p, r, z = state
+
             Ap = A(p)
             a = jnp.dot(r, z) / (p.T @ Ap)
             x = x + a * p
@@ -417,7 +426,6 @@ def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
 
 def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
     def pcg(A: Callable, b: jax.Array, P: Callable):
-        # return pcg_impl(A, b, P)
         return jax.lax.custom_linear_solve(
             A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
         )
@@ -430,49 +438,45 @@ def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
         p = z
 
         Q = jnp.zeros((len(b), num_matvecs))
-
-        body_fun = make_body(A, P)
-
-        def body(i, state):
-            Q, x, p, r, z = state 
-
-            # If the error is small, we must not do anything
-            #  because reorthogonalisation involving zero errors
-            #  would lead to NaNs and everything implodes
-            error = jnp.linalg.norm(r) / jnp.sqrt(r.size)
-            small_value = jnp.sqrt(jnp.finfo(error.dtype).eps )
-            print(error)
-            print(small_value)
-            has_converged = error < small_value
-            return jax.lax.cond(has_converged, lambda j, s: s, body_fun,  i, state)
-
-
-        init = (Q, x, p, r, z)
-        Q, x, p, r, z = jax.lax.fori_loop(0, num_matvecs, body_fun, init_val=init)
+        step = pcg_step(A, P)
+        init = (Q, x, p, r, z, jnp.dot(r, z))
+        Q, x, _p, r, _z, _rzdot = jax.lax.fori_loop(0, num_matvecs, step, init)
         return x, {"residual": r, "Q": Q}
 
-    def make_body(A, P):
+    def pcg_step(A, P):
         def body_fun(i, state):
-            Q, x, p, r, z = state
+            Q, x, p, r, z, rzdot = state
 
-            # Reorthogonalise
-            r = r - (Q @ (Q.T @ P(r)))
-            u = r / jnp.linalg.norm(r)
-            Q = Q.at[:, i].set(u)
-
-            # Proceed as usual
+            # Start as usual
             Ap = A(p)
-            a = jnp.dot(r, z) / (p.T @ Ap)
+            a = _div(rzdot, (p.T @ Ap))
             x = x + a * p
 
-            rold = r
-            r = r - a * Ap
+            # Update
+            r, rold = r - a * Ap, r
+            z, zold = P(r), z
 
-            zold = z
+            # Reorthogonalise (don't forget to reassign z!)
+            Q = Q.at[:, i].set(_div(rold, jnp.sqrt(rzdot)))
+            r = r - Q @ (Q.T @ z)
             z = P(r)
-            b = jnp.dot(r, z) / jnp.dot(rold, zold)
+
+            # Complete the step
+            rzdot = jnp.dot(r, z)
+            b = _div(rzdot, jnp.dot(rold, zold))
             p = z + b * p
-            return Q, x, p, r, z
+            return Q, x, p, r, z, rzdot
+
+        def _div(a, b, /):
+            # Save division, so that the iteration can
+            # run beyond convergence without dividing by zero
+            eps = jnp.finfo(a.dtype).eps ** 2
+
+            # Pre-clip to make all paths in where()
+            #  NaN-free. See:
+            #  https://github.com/google/jax/issues/5039
+            b_safe = jnp.where(jnp.abs(b) > eps, b, 1.0)
+            return jnp.where(jnp.abs(b) > eps, a / b_safe, a)
 
         return body_fun
 

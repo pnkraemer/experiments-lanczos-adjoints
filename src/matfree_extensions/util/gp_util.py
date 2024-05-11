@@ -66,7 +66,7 @@ def mll_exact(
         value, info = logpdf(targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec)
 
         # Normalise by the number of data points because GPyTorch does
-        return value / len(inputs), info
+        return value / len(inputs), {"logpdf": info}
 
     return mll
 
@@ -94,13 +94,13 @@ def mll_exact_p(
             return cov(idx, idx, v)
 
         # Evaluate the log-pdf
-        precon = precondition(kernel_)
-        value, info = logpdf_p(
+        precon, info_p = precondition(kernel_)
+        value, info_l = logpdf_p(
             targets, *p_logpdf, mean=mean_, cov_matvec=cov_matvec, P=precon
         )
 
         # Normalise by the number of data points because GPyTorch does
-        return value / len(inputs), info
+        return value / len(inputs), {"precondition": info_p, "logpdf": info_l}
 
     return mll
 
