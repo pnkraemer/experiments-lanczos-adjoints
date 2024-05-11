@@ -45,7 +45,7 @@ def test_preconditioning_reduces_cg_iteration_count(
         )
     logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
     cholesky_impl = cholesky(n, rank=rank)
-    precon = low_rank.precondition(cholesky_impl, small_value=1e-4)
+    precon = low_rank.preconditioner(cholesky_impl, small_value=1e-4)
     loss_p = gp_util.mll_exact_p(
         prior,
         likelihood,
@@ -93,7 +93,7 @@ def test_preconditioning_is_differentiable(
 
     # Set up an MLL
     cholesky_impl = cholesky(n, rank=rank)
-    precondition = low_rank.precondition(cholesky_impl, small_value=1e-4)
+    precondition = low_rank.preconditioner(cholesky_impl, small_value=1e-4)
     loss = gp_util.mll_exact_p(
         prior,
         likelihood,
@@ -141,11 +141,11 @@ def test_preconditioning_small_value_does_not_affect_the_solution(
     cholesky_impl = cholesky(n, rank=rank)
 
     # Set up two different value and gradient functions
-    P = low_rank.precondition(cholesky_impl, small_value=1e-4)
+    P = low_rank.preconditioner(cholesky_impl, small_value=1e-4)
     loss1 = gp_util.mll_exact_p(
         prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
     )
-    P = low_rank.precondition(cholesky_impl, small_value=1e0)
+    P = low_rank.preconditioner(cholesky_impl, small_value=1e0)
     loss2 = gp_util.mll_exact_p(
         prior, likelihood, logpdf_p=logpdf_fun, gram_matvec=gram_matvec, precondition=P
     )

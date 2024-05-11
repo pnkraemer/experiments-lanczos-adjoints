@@ -30,6 +30,6 @@ def test_value_versus_cholesky(implementation: Callable, n=10):
     y = jax.random.normal(key3, shape=(n,))
 
     reference = gp_util.logpdf_cholesky()
-    truth, _info = reference(y, mean=mean, cov=lambda s: cov @ s)
+    truth, _info = reference(y, mean=mean, cov_matvec=lambda s: cov @ s)
     approx, _info = implementation(y, mean=mean, cov=lambda s: cov @ s)
     assert jnp.allclose(truth, approx)

@@ -46,7 +46,7 @@ def test_pcg_fixed_reortho():
 
     # Build a preconditioner
     cpp = low_rank.cholesky_partial_pivot(len(A), len(A) // 2)
-    precon = low_rank.precondition(cpp, 1e0)
+    precon = low_rank.preconditioner(cpp, 1e0)
     pre, info = precon(lambda i, j: A[i, j])
     P = jax.vmap(pre, in_axes=-1, out_axes=-1)(jnp.eye(len(b)))
     assert info["success"]

@@ -7,11 +7,11 @@ import jax
 import jax.numpy as jnp
 
 
-def precondition(low_rank, small_value):
+def preconditioner(cholesky, /, small_value):
     """Turn a low-rank approximation into a preconditioner."""
 
-    def precon(matrix, /):
-        chol, info = low_rank(matrix)
+    def precon(lazy_kernel, /):
+        chol, info = cholesky(lazy_kernel)
         tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
 
         def matvec(v):
@@ -38,27 +38,26 @@ def precondition(low_rank, small_value):
 def cholesky_partial(n: int, rank: int):
     """Compute a partial Cholesky factorisation."""
 
-    def cholesky(matrix_element: Callable):
+    def cholesky(lazy_kernel: Callable):
         i, j = 0, 0
-        element, aux_args = jax.closure_convert(matrix_element, i, j)
-        return call_backend(element, *aux_args)
+        element, aux_args = jax.closure_convert(lazy_kernel, i, j)
+        return _cholesky(lazy_kernel, *aux_args)
 
     @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
-    def call_backend(matrix_element: Callable, *params):
-        body = _cholesky_partial_body(matrix_element, n, *params)
-
-        L = jnp.zeros((n, rank))
-        return jax.lax.fori_loop(0, rank, body, L), {}
+    def _cholesky(lazy_kernel: Callable, *params):
+        step = _cholesky_partial_body(lazy_kernel, n, *params)
+        chol = jnp.zeros((n, rank))
+        return jax.lax.fori_loop(0, rank, step, chol), {}
 
     # Ensure that no one ever differentiates through here
 
-    def fwd(*args):
-        return call_backend(*args), None
+    def _fwd(*args):
+        return _cholesky(*args), None
 
-    def bwd(*_args):
+    def _bwd(*_args):
         raise RuntimeError
 
-    call_backend.defvjp(fwd, bwd)
+    _cholesky.defvjp(_fwd, _bwd)
 
     return cholesky
 

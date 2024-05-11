@@ -19,6 +19,7 @@ dev = [
     "pre-commit",
     "pytest",
     "pytest-cases",
+    "pytest-xdist",
     # Ensure that PyTorch is installed:
     # https://pytorch.org/
     # and ensure that JAX is installed:
@@ -106,7 +107,7 @@ split-on-trailing-comma = false
 
 
 [tool.pytest.ini_options]
-addopts = "-v"
+addopts = "-v -n auto"
 testpaths = [
     "tests"
 ]
