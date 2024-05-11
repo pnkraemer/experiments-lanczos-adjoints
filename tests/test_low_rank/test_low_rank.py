@@ -59,3 +59,31 @@ def test_pivoting_improves_the_estimate(n=10, rank=5):
     error_nopivot = jnp.linalg.norm(cov - nopivot @ nopivot.T)
     error_pivot = jnp.linalg.norm(cov - pivot @ pivot.T)
     assert error_pivot < error_nopivot
+
+
+def test_preconditioner_solves_correctly(n=10):
+    # Create a relatively ill-conditioned matrix
+    cov_eig = 2.0 ** jnp.arange(-n // 2, n // 2, step=1.0)
+    cov = test_util.symmetric_matrix_from_eigenvalues(cov_eig)
+
+    def element(i, j):
+        return cov[i, j]
+
+    # Assert that the Cholesky decomposition is full-rank.
+    cholesky = low_rank.cholesky_partial_pivot(n, n)
+    matrix, _info = cholesky(element)
+    assert jnp.allclose(matrix @ matrix.T, cov)
+
+    # Choose the small_value as well as possible
+    eps = jnp.finfo(matrix.dtype).eps / jnp.linalg.cond(cov)
+    small_value = jnp.sqrt(eps)
+
+    # Derive the preconditioner
+    precondition = low_rank.preconditioner(cholesky, small_value=small_value)
+    solve, info = precondition(element)
+
+    # Test that the preconditioner solves correctly
+    b = jnp.arange(1.0, 1 + len(cov))
+    received = solve(b)
+    expected = jnp.linalg.solve(cov, b)
+    assert jnp.allclose(received, expected, rtol=10 * jnp.sqrt(small_value))

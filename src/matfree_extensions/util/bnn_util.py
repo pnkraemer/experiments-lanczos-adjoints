@@ -9,7 +9,6 @@ import jax.numpy as jnp
 from matfree import hutchinson
 from tqdm import tqdm
 
-# jax.config.update("jax_disable_jit", True)
 from matfree_extensions import lanczos
 from matfree_extensions.util.bnn_baselines import hutchinson_diagonal
 

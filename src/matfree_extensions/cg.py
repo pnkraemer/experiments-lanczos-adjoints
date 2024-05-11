@@ -17,6 +17,8 @@ def cg_fixed_step(num_matvecs: int, /):
 
 def pcg_fixed_step(num_matvecs: int, /):
     def pcg(A: Callable, b: jax.Array, P: Callable):
+        # Uncomment if we want to print values from inside the solver:
+        return pcg_impl(A, b, P=P)
         return jax.lax.custom_linear_solve(
             A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
         )
@@ -38,7 +40,7 @@ def pcg_fixed_step(num_matvecs: int, /):
             x, p, r, z = state
 
             Ap = A(p)
-            a = jnp.dot(r, z) / (p.T @ Ap)
+            a = _safe_divide(jnp.dot(r, z), (p.T @ Ap))
             x = x + a * p
 
             rold = r
@@ -46,7 +48,8 @@ def pcg_fixed_step(num_matvecs: int, /):
 
             zold = z
             z = P(r)
-            b = jnp.dot(r, z) / jnp.dot(rold, zold)
+
+            b = _safe_divide(jnp.dot(r, z), jnp.dot(rold, zold))
             p = z + b * p
             return x, p, r, z
 
@@ -89,7 +92,7 @@ def pcg_fixed_step_reortho(num_matvecs: int, /):
 
             # Start as usual
             Ap = A(p)
-            a = _div(rzdot, (p.T @ Ap))
+            a = _safe_divide(rzdot, (p.T @ Ap))
             x = x + a * p
 
             # Update
@@ -97,27 +100,33 @@ def pcg_fixed_step_reortho(num_matvecs: int, /):
             z, zold = P(r), z
 
             # Reorthogonalise (don't forget to reassign z!)
-            Q = Q.at[:, i].set(_div(rold, jnp.sqrt(rzdot)))
+            Q = Q.at[:, i].set(_safe_divide(rold, jnp.sqrt(rzdot)))
             r = r - Q @ (Q.T @ z)
             z = P(r)
 
             # Complete the step
             rzdot = jnp.dot(r, z)
-            b = _div(rzdot, jnp.dot(rold, zold))
+            b = _safe_divide(rzdot, jnp.dot(rold, zold))
             p = z + b * p
             return Q, x, p, r, z, rzdot
-
-        def _div(a, b, /):
-            # Save division, so that the iteration can
-            # run beyond convergence without dividing by zero
-            eps = jnp.finfo(a.dtype).eps ** 2
-
-            # Pre-clip to make all paths in where()
-            #  NaN-free. See:
-            #  https://github.com/google/jax/issues/5039
-            b_safe = jnp.where(jnp.abs(b) > eps, b, 1.0)
-            return jnp.where(jnp.abs(b) > eps, a / b_safe, a)
 
         return body_fun
 
     return pcg
+
+
+def _safe_divide(a, b, /):
+    # Safe division, so that the iteration can
+    # run beyond convergence without dividing by zero.
+    # This happens in CG when the iteration has converged,
+    # in which case we would compute 0/0. By using this
+    # safe_divide, we avoid NaNs.
+    # See, e.g.
+    # https://github.com/cornellius-gp/linear_operator/blob/main/linear_operator/utils/linear_cg.py
+
+    # Pre-clip to make all paths in where()
+    #  NaN-free. See:
+    #  https://github.com/google/jax/issues/5039
+    eps = jnp.finfo(a.dtype).eps ** 2
+    b_safe = jnp.where(jnp.abs(b) > eps, b, 1.0)
+    return jnp.where(jnp.abs(b) > eps, a / b_safe, a)

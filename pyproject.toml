@@ -107,7 +107,7 @@ split-on-trailing-comma = false
 
 
 [tool.pytest.ini_options]
-addopts = "-v -n auto"
+addopts = "-v"
 testpaths = [
     "tests"
 ]

@@ -8,17 +8,40 @@ import jax.numpy as jnp
 
 
 def preconditioner(cholesky: Callable, /, small_value: float) -> Callable:
-    """Turn a low-rank approximation into a preconditioner."""
+    """Turn a low-rank approximation into a preconditioner.
+
+    Choose small_value small enough so that small_value * I + L L^\top \approx A
+    holds, but large enough so that x \\mapsto x / small_value**2
+    behaves well.
+
+    A good guess is the square-root of machine precision.
+    If the matrix is ill-conditioned, decrease the value.
+    Some experimentation suggests that
+
+    small_value = sqrt(machine_epsilon / cond(A))
+
+    leads to decent results.
+    """
 
     def solve_with_preconditioner(lazy_kernel, /):
         chol, info = cholesky(lazy_kernel)
-        tmp = small_value * jnp.eye(len(chol.T)) + (chol.T @ chol)
+
+        # Assert that the low-rank matrix is tall,
+        # not wide (better safe than sorry)
+        N, n = jnp.shape(chol)
+        assert n <= N, (N, n)
 
         @jax.custom_vjp
         def solve(v):
-            tmp1 = v
-            tmp2 = chol.T @ v
-            return tmp1 - chol @ jnp.linalg.solve(tmp, tmp2) / small_value
+            # Scale
+            s = small_value
+            U = chol / jnp.sqrt(s)
+            V = chol.T / jnp.sqrt(s)
+            v /= s
+
+            # Solve
+            eye_n = jnp.eye(n)
+            return v - U @ jnp.linalg.solve(eye_n + V @ U, V @ v)
 
         # Ensure that no one ever differentiates through here
 
@@ -37,6 +60,12 @@ def preconditioner(cholesky: Callable, /, small_value: float) -> Callable:
 
 def cholesky_partial(n: int, rank: int) -> Callable:
     """Compute a partial Cholesky factorisation."""
+    if rank > n:
+        msg = f"Rank exceeds n: {rank} >= {n}."
+        raise ValueError(msg)
+    if rank < 1:
+        msg = f"Rank must be positive, but {rank} < {1}."
+        raise ValueError(msg)
 
     def cholesky(lazy_kernel: Callable):
         i, j = 0, 0
@@ -89,6 +118,9 @@ def cholesky_partial_pivot(n: int, rank: int) -> Callable:
     """Compute a partial Cholesky factorisation with pivoting."""
     if rank > n:
         msg = f"Rank exceeds n: {rank} >= {n}."
+        raise ValueError(msg)
+    if rank < 1:
+        msg = f"Rank must be positive, but {rank} < {1}."
         raise ValueError(msg)
 
     def cholesky(matrix_element: Callable):
