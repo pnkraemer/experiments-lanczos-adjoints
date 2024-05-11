@@ -1,5 +1,6 @@
 """Gaussian process models."""
 
+import functools
 from typing import Callable
 
 import jax
@@ -16,95 +17,162 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     def prior(x: jax.Array, params: dict):
         mean = mean_fun(x)
         kernel = kernel_fun(**params)
-
-        def lazy_kernel(i: int, j: int) -> jax.Array:
-            return kernel(x[i], x[j])
-
-        return mean, lazy_kernel
+        return mean, (kernel, x)
 
     return prior
 
 
-# Todo: Ask for a shape input to have lengthscales per dimension?
-def likelihood_gaussian() -> tuple[Callable, dict]:
+#
+#
+# # Todo: Ask for a shape input to have lengthscales per dimension?
+# def likelihood_gaussian_p(
+#     *, gram_matvec: Callable, precondition: Callable | None
+# ) -> tuple[Callable, dict]:
+#     """Construct a Gaussian likelihood."""
+#
+#     def likelihood(mean: jax.Array, lazy_kernel_prior, params: dict):
+#         # Apply a soft-plus because GPyTorch does
+#         raw_noise = params["raw_noise"]
+#         noise = _softplus(raw_noise)
+#
+#         def lazy_kernel(i: int, j: int):
+#             kernel_prior, x_ = lazy_kernel_prior
+#             return kernel_prior(x[i], x[j]) + noise * (i == j)
+#
+#         def cov_matvec(v):
+#             cov = gram_matvec(lazy_kernel)
+#             idx = jnp.arange(len(mean))
+#             return cov(idx, idx, v)
+#
+#         if precondition is not None:
+#             cholesky, info = precondition(lazy_kernel, len(mean))
+#             info = {"preconditioner": cholesky, "preconditioner_info": info}
+#             return mean, (cov_matvec, info)
+#
+#         return mean, (cov_matvec, {})
+#
+#     p = {"raw_noise": jnp.empty(())}
+#     return likelihood, p
+
+
+def likelihood_gaussian_pdf(
+    gram_matvec: Callable, logpdf: Callable
+) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def likelihood(mean: jax.Array, lazy_kernel_prior: Callable, params: dict):
+    def likelihood(mean: jax.Array, lazy_kernel_prior, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
 
         def lazy_kernel(i: int, j: int):
-            return lazy_kernel_prior(i, j) + noise * (i == j)
+            kernel_prior, x_ = lazy_kernel_prior
+            return kernel_prior(x_[i], x_[j]) + noise * (i == j)
 
-        return mean, lazy_kernel
+        def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
+            idx = jnp.arange(len(mean))
+            return cov(idx, idx, v)
+
+        def logpdf_partial(targets, *p_logpdf):
+            return logpdf(targets, *p_logpdf, mean=mean, cov_matvec=cov_matvec)
+
+        return logpdf_partial
 
     p = {"raw_noise": jnp.empty(())}
     return likelihood, p
 
 
-# todo: rename to lml,
-#  because it is a log-marginal-likelihood, not a marginal-log-likelihood
-def mll_exact(
-    prior: Callable, likelihood: Callable, *, logpdf: Callable, gram_matvec: Callable
-) -> Callable:
-    """Construct a marginal log-likelihood function."""
+def likelihood_gaussian_condition(
+    gram_matvec: Callable, solve: Callable
+) -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
 
-    def mll(inputs, targets, *p_logpdf, params_prior: dict, params_likelihood: dict):
-        # Evaluate the marginal data likelihood
-        mean, kernel = prior(inputs, params=params_prior)
-        mean, lazy_kernel = likelihood(mean, kernel, params=params_likelihood)
+    def likelihood(mean: jax.Array, lazy_kernel_prior, params: dict):
+        # Apply a soft-plus because GPyTorch does
+        raw_noise = params["raw_noise"]
+        noise = _softplus(raw_noise)
 
-        # Build matvec
+        def lazy_kernel(i: int, j: int):
+            kernel_prior, x_ = lazy_kernel_prior
+            return kernel_prior(x_[i], x_[j]) + noise * (i == j)
 
         def cov_matvec(v):
             cov = gram_matvec(lazy_kernel)
-            idx = jnp.arange(len(inputs))
+            idx = jnp.arange(len(mean))
             return cov(idx, idx, v)
 
-        # Evaluate the log-pdf
-        value, info = logpdf(targets, *p_logpdf, mean=mean, cov_matvec=cov_matvec)
+        def condition_partial(xs, targets):
+            weights, info = solve(cov_matvec, targets - mean)
 
-        # Normalise by the number of data points because GPyTorch does
-        return value / len(inputs), {"logpdf": info}
+            def cov_matvec_prior(v):
+                kernel_prior, x_ = lazy_kernel_prior
+                cov = gram_matvec(kernel_prior)
+                return cov(xs, x_, v)
 
-    return mll
+            return mean + cov_matvec_prior(weights), {"solve": info}
+
+        return condition_partial
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
 
 
 # todo: if we build the preconditioner internally,
 #  GP-model constructors simplify a lot
-def mll_exact_p(
-    prior: Callable,
-    likelihood: Callable,
-    *,
-    logpdf_p: Callable,
-    gram_matvec: Callable,
-    precondition: Callable,
-) -> Callable:
+def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
     def mll(inputs, targets, *p_logpdf, params_prior: dict, params_likelihood: dict):
         # Evaluate the marginal data likelihood
         mean, kernel = prior(inputs, params=params_prior)
-        mean, lazy_kernel = likelihood(mean, kernel, params=params_likelihood)
-
-        # Build matvec
-
-        def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
-            idx = jnp.arange(len(inputs))
-            return cov(idx, idx, v)
-
-        # Evaluate the log-pdf
-        precon, info_p = precondition(lazy_kernel)
-        value, info_l = logpdf_p(
-            targets, *p_logpdf, mean=mean, cov_matvec=cov_matvec, P=precon
-        )
+        loss = likelihood_pdf(mean, kernel, params=params_likelihood)
+        value, info_pdf = loss(targets, *p_logpdf)
 
         # Normalise by the number of data points because GPyTorch does
-        return value / len(inputs), {"precondition": info_p, "logpdf": info_l}
+        return value / len(inputs), {"logpdf": info_pdf}
+
+        # If the likelihood provides a preconditioner, let's go:
+        # if "preconditioner" in info_lklhd.keys():
+        #     preconditioner = info_lklhd["preconditioner"]
+        #     value, info_pdf = logpdf(
+        #         targets,
+        #         *p_logpdf,
+        #         mean=mean,
+        #         cov_matvec=cov_matvec,
+        #         preconditioner=preconditioner,
+        #     )
+        #     return value / len(inputs), {"likelihood": info_lklhd, "logpdf": info_pdf}
 
     return mll
+
+
+def posterior_exact(prior: Callable, likelihood: Callable) -> Callable:
+    """Construct a marginal log-likelihood function."""
+
+    def posterior(inputs, targets, params_prior: dict, params_likelihood: dict):
+        # Evaluate the marginal data likelihood
+        mean, kernel = prior(inputs, params=params_prior)
+        condition = likelihood(mean, kernel, params=params_likelihood)
+        return functools.partial(condition, targets=targets), {}
+        # value, info_pdf = condition(targets, *p_logpdf)
+        #
+        # # Normalise by the number of data points because GPyTorch does
+        # return value / len(inputs), {"logpdf": info_pdf}
+
+        # If the likelihood provides a preconditioner, let's go:
+        # if "preconditioner" in info_lklhd.keys():
+        #     preconditioner = info_lklhd["preconditioner"]
+        #     value, info_pdf = logpdf(
+        #         targets,
+        #         *p_logpdf,
+        #         mean=mean,
+        #         cov_matvec=cov_matvec,
+        #         preconditioner=preconditioner,
+        #     )
+        #     return value / len(inputs), {"likelihood": info_lklhd, "logpdf": info_pdf}
+
+    return posterior
 
 
 def logpdf_scipy_stats() -> Callable:
@@ -321,7 +389,14 @@ def _softplus(x, beta=1.0, threshold=20.0):
     )
 
 
-def condition(prior, likelihood, *, solve: Callable, gram_matvec: Callable):
+def condition_krylov(solve) -> Callable:
+    def condition_(y, /, *, mean, cov_matvec: Callable):
+        return solve(cov_matvec, y - mean)
+
+    return condition_
+
+
+def condition_(prior, likelihood, *, solve: Callable, gram_matvec: Callable):
     def posterior(xs, *, inputs, targets, params_prior: dict, params_likelihood: dict):
         # Compute (K + s^2 I)^{-1} y
         k_inv_times_y, _info = _representer_weights(
@@ -341,25 +416,18 @@ def condition(prior, likelihood, *, solve: Callable, gram_matvec: Callable):
 
     def _representer_weights(inputs, targets, params_prior, params_likelihood):
         mean, kernel_prior = prior(inputs, params=params_prior)
-        mean_, kernel_likelihood = likelihood(
+        mean_, (cov_matvec_likelihood, _) = likelihood(
             mean, kernel_prior, params=params_likelihood
         )
 
         # Build matvec for likelihood
-
-        def cov_matvec_likelihood(v):
-            cov = gram_matvec(kernel_likelihood)
-
-            i = jnp.arange(len(inputs))
-            return cov(i, i, v)
-
         return solve(cov_matvec_likelihood, targets - mean_)
 
     def _mean(xs, /, weights, *, inputs, params_prior):
-        prior_mean, kernel_prior = prior(xs, params=params_prior)
+        prior_mean, lazy_kernel = prior(xs, params=params_prior)
 
         def cov_matvec_prior(v):
-            cov = gram_matvec(kernel_prior)
+            cov = gram_matvec(lazy_kernel)
             i = jnp.arange(len(xs))
             j = jnp.arange(len(inputs))
             return cov(i, j, v)

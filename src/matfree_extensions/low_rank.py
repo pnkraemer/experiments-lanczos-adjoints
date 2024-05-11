@@ -23,8 +23,8 @@ def preconditioner(cholesky: Callable, /) -> Callable:
     leads to decent results.
     """
 
-    def solve_with_preconditioner(lazy_kernel, /):
-        chol, info = cholesky(lazy_kernel)
+    def solve_with_preconditioner(lazy_kernel, /, nrows: int):
+        chol, info = cholesky(lazy_kernel, nrows)
 
         # Assert that the low-rank matrix is tall,
         # not wide (better safe than sorry)
@@ -60,22 +60,23 @@ def preconditioner(cholesky: Callable, /) -> Callable:
     return solve_with_preconditioner
 
 
-def cholesky_partial(n: int, rank: int) -> Callable:
+def cholesky_partial(*, rank: int) -> Callable:
     """Compute a partial Cholesky factorisation."""
-    if rank > n:
-        msg = f"Rank exceeds n: {rank} >= {n}."
-        raise ValueError(msg)
-    if rank < 1:
-        msg = f"Rank must be positive, but {rank} < {1}."
-        raise ValueError(msg)
 
-    def cholesky(lazy_kernel: Callable):
+    def cholesky(lazy_kernel: Callable, n: int, /):
+        if rank > n:
+            msg = f"Rank exceeds n: {rank} >= {n}."
+            raise ValueError(msg)
+        if rank < 1:
+            msg = f"Rank must be positive, but {rank} < {1}."
+            raise ValueError(msg)
+
         i, j = 0, 0
         element, aux_args = jax.closure_convert(lazy_kernel, i, j)
-        return _cholesky(element, *aux_args)
+        return _cholesky(element, n, *aux_args)
 
-    @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
-    def _cholesky(lazy_kernel: Callable, *params):
+    @functools.partial(jax.custom_vjp, nondiff_argnums=[0, 1])
+    def _cholesky(lazy_kernel: Callable, n: int, *params):
         step = _cholesky_partial_body(lazy_kernel, n, *params)
         chol = jnp.zeros((n, rank))
         return jax.lax.fori_loop(0, rank, step, chol), {}
