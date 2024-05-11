@@ -6,17 +6,17 @@ import jax
 import jax.numpy as jnp
 import pytest_cases
 from matfree import test_util
-from matfree_extensions.util import gp_util_linalg
+from matfree_extensions import low_rank
 
 
 def case_low_rank_cholesky():
     """Construct a partial Cholesky factorisation."""
-    return gp_util_linalg.low_rank_cholesky
+    return low_rank.cholesky_partial
 
 
 def case_low_rank_cholesky_pivot():
     """Construct a partial Cholesky factorisation with pivoting."""
-    return gp_util_linalg.low_rank_cholesky_pivot
+    return low_rank.cholesky_partial_pivot
 
 
 @pytest_cases.parametrize_with_cases("low_rank", ".")
@@ -53,8 +53,8 @@ def test_pivoting_improves_the_estimate(n=10, rank=5):
     def element(i, j):
         return cov[i, j]
 
-    nopivot, _info = gp_util_linalg.low_rank_cholesky(n, rank)(element)
-    pivot, _info = gp_util_linalg.low_rank_cholesky_pivot(n, rank)(element)
+    nopivot, _info = low_rank.cholesky_partial(n, rank)(element)
+    pivot, _info = low_rank.cholesky_partial_pivot(n, rank)(element)
 
     error_nopivot = jnp.linalg.norm(cov - nopivot @ nopivot.T)
     error_pivot = jnp.linalg.norm(cov - pivot @ pivot.T)

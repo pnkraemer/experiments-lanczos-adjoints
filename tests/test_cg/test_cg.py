@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 from matfree import test_util
-from matfree_extensions.util import gp_util_linalg
+from matfree_extensions import cg, low_rank
 
 
 def test_cg_fixed():
@@ -12,7 +12,7 @@ def test_cg_fixed():
     b = jnp.arange(1.0, 10.0)
     solution = jnp.linalg.solve(A, b)
 
-    solve = gp_util_linalg.krylov_solve_cg_fixed_step(len(A))
+    solve = cg.cg_fixed_step(len(A))
     approximation, _info = solve(lambda v: A @ v, b)
     assert jnp.allclose(approximation, solution)
 
@@ -24,12 +24,12 @@ def test_cg_fixed_reortho():
     solution = jnp.linalg.solve(A, b)
 
     num_matvecs = len(A)
-    solve = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(num_matvecs)
+    solve = cg.cg_fixed_step_reortho(num_matvecs)
     approximation, info = solve(lambda v: A @ v, b)
     assert jnp.allclose(approximation, solution)
 
     num_matvecs = len(A) // 2
-    solve = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(num_matvecs)
+    solve = cg.cg_fixed_step_reortho(num_matvecs)
     _approximation, info = solve(lambda v: A @ v, b)
     Q = info["Q"]
 
@@ -45,8 +45,8 @@ def test_pcg_fixed_reortho():
     solution = jnp.linalg.solve(A, b)
 
     # Build a preconditioner
-    low_rank = gp_util_linalg.low_rank_cholesky_pivot(len(A), len(A) // 2)
-    precon = gp_util_linalg.precondition_low_rank(low_rank, 1e0)
+    cpp = low_rank.cholesky_partial_pivot(len(A), len(A) // 2)
+    precon = low_rank.precondition(cpp, 1e0)
     pre, info = precon(lambda i, j: A[i, j])
     P = jax.vmap(pre, in_axes=-1, out_axes=-1)(jnp.eye(len(b)))
     assert info["success"]
@@ -54,9 +54,9 @@ def test_pcg_fixed_reortho():
     # Assert that PCG w/ two reorthos beats PCG w/ one reortho
     #  beats PCG w/o reortho
     num_matvecs = len(A) - 1  # exceed N to test some corner cases
-    solve = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs)
+    solve = cg.pcg_fixed_step(num_matvecs)
     approximation_wo, info_wo = solve(lambda v: A @ v, b, lambda v: P @ v)
-    solve = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+    solve = cg.pcg_fixed_step_reortho(num_matvecs)
     approximation_w, info_w = solve(lambda v: A @ v, b, lambda v: P @ v)
     error_wo = jnp.amax(jnp.abs(approximation_wo - solution))
     error_w = jnp.amax(jnp.abs(approximation_w - solution))
@@ -65,7 +65,7 @@ def test_pcg_fixed_reortho():
 
     # Assert that PCG yields P-orthogonal vectors
     num_matvecs = len(A)
-    solve = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
+    solve = cg.pcg_fixed_step_reortho(num_matvecs)
     _approximation, info = solve(lambda v: A @ v, b, lambda v: P @ v)
     Q = info["Q"]
     jnp.allclose(Q.T @ P @ Q, jnp.eye(len(Q.T)))
@@ -78,7 +78,7 @@ def test_cg_fixed_num_matvecs_improves_error():
 
     error = 100.0
     for n in range(len(A)):
-        solve = gp_util_linalg.krylov_solve_cg_fixed_step(n)
+        solve = cg.cg_fixed_step(n)
         _approximation, info = solve(lambda v: A @ v, b)
 
         error_now = jnp.linalg.norm(info["residual"])
