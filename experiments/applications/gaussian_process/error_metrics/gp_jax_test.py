@@ -37,9 +37,9 @@ num_partitions = 200
 rank_precon = 500
 small_value = 1e-4
 
-memory_gb = (
-    num_data**2 * num_matvecs * num_samples_batched / num_partitions * 32 / 8589934592
-)
+
+memory_bytes = num_data**2 * num_matvecs * num_samples_batched / num_partitions * 32
+memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
 # todo: shuffle?
