@@ -132,7 +132,7 @@ def cholesky_partial_pivot(*, rank: int) -> Callable:
         element, aux_args = jax.closure_convert(matrix_element, i, j)
         return call_backend(element, n, *aux_args)
 
-    @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
+    @functools.partial(jax.custom_vjp, nondiff_argnums=[0, 1])
     def call_backend(matrix_element: Callable, n: int, *params):
         body = _cholesky_partial_pivot_body(matrix_element, n, *params)
 

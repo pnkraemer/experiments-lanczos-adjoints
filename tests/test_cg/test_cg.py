@@ -2,6 +2,7 @@
 
 import jax
 import jax.numpy as jnp
+import pytest
 from matfree import test_util
 from matfree_extensions import cg, low_rank
 
@@ -55,7 +56,7 @@ def test_pcg_fixed_reortho():
 
     # Assert that PCG w/ two reorthos beats PCG w/ one reortho
     #  beats PCG w/o reortho
-    num_matvecs = len(A) - 1  # exceed N to test some corner cases
+    num_matvecs = len(A) * 2  # exceed N to test some corner cases
     solve = cg.pcg_fixed_step(num_matvecs)
     approximation_wo, info_wo = solve(lambda v: A @ v + sigma * v, b, lambda v: P @ v)
     solve = cg.pcg_fixed_step_reortho(num_matvecs)
@@ -64,7 +65,6 @@ def test_pcg_fixed_reortho():
     error_w = jnp.amax(jnp.abs(approximation_w - solution))
     print(error_w, error_wo)
     assert error_w < 0.95 * error_wo
-    assert False
 
     # Assert that PCG yields P-orthogonal vectors
     num_matvecs = len(A)
@@ -72,9 +72,10 @@ def test_pcg_fixed_reortho():
     _approximation, info = solve(lambda v: A @ v + sigma * v, b, lambda v: P @ v)
     Q = info["Q"]
     jnp.allclose(Q.T @ P @ Q, jnp.eye(len(Q.T)))
+    pytest.fail()  # something is still not great...
 
 
-def test_cg_fixed_num_matvecs_improves_error():
+def test_cg_more_matvecs_improve_error():
     eigvals = jnp.arange(1.0, 10.0)
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
     b = jnp.arange(1.0, 10.0)
@@ -87,3 +88,19 @@ def test_cg_fixed_num_matvecs_improves_error():
         error_now = jnp.linalg.norm(info["residual"])
         assert error_now < error, (n, error_now)
         error = error_now
+
+
+def test_cg_reortho_improves_error():
+    eigvals = 1.5 ** jnp.arange(-20.0, 20.0)
+    A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+    b = jnp.arange(1.0, 1.0 + len(A))
+
+    solve = cg.cg_fixed_step(len(A) // 2)
+    _approximation, info = solve(lambda v: A @ v, b)
+    error_without = jnp.linalg.norm(info["residual"])
+
+    solve = cg.cg_fixed_step_reortho(len(A) // 2)
+    _approximation, info = solve(lambda v: A @ v, b)
+    error_with = jnp.linalg.norm(info["residual"])
+
+    assert error_with < 0.9 * error_without

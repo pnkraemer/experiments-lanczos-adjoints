@@ -60,7 +60,7 @@ def case_logpdf_krylov_reuse():
 
 
 @pytest_cases.case
-def case_logpdf_p_krylov():
+def case_precon_logpdf_krylov():
     # maaaany samples because we test for exactness
     num_batches, num_samples = 2, 50_000
 
@@ -94,13 +94,13 @@ def case_gram_matvec_map_no_checkpt():
 
 
 @pytest_cases.case
-def case_precon_partial_cholesky():
+def case_preconditioner_partial_cholesky():
     cholesky = low_rank.cholesky_partial(rank=1)
     return low_rank.preconditioner(cholesky)
 
 
 @pytest_cases.case
-def case_precon_partial_cholesky_pivot():
+def case_preconditioner_partial_cholesky_pivot():
     cholesky = low_rank.cholesky_partial_pivot(rank=1)
     return low_rank.preconditioner(cholesky)
 
@@ -140,9 +140,11 @@ def test_mll_exact(logpdf, gram_matvec):
     assert jnp.allclose(value_ref, value, rtol=small_value, atol=small_value)
 
 
-@pytest_cases.parametrize_with_cases("logpdf_p", cases=".", prefix="case_logpdf_p_")
+@pytest_cases.parametrize_with_cases(
+    "logpdf_p", cases=".", prefix="case_precon_logpdf_"
+)
 @pytest_cases.parametrize_with_cases("gram_matvec", cases=".", prefix="case_gram_")
-@pytest_cases.parametrize_with_cases("precon", cases=".", prefix="case_precon_")
+@pytest_cases.parametrize_with_cases("precon", cases=".", prefix="case_preconditioner_")
 def test_mll_exact_precondition(logpdf_p, gram_matvec, precon):
     # Compute the reference model
     reference = _model_and_mll_via_gpytorch()

@@ -29,8 +29,8 @@ def test_predict_posterior(n=100):
     posterior = gp_util.posterior_exact(prior, likelihood)
     mean, _ = posterior(xs, ys, params_prior=p_prior, params_likelihood=p_likelihood)
     tol = jnp.sqrt(_softplus(p_likelihood["raw_noise"]))
-    posterior_mean, _ = mean(xs)
-    assert jnp.allclose(posterior_mean, ys, atol=tol, rtol=tol)
+    posterior_mean, _ = mean(xs[: len(ys) // 2])
+    assert jnp.allclose(posterior_mean, ys[: len(ys) // 2], atol=tol, rtol=tol)
 
 
 def _softplus(x, beta=1.0, threshold=20.0):

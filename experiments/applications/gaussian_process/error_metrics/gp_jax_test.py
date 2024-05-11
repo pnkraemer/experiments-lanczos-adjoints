@@ -8,6 +8,7 @@ import optax
 import scipy.io
 import tqdm
 from matfree import hutchinson
+from matfree_extensions import low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, gp_util_linalg
 
 
@@ -28,7 +29,7 @@ print(jnp.shape(data))
 # Choose parameters
 # Memory consumption: ~ num_data**2 * num_matvecs * num_samples / num_partitions
 # todo: give cg fewer partitions than slq, because cg does not track batched samples!
-num_data = 400
+num_data = 40
 num_matvecs = 10
 num_matvecs_cg_eval = 10  # todo: pass to mll_test (currently this arg is not used)
 num_samples_batched = 10
@@ -43,8 +44,10 @@ memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
 # todo: shuffle?
+key = jax.random.PRNGKey(1)
+key, subkey = jax.random.split(key, num=2)
 data_sampled = data[:num_data, :-1], data[:num_data, -1]
-train, test = data_util.split_train_test(*data_sampled, train=0.95)
+train, test = data_util.split_train_test(subkey, *data_sampled, train=0.95)
 (train_x, train_y), (test_x, test_y) = train, test
 print("Train:", train_x.shape, train_y.shape)
 print("Test:", test_x.shape, test_y.shape)
@@ -62,19 +65,32 @@ train_y = (train_y - mean) / std
 test_y = (test_y - mean) / std
 
 
+# Set up linear algebra
+gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
+solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs)
+v_like = jnp.ones((len(train_x),), dtype=float)
+sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
+logdet = gp_util_linalg.krylov_logdet_slq(
+    num_matvecs, sample=sample, num_batches=num_samples_sequential
+)
+cholesky = low_rank.cholesky_partial_pivot(rank=rank_precon)
+precondition = low_rank.preconditioner(cholesky)
+logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
+likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
+    gram_matvec, logpdf_p, precondition
+)
+
 # Set up a model
 k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(3,), shape_out=())
 prior = gp_util.model(gp_util.mean_zero(), k)
-likelihood, p_likelihood = gp_util.likelihood_gaussian()
 
+# Build the loss and evaluate
+loss = gp_util.mll_exact(prior, likelihood)
 
 # Set up matrix-free linear algebra
 # todo: why does solve_pcg_fixed_step_reortho nan out??
-gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step_reortho(num_matvecs)
 
 # Initialise the parameters
-key = jax.random.PRNGKey(1)
 key, subkey = jax.random.split(key)
 p_prior, p_likelihood = exp_util.tree_random_like(subkey, (p_prior, p_likelihood))
 p_opt, unflatten = jax.flatten_util.ravel_pytree([p_prior, p_likelihood])
@@ -84,30 +100,6 @@ p_opt, unflatten = jax.flatten_util.ravel_pytree([p_prior, p_likelihood])
 @jax.jit
 def mll_lanczos(params, *p_logdet, inputs, targets):
     p1, p2 = unflatten(params)
-
-    # SLQ depends on the input size, so we define it here
-    v_like = jnp.ones((len(inputs),), dtype=float)
-    sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
-    logdet = gp_util_linalg.krylov_logdet_slq(
-        num_matvecs, sample=sample, num_batches=num_samples_sequential
-    )
-
-    # The preconditioner also depends on the inputs size
-    low_rank = gp_util_linalg.low_rank_cholesky_pivot(len(inputs), rank_precon)
-    precondition = gp_util_linalg.precondition_low_rank(
-        low_rank, small_value=small_value
-    )
-    logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-
-    # Build the loss and evaluate
-    loss = gp_util.mll_exact_p(
-        prior,
-        likelihood,
-        logpdf_p=logpdf_p,
-        gram_matvec=gram_matvec,
-        precondition=precondition,
-    )
-
     val, info = loss(inputs, targets, *p_logdet, params_prior=p1, params_likelihood=p2)
     return -val, info
 
@@ -115,26 +107,31 @@ def mll_lanczos(params, *p_logdet, inputs, targets):
 @jax.jit
 def mll_cholesky(params, inputs, targets):
     p1, p2 = unflatten(params)
-    logpdf = gp_util.logpdf_scipy_stats()
 
     # Build the loss and evaluate
-    loss = gp_util.mll_exact(prior, likelihood, logpdf=logpdf, gram_matvec=gram_matvec)
-    val, info = loss(inputs, targets, params_prior=p1, params_likelihood=p2)
+    logpdf = gp_util.logpdf_scipy_stats()
+    lklhd, _ = gp_util.likelihood_gaussian_pdf(gram_matvec, logpdf)
+
+    loss_fun = gp_util.mll_exact(prior, lklhd)
+    val, info = loss_fun(inputs, targets, params_prior=p1, params_likelihood=p2)
     return -val, info
+
+
+# Use a Krylov solver with 2x as many steps for evaluation
+solve = gp_util_linalg.krylov_solve_cg_fixed_step(2 * num_matvecs)
+likelihood_, _p_likelihood_ = gp_util.likelihood_gaussian_condition(gram_matvec, solve)
+
+posterior = gp_util.posterior_exact(prior, likelihood_)
 
 
 @jax.jit
 def predict_mean(params, x, inputs, targets):
     p1, p2 = unflatten(params)
 
-    # Use a Krylov solver with 2x as many steps
-    solve = gp_util_linalg.krylov_solve_cg_fixed_step(2 * num_matvecs)
-    posterior = gp_util.condition(
-        prior, likelihood, gram_matvec=gram_matvec, solve=solve
+    postmean, _ = posterior(
+        inputs=inputs, targets=targets, params_prior=p1, params_likelihood=p2
     )
-    return posterior(
-        x, inputs=inputs, targets=targets, params_prior=p1, params_likelihood=p2
-    )
+    return postmean(x)
 
 
 # Pre-compile the loss function

@@ -70,6 +70,9 @@ def cg_fixed_step_reortho(num_matvecs: int, /):
 
 def pcg_fixed_step_reortho(num_matvecs: int, /):
     def pcg(A: Callable, b: jax.Array, P: Callable):
+        # Uncomment if we want to print values from inside the solver:
+        # return pcg_impl(A, b, P=P)
+
         return jax.lax.custom_linear_solve(
             A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
         )
@@ -93,6 +96,8 @@ def pcg_fixed_step_reortho(num_matvecs: int, /):
 
             # Start as usual
             Ap = A(p)
+            # print(p.T @ Ap)
+
             a = _safe_divide(rzdot, (p.T @ Ap))
             x = x + a * p
 
@@ -101,9 +106,12 @@ def pcg_fixed_step_reortho(num_matvecs: int, /):
             z, zold = P(r), z
 
             # Reorthogonalise (don't forget to reassign z!)
-            Q = Q.at[:, i].set(_safe_divide(rold, jnp.sqrt(rzdot)))
+            Q = Q.at[:, i].set(_safe_divide(rold, _safe_sqrt(rzdot)))
+            # print("ORTHO", Q.T @ z)
             r = r - Q @ (Q.T @ z)
             z = P(r)
+            # print("ORTHO", Q.T @ z)
+            # print()
 
             # Complete the step
             rzdot = jnp.dot(r, z)
@@ -131,3 +139,8 @@ def _safe_divide(a, b, /):
     eps = jnp.finfo(a.dtype).eps ** 2
     b_safe = jnp.where(jnp.abs(b) > eps, b, 1.0)
     return jnp.where(jnp.abs(b) > eps, a / b_safe, a)
+
+
+def _safe_sqrt(a, /):
+    a_safe = jnp.where(a > 0.0, a, 0.0)
+    return jnp.sqrt(a_safe)
