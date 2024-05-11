@@ -22,39 +22,6 @@ def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     return prior
 
 
-#
-#
-# # Todo: Ask for a shape input to have lengthscales per dimension?
-# def likelihood_gaussian_p(
-#     *, gram_matvec: Callable, precondition: Callable | None
-# ) -> tuple[Callable, dict]:
-#     """Construct a Gaussian likelihood."""
-#
-#     def likelihood(mean: jax.Array, lazy_kernel_prior, params: dict):
-#         # Apply a soft-plus because GPyTorch does
-#         raw_noise = params["raw_noise"]
-#         noise = _softplus(raw_noise)
-#
-#         def lazy_kernel(i: int, j: int):
-#             kernel_prior, x_ = lazy_kernel_prior
-#             return kernel_prior(x[i], x[j]) + noise * (i == j)
-#
-#         def cov_matvec(v):
-#             cov = gram_matvec(lazy_kernel)
-#             idx = jnp.arange(len(mean))
-#             return cov(idx, idx, v)
-#
-#         if precondition is not None:
-#             cholesky, info = precondition(lazy_kernel, len(mean))
-#             info = {"preconditioner": cholesky, "preconditioner_info": info}
-#             return mean, (cov_matvec, info)
-#
-#         return mean, (cov_matvec, {})
-#
-#     p = {"raw_noise": jnp.empty(())}
-#     return likelihood, p
-
-
 def likelihood_gaussian_pdf(
     gram_matvec: Callable, logpdf: Callable
 ) -> tuple[Callable, dict]:
@@ -76,6 +43,43 @@ def likelihood_gaussian_pdf(
 
         def logpdf_partial(targets, *p_logpdf):
             return logpdf(targets, *p_logpdf, mean=mean, cov_matvec=cov_matvec)
+
+        return logpdf_partial
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
+
+
+def likelihood_gaussian_pdf_p(
+    gram_matvec: Callable, logpdf_p: Callable, precondition: Callable
+) -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
+
+    def likelihood(mean: jax.Array, lazy_kernel_prior, params: dict):
+        # Apply a soft-plus because GPyTorch does
+        raw_noise = params["raw_noise"]
+        noise = _softplus(raw_noise)
+
+        def lazy_kernel(i: int, j: int):
+            kernel_prior, x_ = lazy_kernel_prior
+            return kernel_prior(x_[i], x_[j]) + noise * (i == j)
+
+        def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
+            idx = jnp.arange(len(mean))
+            return cov(idx, idx, v)
+
+        pre, info = precondition(lazy_kernel, len(mean))
+
+        def logpdf_partial(targets, *p_logpdf):
+            val, aux = logpdf_p(
+                targets,
+                *p_logpdf,
+                mean=mean,
+                cov_matvec=cov_matvec,
+                P=lambda v: pre(v, noise),
+            )
+            return val, {"precondition": info, "logpdf": aux}
 
         return logpdf_partial
 

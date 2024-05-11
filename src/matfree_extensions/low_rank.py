@@ -47,8 +47,8 @@ def preconditioner(cholesky: Callable, /) -> Callable:
 
         # Ensure that no one ever differentiates through here
 
-        def fwd(v):
-            return solve(v), None
+        def fwd(v, s):
+            return solve(v, s), None
 
         def bwd(_cache, _vjp_incoming):
             raise RuntimeError
@@ -117,22 +117,23 @@ def _cholesky_partial_body(fn: Callable, n: int, *args):
     return body
 
 
-def cholesky_partial_pivot(n: int, rank: int) -> Callable:
+def cholesky_partial_pivot(*, rank: int) -> Callable:
     """Compute a partial Cholesky factorisation with pivoting."""
-    if rank > n:
-        msg = f"Rank exceeds n: {rank} >= {n}."
-        raise ValueError(msg)
-    if rank < 1:
-        msg = f"Rank must be positive, but {rank} < {1}."
-        raise ValueError(msg)
 
-    def cholesky(matrix_element: Callable):
+    def cholesky(matrix_element: Callable, n: int):
+        if rank > n:
+            msg = f"Rank exceeds n: {rank} >= {n}."
+            raise ValueError(msg)
+        if rank < 1:
+            msg = f"Rank must be positive, but {rank} < {1}."
+            raise ValueError(msg)
+
         i, j = 0, 0
         element, aux_args = jax.closure_convert(matrix_element, i, j)
-        return call_backend(element, *aux_args)
+        return call_backend(element, n, *aux_args)
 
     @functools.partial(jax.custom_vjp, nondiff_argnums=[0])
-    def call_backend(matrix_element: Callable, *params):
+    def call_backend(matrix_element: Callable, n: int, *params):
         body = _cholesky_partial_pivot_body(matrix_element, n, *params)
 
         L = jnp.zeros((n, rank))

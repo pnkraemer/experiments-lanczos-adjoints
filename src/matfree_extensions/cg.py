@@ -18,7 +18,8 @@ def cg_fixed_step(num_matvecs: int, /):
 def pcg_fixed_step(num_matvecs: int, /):
     def pcg(A: Callable, b: jax.Array, P: Callable):
         # Uncomment if we want to print values from inside the solver:
-        return pcg_impl(A, b, P=P)
+        # return pcg_impl(A, b, P=P)
+
         return jax.lax.custom_linear_solve(
             A, b, lambda a, r: pcg_impl(a, r, P=P), symmetric=True, has_aux=True
         )

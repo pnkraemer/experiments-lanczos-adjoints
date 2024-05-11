@@ -18,7 +18,7 @@ def test_full_rank_cholesky_reconstructs_matrix(low_rank, n=5):
     cov_eig = 1.0 + jax.random.uniform(key, shape=(n,), dtype=float)
     cov = test_util.symmetric_matrix_from_eigenvalues(cov_eig)
 
-    approximation, _info = low_rank(n, n)(lambda i, j: cov[i, j])
+    approximation, _info = low_rank(rank=n)(lambda i, j: cov[i, j], n)
 
     tol = jnp.finfo(approximation.dtype).eps
     assert jnp.allclose(approximation @ approximation.T, cov, atol=tol, rtol=tol)
@@ -31,11 +31,11 @@ def test_full_rank_nopivot_matches_cholesky(n=10):
     cholesky = jnp.linalg.cholesky(cov)
 
     # Sanity check: pivoting should definitely not satisfy this:
-    received, info = low_rank.cholesky_partial_pivot(n, n)(lambda i, j: cov[i, j])
+    received, info = low_rank.cholesky_partial_pivot(rank=n)(lambda i, j: cov[i, j], n)
     assert not jnp.allclose(received, cholesky)
 
     # But without pivoting, we should get there!
-    received, info = low_rank.cholesky_partial(n, n)(lambda i, j: cov[i, j])
+    received, info = low_rank.cholesky_partial(rank=n)(lambda i, j: cov[i, j], n)
     assert jnp.allclose(received, cholesky, atol=1e-6)
 
 
@@ -48,7 +48,7 @@ def test_output_the_right_shapes(low_rank: Callable, n=4, rank=4):
     cov_eig = 0.1 + jax.random.uniform(key, shape=(n,))
     cov = test_util.symmetric_matrix_from_eigenvalues(cov_eig)
 
-    approximation, _info = low_rank(n, rank)(lambda i, j: cov[i, j])
+    approximation, _info = low_rank(rank=rank)(lambda i, j: cov[i, j], n)
     assert approximation.shape == (n, rank)
 
 
@@ -61,8 +61,8 @@ def test_pivoting_improves_the_estimate(n=10, rank=5):
     def element(i, j):
         return cov[i, j]
 
-    nopivot, _info = low_rank.cholesky_partial(n, rank)(element)
-    pivot, _info = low_rank.cholesky_partial_pivot(n, rank)(element)
+    nopivot, _info = low_rank.cholesky_partial(rank=rank)(element, n)
+    pivot, _info = low_rank.cholesky_partial_pivot(rank=rank)(element, n)
 
     error_nopivot = jnp.linalg.norm(cov - nopivot @ nopivot.T)
     error_pivot = jnp.linalg.norm(cov - pivot @ pivot.T)
@@ -78,8 +78,8 @@ def test_preconditioner_solves_correctly(n=10):
         return cov[i, j]
 
     # Assert that the Cholesky decomposition is full-rank.
-    cholesky = low_rank.cholesky_partial(n, n)
-    matrix, _info = cholesky(element)
+    cholesky = low_rank.cholesky_partial(rank=n)
+    matrix, _info = cholesky(element, n)
     assert jnp.allclose(matrix @ matrix.T, cov)
 
     # Solve the linear system
@@ -92,7 +92,7 @@ def test_preconditioner_solves_correctly(n=10):
 
     # Derive the preconditioner
     precondition = low_rank.preconditioner(cholesky)
-    solve, info = precondition(element)
+    solve, info = precondition(element, n)
 
     # Test that the preconditioner solves correctly
     received = solve(b, small_value)
