@@ -29,24 +29,32 @@ print(jnp.shape(data))
 # Choose parameters
 # Memory consumption: ~ num_data**2 * num_matvecs * num_samples / num_partitions
 # todo: give cg fewer partitions than slq, because cg does not track batched samples!
-num_data = 40
-num_matvecs = 10
-num_matvecs_cg_eval = 10  # todo: pass to mll_test (currently this arg is not used)
+num_data = 1000
+num_matvecs_train_lanczos = 10
+num_matvecs_train_cg = 10
+num_matvecs_eval_cg = 10  # todo: pass to mll_test (currently this arg is not used)
 num_samples_batched = 10
 num_samples_sequential = 1
-num_partitions = 1
+num_partitions_train = 1  # todo: split for cg and lanczos?
 rank_precon = 1
 small_value = 1e-10
 
 
-memory_bytes = num_data**2 * num_matvecs * num_samples_batched / num_partitions * 32
+memory_bytes = (
+    num_data**2
+    * num_matvecs_train_lanczos
+    * num_samples_batched
+    / num_partitions_train
+    * 32
+)
 memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
 key = jax.random.PRNGKey(1)
 key, subkey = jax.random.split(key, num=2)
 data_sampled = data[:num_data, :-1], data[:num_data, -1]
-train, test = data_util.split_train_test(subkey, *data_sampled, train=0.95)
+train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.95)
+# train, test = data_util.split_train_test(*data_sampled, train=0.95)
 (train_x, train_y), (test_x, test_y) = train, test
 print("Train:", train_x.shape, train_y.shape)
 print("Test:", test_x.shape, test_y.shape)
@@ -64,17 +72,19 @@ train_y = (train_y - mean) / std
 test_y = (test_y - mean) / std
 
 
-# Set up linear algebra
-gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(num_batches=num_partitions)
-solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs)
+# Set up linear algebra for training
+solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs_train_cg)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
 logdet = gp_util_linalg.krylov_logdet_slq(
-    num_matvecs, sample=sample, num_batches=num_samples_sequential
+    num_matvecs_train_lanczos, sample=sample, num_batches=num_samples_sequential
 )
 cholesky = low_rank.cholesky_partial_pivot(rank=rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
+gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(
+    num_batches=num_partitions_train
+)
 likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
     gram_matvec, logpdf_p, precondition
 )
@@ -117,7 +127,7 @@ def mll_cholesky(params, inputs, targets):
 
 
 # Use a Krylov solver with 2x as many steps for evaluation
-solve = gp_util_linalg.krylov_solve_cg_fixed_step(2 * num_matvecs)
+solve = gp_util_linalg.krylov_solve_cg_fixed_step(num_matvecs_eval_cg)
 likelihood_, _p_likelihood_ = gp_util.likelihood_gaussian_condition(gram_matvec, solve)
 
 posterior = gp_util.posterior_exact(prior, likelihood_)
