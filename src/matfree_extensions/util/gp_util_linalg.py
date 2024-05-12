@@ -11,8 +11,7 @@ from matfree import hutchinson
 from matfree_extensions import cg, lanczos
 
 
-# todo: call this gram_matvec_sequential()?
-def gram_matvec_map(*, checkpoint: bool = True):
+def gram_matvec_sequential(*, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by row-wise mapping.
@@ -48,19 +47,17 @@ def gram_matvec_map(*, checkpoint: bool = True):
     return matvec
 
 
-# todo: call this gram_matvec_partitioned()?
-# todo: rename num_batches to num_partitions?
-def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool = True):
+def gram_matvec_partitioned(num: int, *, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
-    Why? To reduce memory compared to gram_matvec_full_batch,
-    but to increase runtime compare to gram_matvec_map.
+    Why? To reduce memory compared to gram_matvec,
+    but to increase runtime compare to gram_matvec_sequential.
 
     Parameters
     ----------
-    num_batches
-        Number of batches. Make this value as large as possible,
+    num
+        Number of partitions. Make this value as large as possible,
         but small enough so that each batch fits into memory.
     checkpoint
         Whether to wrap each row through jax.checkpoint.
@@ -78,20 +75,20 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool = True):
 
     def matvec(fun: Callable) -> Callable:
         def matvec_map(i, j, v):
-            num, *shape = jnp.shape(i)
-            if num % num_batches != 0:
-                msg = f"num_batches = {num_batches} does not divide dataset size {num}."
+            ndata, *shape = jnp.shape(i)
+            if ndata % num != 0:
+                msg = f"num = {num} does not divide dataset size {ndata}."
                 raise ValueError(msg)
 
             mv = matvec_single(j, v)
             if checkpoint:
                 mv = jax.checkpoint(mv)
 
-            x_batched = jnp.reshape(i, (num_batches, num // num_batches, *shape))
+            x_batched = jnp.reshape(i, (num, ndata // num, *shape))
             mapped = jax.lax.map(mv, x_batched)
             return jnp.reshape(mapped, (-1,))
 
-        matvec_dense = gram_matvec_full_batch()
+        matvec_dense = gram_matvec()
         matvec_dense_f = matvec_dense(fun)
 
         def matvec_single(j, v):
@@ -105,8 +102,7 @@ def gram_matvec_map_over_batch(*, num_batches: int, checkpoint: bool = True):
     return matvec
 
 
-# todo: Rename to gram_matvec()?
-def gram_matvec_full_batch():
+def gram_matvec():
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product over a full batch.

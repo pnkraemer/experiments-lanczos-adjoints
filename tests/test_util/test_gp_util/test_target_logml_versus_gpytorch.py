@@ -80,17 +80,17 @@ def case_precon_logpdf_krylov():
 
 @pytest_cases.case
 def case_gram_matvec_full_batch():
-    return gp_util_linalg.gram_matvec_full_batch()
+    return gp_util_linalg.gram_matvec()
 
 
 @pytest_cases.case
-def case_gram_matvec_map_over_batch_checkpt():
-    return gp_util_linalg.gram_matvec_map_over_batch(num_batches=1, checkpoint=True)
+def case_gram_matvec_partitioned_checkpoint():
+    return gp_util_linalg.gram_matvec_partitioned(1, checkpoint=True)
 
 
 @pytest_cases.case
-def case_gram_matvec_map_no_checkpt():
-    return gp_util_linalg.gram_matvec_map(checkpoint=False)
+def case_gram_matvec_sequential():
+    return gp_util_linalg.gram_matvec_sequential(checkpoint=False)
 
 
 @pytest_cases.case

@@ -20,7 +20,7 @@ def test_posterior_mean_interpolates_data_if_noise_is_small(n=100):
     m, p_mean = gp_util.mean_constant(shape_out=())
     k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
     prior = gp_util.model_gp(m, k)
-    gram_matvec = gp_util_linalg.gram_matvec_full_batch()
+    gram_matvec = gp_util_linalg.gram_matvec()
     likelihood, p_likelihood = gp_util.likelihood_gaussian_condition(
         gram_matvec, solve=solve
     )
