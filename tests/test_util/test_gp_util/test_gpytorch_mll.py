@@ -116,24 +116,30 @@ def test_mll_exact(logpdf, gram_matvec):
     logpdf_fun, p_logpdf = logpdf
 
     # Set up a GP model
-    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp_util.model(gp_util.mean_zero(), k)
+    m, p_mean = gp_util.mean_constant(shape_out=())
+    k, p_kernel = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
+    prior = gp_util.model(m, k)
     likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf(gram_matvec, logpdf_fun)
     loss = gp_util.mll_exact(prior, likelihood)
 
     # Ensure that the parameters match
-    p_prior["raw_lengthscale"] = lengthscale.squeeze()
-    p_prior["raw_outputscale"] = outputscale.squeeze()
+    p_mean["constant_value"] = 0.0
+    p_kernel["raw_lengthscale"] = lengthscale.squeeze()
+    p_kernel["raw_outputscale"] = outputscale.squeeze()
     p_likelihood["raw_noise"] = noise.squeeze()
 
     # Evaluate the MLL
     # We do it in a weird way, by computing value_and_grad.
     # The reason is that we need to ensure that the MLL function
     # is differentiable, and this is the most obvious place for doing so.
-    def mll(p1, p2):
-        return loss(x, y, *p_logpdf, params_prior=p1, params_likelihood=p2)
+    def mll(p1, p2, p3):
+        return loss(
+            x, y, *p_logpdf, params_mean=p1, params_kernel=p2, params_likelihood=p3
+        )
 
-    (value, _info), _grad = jax.value_and_grad(mll, has_aux=True)(p_prior, p_likelihood)
+    (value, _info), _grad = jax.value_and_grad(mll, has_aux=True)(
+        p_mean, p_kernel, p_likelihood
+    )
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)
@@ -154,8 +160,9 @@ def test_mll_exact_precondition(logpdf_p, gram_matvec, precon):
     logpdf_fun, p_logpdf = logpdf_p
 
     # Set up a GP model
-    k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp_util.model(gp_util.mean_zero(), k)
+    m, p_mean = gp_util.mean_constant(shape_out=())
+    k, p_kernel = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
+    prior = gp_util.model(m, k)
 
     likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
         gram_matvec, logpdf_fun, precon
@@ -163,18 +170,23 @@ def test_mll_exact_precondition(logpdf_p, gram_matvec, precon):
     loss = gp_util.mll_exact(prior, likelihood)
 
     # Ensure that the parameters match
-    p_prior["raw_lengthscale"] = lengthscale.squeeze()
-    p_prior["raw_outputscale"] = outputscale.squeeze()
+    p_mean["constant_value"] = 0.0
+    p_kernel["raw_lengthscale"] = lengthscale.squeeze()
+    p_kernel["raw_outputscale"] = outputscale.squeeze()
     p_likelihood["raw_noise"] = noise.squeeze()
 
     # Evaluate the MLL
     # We do it in a weird way, by computing value_and_grad.
     # The reason is that we need to ensure that the MLL function
     # is differentiable, and this is the most obvious place for doing so.
-    def mll(p1, p2):
-        return loss(x, y, *p_logpdf, params_prior=p1, params_likelihood=p2)
+    def mll(p1, p2, p3):
+        return loss(
+            x, y, *p_logpdf, params_mean=p1, params_kernel=p2, params_likelihood=p3
+        )
 
-    (value, _info), _grad = jax.value_and_grad(mll, has_aux=True)(p_prior, p_likelihood)
+    (value, _info), _grad = jax.value_and_grad(mll, has_aux=True)(
+        p_mean, p_kernel, p_likelihood
+    )
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)

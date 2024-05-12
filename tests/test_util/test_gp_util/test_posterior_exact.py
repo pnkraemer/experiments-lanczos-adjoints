@@ -17,8 +17,9 @@ def test_predict_posterior(n=100):
         return jnp.linalg.solve(matrix, b), {}
 
     # Set up: model
-    k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
-    prior = gp_util.model(gp_util.mean_zero(), k)
+    m, p_mean = gp_util.mean_constant(shape_out=())
+    k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
+    prior = gp_util.model(m, k)
     gram_matvec = gp_util_linalg.gram_matvec_full_batch()
     likelihood, p_likelihood = gp_util.likelihood_gaussian_condition(
         gram_matvec, solve=solve
@@ -27,7 +28,13 @@ def test_predict_posterior(n=100):
 
     # Evaluate the posterior
     posterior = gp_util.posterior_exact(prior, likelihood)
-    mean, _ = posterior(xs, ys, params_prior=p_prior, params_likelihood=p_likelihood)
+    mean, _ = posterior(
+        xs,
+        ys,
+        params_mean=p_mean,
+        params_kernel=p_kernel,
+        params_likelihood=p_likelihood,
+    )
     tol = jnp.sqrt(_softplus(p_likelihood["raw_noise"]))
     posterior_mean, _ = mean(xs[: len(ys) // 2])
     assert jnp.allclose(posterior_mean, ys[: len(ys) // 2], atol=tol, rtol=tol)

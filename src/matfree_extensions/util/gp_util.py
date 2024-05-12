@@ -14,11 +14,10 @@ import jax.numpy as jnp
 def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
     """Construct a Gaussian process model."""
 
-    def prior(x: jax.Array, params: dict):
-        # todo: what exactly is this function doing?
-
-        kernel = kernel_fun(**params)
-        return mean_fun, (kernel, x)
+    def prior(params_mean: dict, params_kernel: dict):
+        mean = mean_fun(**params_mean)
+        kernel = kernel_fun(**params_kernel)
+        return mean, kernel
 
     return prior
 
@@ -28,12 +27,10 @@ def likelihood_gaussian_pdf(
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def likelihood(mean, covariance, params: dict):
+    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
-
-        kernel, inputs = covariance
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -44,7 +41,8 @@ def likelihood_gaussian_pdf(
             return cov(idx, idx, v)
 
         def logpdf_partial(targets, *p_logpdf):
-            return logpdf(targets, *p_logpdf, mean=mean(inputs), cov_matvec=cov_matvec)
+            mean_array = jax.vmap(mean)(inputs)
+            return logpdf(targets, *p_logpdf, mean=mean_array, cov_matvec=cov_matvec)
 
         return logpdf_partial
 
@@ -57,12 +55,10 @@ def likelihood_gaussian_pdf_p(
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def likelihood(mean, covariance, params: dict):
+    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
-
-        kernel, inputs = covariance
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -75,10 +71,11 @@ def likelihood_gaussian_pdf_p(
         pre, info = precondition(lazy_kernel, len(inputs))
 
         def logpdf_partial(targets, *p_logpdf):
+            mean_array = jax.vmap(mean)(inputs)
             val, aux = logpdf_p(
                 targets,
                 *p_logpdf,
-                mean=mean(inputs),
+                mean=mean_array,
                 cov_matvec=cov_matvec,
                 P=lambda v: pre(v, noise),
             )
@@ -95,12 +92,10 @@ def likelihood_gaussian_condition(
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
-    def likelihood(mean, covariance, params: dict):
+    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
-
-        kernel, inputs = covariance
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -111,13 +106,15 @@ def likelihood_gaussian_condition(
             return cov(idx, idx, v)
 
         def condition_partial(xs, targets):
-            weights, info = solve(cov_matvec, targets - mean(inputs))
+            mean_array = jax.vmap(mean)(inputs)
+            weights, info = solve(cov_matvec, targets - mean_array)
 
             def cov_matvec_prior(v):
                 cov = gram_matvec(kernel)
                 return cov(xs, inputs, v)
 
-            return mean(xs) + cov_matvec_prior(weights), {"solve": info}
+            mean_eval = jax.vmap(mean)(xs)
+            return mean_eval + cov_matvec_prior(weights), {"solve": info}
 
         return condition_partial
 
@@ -130,10 +127,19 @@ def likelihood_gaussian_condition(
 def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
-    def mll(inputs, targets, *p_logpdf, params_prior: dict, params_likelihood: dict):
+    def mll(
+        inputs,
+        targets,
+        *p_logpdf,
+        params_mean: dict,
+        params_kernel: dict,
+        params_likelihood: dict,
+    ):
         # Evaluate the marginal data likelihood
-        mean, kernel = prior(inputs, params=params_prior)
-        loss = likelihood_pdf(mean, kernel, params=params_likelihood)
+        mean, kernel = prior(params_mean=params_mean, params_kernel=params_kernel)
+        loss = likelihood_pdf(
+            inputs, mean=mean, kernel=kernel, params=params_likelihood
+        )
         value, info_pdf = loss(targets, *p_logpdf)
 
         # Normalise by the number of data points because GPyTorch does
@@ -145,10 +151,12 @@ def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
 def posterior_exact(prior: Callable, likelihood: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
-    def posterior(inputs, targets, params_prior: dict, params_likelihood: dict):
+    def posterior(
+        inputs, targets, params_mean: dict, params_kernel: dict, params_likelihood: dict
+    ):
         # Evaluate the marginal data likelihood
-        mean, kernel = prior(inputs, params=params_prior)
-        condition = likelihood(mean, kernel, params=params_likelihood)
+        mean, kernel = prior(params_mean, params_kernel)
+        condition = likelihood(inputs, mean, kernel, params=params_likelihood)
         return functools.partial(condition, targets=targets), {}
 
     return posterior
@@ -230,13 +238,14 @@ def logpdf_krylov_p(solve_p: Callable, logdet: Callable):
     return logpdf
 
 
-def mean_zero() -> Callable:
+def mean_constant(*, shape_out) -> tuple[Callable, dict]:
     """Construct a zero mean-function."""
 
-    def mean(x):
-        return jnp.zeros((len(x),), dtype=jnp.dtype(x))
+    def parametrize(*, constant_value):
+        return lambda _x: constant_value
 
-    return mean
+    p_mean = {"constant_value": jnp.empty(shape_out)}
+    return parametrize, p_mean
 
 
 def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
