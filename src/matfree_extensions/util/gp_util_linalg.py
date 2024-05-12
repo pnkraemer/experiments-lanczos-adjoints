@@ -10,6 +10,8 @@ from matfree import hutchinson
 
 from matfree_extensions import cg, lanczos
 
+# todo: delete all lineax and jax wrappers for CG
+
 
 def gram_matvec_sequential(*, checkpoint: bool = True):
     """Turn a covariance function into a gram-matrix vector product.

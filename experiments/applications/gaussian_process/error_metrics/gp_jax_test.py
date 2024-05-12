@@ -29,10 +29,8 @@ data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
 print(jnp.shape(data))
 
 # Choose parameters
-# todo: give cg fewer partitions than slq, because cg does not track batched samples!
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", default=1)
-
 args = parser.parse_args()
 print(args)
 
@@ -40,14 +38,14 @@ print(args)
 # todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
 #  but it might not be necessary?
-num_data = 40_000
+num_data = 40
 num_samples_batched = 1
 num_samples_sequential = 5
 num_matvecs_train_lanczos = 10
 num_matvecs_train_cg = 2 * num_matvecs_train_lanczos
 num_matvecs_eval_cg = 10 * num_matvecs_train_cg
 num_partitions_train = 4
-rank_precon = 500
+rank_precon = 5
 num_epochs = 100
 
 memory_bytes = (
@@ -92,20 +90,16 @@ logdet = gp_util_linalg.krylov_logdet_slq(
 cholesky = low_rank.cholesky_partial_pivot(rank=rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-gram_matvec = gp_util_linalg.gram_matvec_map_over_batch(
-    num_batches=num_partitions_train
-)
-likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
-    gram_matvec, logpdf_p, precondition
-)
+gram_matvec = gp_util_linalg.gram_matvec_partitioned(num_partitions_train)
+likelihood, p_likelihood = gp_util.likelihood_pdf_p(gram_matvec, logpdf_p, precondition)
 
 # Set up a model
 m, p_mean = gp_util.mean_constant(shape_out=())
 k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
-prior = gp_util.model(m, k)
+prior = gp_util.model_gp(m, k)
 
 # Build the loss and evaluate
-loss = gp_util.mll_exact(prior, likelihood)
+loss = gp_util.target_logml(prior, likelihood)
 
 # Set up matrix-free linear algebra
 # todo: why does solve_pcg_fixed_step_reortho nan out??
@@ -113,7 +107,7 @@ loss = gp_util.mll_exact(prior, likelihood)
 # Initialise the parameters
 key, subkey = jax.random.split(key)
 ps = (p_mean, p_kernel, p_likelihood)
-# ps = exp_util.tree_random_like(subkey, ps)
+ps = exp_util.tree_random_like(subkey, ps)
 p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 
 
@@ -138,9 +132,9 @@ def mll_cholesky(params, inputs, targets):
 
     # Build the loss and evaluate
     logpdf = gp_util.logpdf_scipy_stats()
-    lklhd, _ = gp_util.likelihood_gaussian_pdf(gram_matvec, logpdf)
+    lklhd, _ = gp_util.likelihood_pdf(gram_matvec, logpdf)
 
-    loss_fun = gp_util.mll_exact(prior, lklhd)
+    loss_fun = gp_util.target_logml(prior, lklhd)
     val, info = loss_fun(
         inputs, targets, params_mean=p1, params_kernel=p2, params_likelihood=p3
     )
@@ -149,9 +143,9 @@ def mll_cholesky(params, inputs, targets):
 
 # Use a Krylov solver with 2x as many steps for evaluation
 solve = gp_util_linalg.krylov_solve_cg_fixed_step(num_matvecs_eval_cg)
-likelihood_, _p_likelihood_ = gp_util.likelihood_gaussian_condition(gram_matvec, solve)
+likelihood_, _p_likelihood_ = gp_util.likelihood_condition(gram_matvec, solve)
 
-posterior = gp_util.posterior_exact(prior, likelihood_)
+posterior = gp_util.target_posterior(prior, likelihood_)
 
 
 @jax.jit
@@ -214,11 +208,6 @@ print("A-priori NLL:", nll)
 print()
 
 optimizer = optax.adam(0.1)
-# optimizer = jaxopt.LBFGS(
-#     value_and_grad, linesearch="backtracking", has_aux=True, value_and_grad=True, verbose=False, tol=0.1, maxls=3,
-# )
-# optim_update = jax.jit(optimizer.update)
-# state = optim_optimizer.init_stateinit(p_opt, subkey, inputs=train_x, targets=train_y)
 state = optimizer.init(p_opt)
 
 progressbar = tqdm.tqdm(range(num_epochs))
