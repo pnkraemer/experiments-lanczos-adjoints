@@ -211,6 +211,11 @@ progressbar.set_description(
     f"slq_std_rel: {slq_std_rel:.1e}, "
 )
 
+gradient_norms: dict = {}
+for p_dict in unflatten(p_opt):
+    for name, _value in p_dict.items():
+        gradient_norms[name] = []
+
 loss_timestamps = []
 loss_curve = [float(mll_train)]
 cg_errors = [float(cg_error)]
@@ -227,10 +232,13 @@ for _ in progressbar:
         updates, state = optimizer.update(grads, state)
         p_opt = optax.apply_updates(p_opt, updates)
 
-        # Evaluate numerics-errors
+        # Evaluate relevant quantities
         slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
         residual = aux["logpdf"]["solve"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
+        for p_dict in unflatten(grads):
+            for name, value in p_dict.items():
+                gradient_norms[name].append(jnp.linalg.norm(value))
 
         # Save values
         raw_noise = unflatten(p_opt)[-1]["raw_noise"]
@@ -276,3 +284,6 @@ jnp.save(f"{directory}test_rmses.npy", test_rmses)
 jnp.save(f"{directory}loss_curve.npy", loss_curve)
 jnp.save(f"{directory}cg_errors.npy", cg_errors)
 jnp.save(f"{directory}slq_std_rels.npy", cg_errors)
+
+for name, value in gradient_norms.items():
+    jnp.save(f"{directory}gradient_norms_{name}.npy", jnp.asarray(value))
