@@ -18,6 +18,17 @@ def test_cg_fixed():
     assert jnp.allclose(approximation, solution)
 
 
+def test_pcg_adaptive():
+    eigvals = jnp.arange(1.0, 10.0)
+    A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
+    b = jnp.arange(1.0, 10.0)
+    solution = jnp.linalg.solve(A, b)
+
+    solve = cg.pcg_adaptive(atol=1e-5, rtol=1e-5)
+    approximation, _info = solve(lambda v: A @ v, b, lambda v:  v)
+    assert jnp.allclose(approximation, solution)
+
+
 def test_cg_fixed_reortho():
     eigvals = jnp.arange(1.0, 10.0)
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
@@ -85,7 +96,7 @@ def test_cg_more_matvecs_improve_error():
         solve = cg.cg_fixed_step(n)
         _approximation, info = solve(lambda v: A @ v, b)
 
-        error_now = jnp.linalg.norm(info["residual"])
+        error_now = jnp.linalg.norm(info["residual_abs"])
         assert error_now < error, (n, error_now)
         error = error_now
 
@@ -97,10 +108,10 @@ def test_cg_reortho_improves_error():
 
     solve = cg.cg_fixed_step(len(A) // 2)
     _approximation, info = solve(lambda v: A @ v, b)
-    error_without = jnp.linalg.norm(info["residual"])
+    error_without = jnp.linalg.norm(info["residual_abs"])
 
     solve = cg.cg_fixed_step_reortho(len(A) // 2)
     _approximation, info = solve(lambda v: A @ v, b)
-    error_with = jnp.linalg.norm(info["residual"])
+    error_with = jnp.linalg.norm(info["residual_abs"])
 
     assert error_with < 0.9 * error_without

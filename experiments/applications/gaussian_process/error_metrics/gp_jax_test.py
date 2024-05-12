@@ -164,7 +164,7 @@ key, subkey = jax.random.split(key)
 mll_train.block_until_ready()
 slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
 residual = aux["logpdf"]["solve"]["residual_abs"]
-print(aux["logpdf"]["solve"]["num_steps"])
+print("NumSteps apriori", aux["logpdf"]["solve"]["num_steps"])
 
 cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
