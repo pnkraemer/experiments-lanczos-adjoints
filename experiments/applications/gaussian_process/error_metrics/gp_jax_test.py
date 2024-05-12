@@ -1,6 +1,7 @@
 import os.path
 import time
 import urllib.request
+import argparse 
 
 import jax
 import jax.numpy as jnp
@@ -27,18 +28,23 @@ data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
 print(jnp.shape(data))
 
 # Choose parameters
-# Memory consumption: ~ num_data**2 * num_matvecs * num_samples / num_partitions
 # todo: give cg fewer partitions than slq, because cg does not track batched samples!
-num_data = 1000
-num_matvecs_train_lanczos = 10
-num_matvecs_train_cg = 10
-num_matvecs_eval_cg = 10  # todo: pass to mll_test (currently this arg is not used)
-num_samples_batched = 10
-num_samples_sequential = 1
-num_partitions_train = 1  # todo: split for cg and lanczos?
-rank_precon = 1
-small_value = 1e-10
+parser = argparse.ArgumentParser()
+parser.add_argument("--seed", default=1)
 
+args = parser.parse_args()
+print(args)
+
+
+num_data = 42_500
+num_matvecs_train_lanczos = 10
+num_matvecs_train_cg = 30  # match num_samples * num_matvecs_lanczos?
+num_matvecs_eval_cg = 20
+num_samples_batched = 1
+num_samples_sequential = 3
+num_partitions_train = 25
+rank_precon = 500  # Let's goooo
+num_epochs = 10 # maaan, let's use a better optimiser...
 
 memory_bytes = (
     num_data**2
@@ -50,11 +56,11 @@ memory_bytes = (
 memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
-key = jax.random.PRNGKey(1)
+key = jax.random.PRNGKey(args.seed)
 key, subkey = jax.random.split(key, num=2)
 data_sampled = data[:num_data, :-1], data[:num_data, -1]
-train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.95)
-# train, test = data_util.split_train_test(*data_sampled, train=0.95)
+train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.9)
+# train, test = data_util.split_train_test(*data_sampled, train=0.9)
 (train_x, train_y), (test_x, test_y) = train, test
 print("Train:", train_x.shape, train_y.shape)
 print("Test:", test_x.shape, test_y.shape)
@@ -90,7 +96,7 @@ likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
 )
 
 # Set up a model
-k, p_prior = gp_util.kernel_scaled_rbf(shape_in=(3,), shape_out=())
+k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
 prior = gp_util.model(gp_util.mean_zero(), k)
 
 # Build the loss and evaluate
@@ -186,9 +192,12 @@ print("A-priori NLL:", nll)
 
 
 print()
+
 optimizer = optax.adam(learning_rate=0.1)
+
+
 state = optimizer.init(p_opt)
-progressbar = tqdm.tqdm(range(50))
+progressbar = tqdm.tqdm(range(num_epochs))
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
     f"test-nll: {nll:.3F}, "
@@ -230,7 +239,7 @@ for _ in progressbar:
         test_nlls.append(float(nll))
         loss_timestamps.append(current - start)
         progressbar.set_description(
-            f"loss: {mll_train:.3F}, "
+            f"loss: {value:.3F}, "
             f"test-nll: {nll:.3F}, "
             f"rmse: {rmse:.3F}, "
             f"cg_error: {cg_error:.3e}"
