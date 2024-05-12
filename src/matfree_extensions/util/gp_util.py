@@ -29,6 +29,7 @@ def likelihood_gaussian_pdf(
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
+        # todo: implement a box-constraint?
         raw_noise = params["raw_noise"]
         noise = _softplus(raw_noise)
 
@@ -141,9 +142,7 @@ def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
             inputs, mean=mean, kernel=kernel, params=params_likelihood
         )
         value, info_pdf = loss(targets, *p_logpdf)
-
-        # Normalise by the number of data points because GPyTorch does
-        return value / len(inputs), info_pdf
+        return value, info_pdf
 
     return mll
 
@@ -207,13 +206,16 @@ def logpdf_cholesky() -> Callable:
 def logpdf_krylov(solve: Callable, logdet: Callable):
     def logpdf(y, *params_logdet, mean, cov_matvec: Callable):
         # Log-determinant
-        logdet_ = logdet(cov_matvec, *params_logdet) / 2
+        logdet_, info_logdet = logdet(cov_matvec, *params_logdet)
+        logdet_ /= 2
 
         # Mahalanobis norm
-        tmp, info = solve(cov_matvec, y - mean)
+        tmp, info_solve = solve(cov_matvec, y - mean)
         mahalanobis = jnp.dot(y - mean, tmp)
 
+        
         # Combine the terms
+        info = {"logdet": info_logdet, "solve": info_solve}
         (n,) = jnp.shape(mean)
         return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
 
@@ -225,13 +227,15 @@ def logpdf_krylov_p(solve_p: Callable, logdet: Callable):
 
     def logpdf(y, *params_logdet, mean, cov_matvec, P: Callable):
         # Log-determinant
-        logdet_ = logdet(cov_matvec, *params_logdet) / 2
+        logdet_, info_logdet = logdet(cov_matvec, *params_logdet)
+        logdet_ /= 2
 
         # Mahalanobis norm
-        tmp, info = solve_p(cov_matvec, y - mean, P=P)
+        tmp, info_solve = solve_p(cov_matvec, y - mean, P=P)
         mahalanobis = jnp.dot(y - mean, tmp)
 
         # Combine the terms
+        info = {"logdet": info_logdet, "solve": info_solve}
         (n,) = jnp.shape(mean)
         return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
 

@@ -207,7 +207,7 @@ def krylov_logdet_slq(
 
         # If a single batch, we never checkpoint.
         if num_batches == 1:
-            return estimate(key)
+            return estimate(key), {"std": None, "std_rel": None}
 
         # Memory-efficient reverse-mode derivatives
         #  See gram_matvec_map_over_batch().
@@ -217,7 +217,9 @@ def krylov_logdet_slq(
 
         keys = jax.random.split(key, num=num_batches)
         values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0)
+        mean = jnp.mean(values, axis=0)
+        std = jnp.std(values, axis=0)
+        return mean, {"std_abs": std, "std_rel": std / jnp.abs(mean)}
 
     return logdet
 
@@ -260,6 +262,8 @@ def krylov_logdet_slq_vjp_reuse(
 
         keys = jax.random.split(key, num=num_batches)
         values = jax.lax.map(lambda k: estimate(k), keys)
-        return jnp.mean(values, axis=0)
+        mean = jnp.mean(values, axis=0)
+        std = jnp.std(values, axis=0)
+        return mean, {"std": std}
 
     return logdet

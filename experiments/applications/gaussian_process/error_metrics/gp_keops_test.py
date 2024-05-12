@@ -4,6 +4,8 @@ import urllib.request
 import gpytorch
 import torch
 from scipy.io import loadmat
+import time
+
 
 if not os.path.isfile("../3droad.mat"):
     print("Downloading '3droad' UCI dataset...")
@@ -14,16 +16,24 @@ if not os.path.isfile("../3droad.mat"):
 data = torch.Tensor(loadmat("../3droad.mat")["data"])
 
 
-torch.backends.cuda.matmul.allow_tf32 = False
-torch.backends.cudnn.allow_tf32 = False
+# torch.backends.cuda.matmul.allow_tf32 = False
+# torch.backends.cudnn.allow_tf32 = False
 
 device = "cuda:0"
 
-N = data.shape[0]
+# N = data.shape[0]
+N = 40_000
+training_iter = 100
+num_samples = 10
+num_matvecs_train_lanczos = 10
+num_matvecs_train_cg = 100*num_matvecs_train_lanczos
+num_matvecs_eval_cg = 100*num_matvecs_train_cg
+rank_precon = 500
+
 # make train/val/test
-n_train = int(0.8 * N)
+n_train = int(0.9 * N)
 train_x, train_y = data[:n_train, :-1], data[:n_train, -1]
-test_x, test_y = data[n_train:, :-1], data[n_train:, -1]
+test_x, test_y = data[n_train:N, :-1], data[n_train:N, -1]
 
 # normalize features
 mean = train_x.mean(dim=-2, keepdim=True)
@@ -53,7 +63,7 @@ class ExactGPModel(gpytorch.models.ExactGP):
         self.mean_module = gpytorch.means.ConstantMean()
 
         self.covar_module = gpytorch.kernels.ScaleKernel(
-            gpytorch.kernels.keops.RBFKernel()
+            gpytorch.kernels.keops.MaternKernel(nu=1.5, ard_num_dims=train_x.size(-1))
         )
 
     def forward(self, x):
@@ -75,37 +85,55 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 # "Loss" for GPs - the marginal log likelihood
 mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
-import time
 
-training_iter = 50
+
 # with (gpytorch.settings.max_preconditioner_size(500),gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.verbose_linalg(True)):
 # with gpytorch.settings.verbose_linalg(True):
 # with gpytorch.settings.verbose_linalg(True), gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_preconditioner_size(250), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.linalg_dtypes(default=torch.float32):
-with gpytorch.settings.max_preconditioner_size(200), gpytorch.settings.cg_tolerance(
-    1e0
+with gpytorch.settings.max_preconditioner_size(rank_precon), gpytorch.settings.cg_tolerance(
+    1e-2
 ), gpytorch.settings.num_trace_samples(
-    15
+    num_samples
 ), gpytorch.settings.max_lanczos_quadrature_iterations(
-    15
-), gpytorch.settings.max_cg_iterations(1000), gpytorch.settings.verbose_linalg(True):
+    num_matvecs_train_lanczos
+), gpytorch.settings.deterministic_probes(
+    True
+), gpytorch.settings.max_cg_iterations(num_matvecs_train_cg), gpytorch.settings.verbose_linalg(False):
     for i in range(training_iter):
-        start_time = time.time()
-        # Zero gradients from previous iteration
-        optimizer.zero_grad()
-        # Output from model
-        output = model(train_x)
-        # Calc loss and backprop gradients
-        loss = -mll(output, train_y)
-        loss.backward()
-        print(
-            "Iter %d/%d - Loss: %.3f   lengthscale: %.3f   noise: %.3f"
-            % (
-                i + 1,
-                training_iter,
-                loss.item(),
-                model.covar_module.base_kernel.lengthscale.item(),
-                model.likelihood.noise.item(),
+        try:
+            start_time = time.time()
+            # Zero gradients from previous iteration
+            optimizer.zero_grad()
+            # Output from model
+            output = model(train_x)
+            # Calc loss and backprop gradients
+            loss = -mll(output, train_y)
+            loss.backward()
+
+            for name, p in model.named_parameters():
+                print(name, p.grad)
+
+            # print("CG iterations {:4d}".format(len(gpytorch.settings.record_residual.lst_residual_norm)))
+            print(
+                "Iter %d/%d - Loss: %.3f    noise: %.3f"
+                % (
+                    i + 1,
+                    training_iter,
+                    loss.item(),
+                    model.likelihood.raw_noise.item(),
+                )
             )
-        )
-        optimizer.step()
-        print(time.time() - start_time)
+            optimizer.step()
+            # print(time.time() - start_time)
+            print()
+        except KeyboardInterrupt:
+            break
+
+    # RMSE
+model.eval()
+likelihood.eval()
+with torch.no_grad(), gpytorch.settings.skip_posterior_variances():
+    pred_dist = likelihood(model(test_x))
+    mean = pred_dist.mean
+    rmse = mean.sub(test_y).pow(2).mean().sqrt()
+    print("RMSE", rmse)

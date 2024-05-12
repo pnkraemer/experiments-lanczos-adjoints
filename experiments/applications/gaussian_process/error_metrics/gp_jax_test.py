@@ -11,11 +11,13 @@ import tqdm
 from matfree import hutchinson
 from matfree_extensions import low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, gp_util_linalg
+import optax 
 
 
 def root_mean_square_error(x, *, target):
     error_abs = x - target
-    return jnp.linalg.norm(error_abs) / jnp.sqrt(x.size)
+    return jnp.sqrt(jnp.mean(error_abs**2))
+    # return jnp.linalg.norm(error_abs) / jnp.sqrt(x.size)
 
 
 if not os.path.isfile("../3droad.mat"):
@@ -36,15 +38,18 @@ args = parser.parse_args()
 print(args)
 
 
-num_data = 40
-num_matvecs_train_lanczos = 10
-num_matvecs_train_cg = 50  # match num_samples * num_matvecs_lanczos?
-num_matvecs_eval_cg = 20
+# todo: we _could_ give CG a different matvec 
+#  (fewer partitions) to boost performance,
+#  but it might not be necessary?
+num_data = 40_000
 num_samples_batched = 1
 num_samples_sequential = 5
-num_partitions_train = 1
-rank_precon = 5
-num_epochs = 50
+num_matvecs_train_lanczos = 10
+num_matvecs_train_cg = 2*num_matvecs_train_lanczos
+num_matvecs_eval_cg = 10*num_matvecs_train_cg
+num_partitions_train = 4
+rank_precon = 500
+num_epochs = 100
 
 memory_bytes = (
     num_data**2
@@ -108,7 +113,8 @@ loss = gp_util.mll_exact(prior, likelihood)
 
 # Initialise the parameters
 key, subkey = jax.random.split(key)
-ps = exp_util.tree_random_like(subkey, (p_mean, p_kernel, p_likelihood))
+ps =  (p_mean, p_kernel, p_likelihood)
+# ps = exp_util.tree_random_like(subkey, ps)
 p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 
 
@@ -124,7 +130,7 @@ def mll_lanczos(params, *p_logdet, inputs, targets):
         params_kernel=p2,
         params_likelihood=p3,
     )
-    return -val, info
+    return -val / len(inputs), info
 
 
 @jax.jit
@@ -139,7 +145,7 @@ def mll_cholesky(params, inputs, targets):
     val, info = loss_fun(
         inputs, targets, params_mean=p1, params_kernel=p2, params_likelihood=p3
     )
-    return -val, info
+    return -val/ len(inputs), info
 
 
 # Use a Krylov solver with 2x as many steps for evaluation
@@ -167,8 +173,8 @@ def predict_mean(params, x, inputs, targets):
 key, subkey = jax.random.split(key)
 (mll_train, aux) = mll_lanczos(p_opt, subkey, inputs=train_x, targets=train_y)
 mll_train.block_until_ready()
-print(aux)
-residual = aux["logpdf"]["residual"]
+slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
+residual = aux["logpdf"]["solve"]["residual"]
 cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
 # Benchmark the loss function
@@ -200,26 +206,29 @@ print("Runtime (value-and-gradient):", (t1 - t0) / 1)
 predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
 rmse = root_mean_square_error(predicted, target=test_y)
 nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
-print("A priori CG error:", cg_error)
+print("A-priori CG error:", cg_error)
+print("A-priori SLQ std (rel):", slq_std_rel)
 print("A-priori RMSE:", rmse)
 print("A-priori NLL:", nll)
 
 
 print()
 
-optimizer = jaxopt.LBFGS(
-    value_and_grad, has_aux=True, value_and_grad=True, maxls=3, tol=0.1, verbose=False
-)
-optim_init = jax.jit(optimizer.init_state)
-optim_update = jax.jit(optimizer.update)
-state = optim_init(p_opt, subkey, inputs=train_x, targets=train_y)
+optimizer = optax.adam(0.1)
+# optimizer = jaxopt.LBFGS(
+#     value_and_grad, linesearch="backtracking", has_aux=True, value_and_grad=True, verbose=False, tol=0.1, maxls=3,
+# )
+# optim_update = jax.jit(optimizer.update)
+# state = optim_optimizer.init_stateinit(p_opt, subkey, inputs=train_x, targets=train_y)
+state = optimizer.init(p_opt)
 
 progressbar = tqdm.tqdm(range(num_epochs))
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
     f"test-nll: {nll:.3F}, "
     f"rmse: {rmse:.3F}, "
-    f"cg_error: {cg_error:.3e}, "
+    f"cg_error: {cg_error:.1e}, "
+    f"slq_std_rel: {slq_std_rel:.1e}, "
 )
 start = time.perf_counter()
 
@@ -228,32 +237,37 @@ test_nlls = [nll]
 test_rmses = [rmse]
 loss_curve = [float(mll_train)]
 cg_errors = [float(cg_error)]
+slq_std_rels = [float(slq_std_rel)]
 
 for _ in progressbar:
     try:
         # Take the value and gradient
-        # (value, aux), grads = value_and_grad(
-        #     p_opt, subkey, inputs=train_x, targets=train_y
-        # )
-        # updates, state = optimizer.update(grads, state)
-        # p_opt = optax.apply_updates(p_opt, updates)
+        key, subkey = jax.random.split(key, num=2)
+        (value, aux), grads = value_and_grad(
+            p_opt, subkey, inputs=train_x, targets=train_y
+        )
+        updates, state = optimizer.update(grads, state)
+        p_opt = optax.apply_updates(p_opt, updates)
+        print("grad", unflatten(grads))
 
         # Optimiser step
-        key, subkey = jax.random.split(key, num=2)
-        p_opt, state = optim_update(
-            p_opt, state, subkey, inputs=train_x, targets=train_y
-        )
-        aux = state.aux
-        value = state.value
-
-        residual = aux["logpdf"]["residual"]
+        # p_opt, state = optim_update(
+        #     p_opt, state, subkey, inputs=train_x, targets=train_y
+        # )
+        # aux = state.aux
+        # value = state.value
+        slq_std_rel = aux["logpdf"]["logdet"]["std_rel"] 
+        residual = aux["logpdf"]["solve"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
         # # Test NLL and RMSE
         predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
         rmse = root_mean_square_error(predicted, target=test_y)
         nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
-        print(unflatten(p_opt))
+        # print(state)
+        # print()
+        print(unflatten(p_opt)[-1]["raw_noise"])
+        print()
 
         # Save values
         current = time.perf_counter()
@@ -266,8 +280,10 @@ for _ in progressbar:
             f"loss: {value:.3F}, "
             f"test-nll: {nll:.3F}, "
             f"rmse: {rmse:.3F}, "
-            f"cg_error: {cg_error:.3e}, "
+            f"cg_error: {cg_error:.1e}, "
+            f"slq_std_rel: {slq_std_rel:.1e} "
         )
+
     except KeyboardInterrupt:
         break
 end = time.perf_counter()
