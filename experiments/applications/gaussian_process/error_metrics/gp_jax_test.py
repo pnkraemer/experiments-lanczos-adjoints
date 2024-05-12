@@ -36,15 +36,15 @@ args = parser.parse_args()
 print(args)
 
 
-num_data = 400
+num_data = 40
 num_matvecs_train_lanczos = 10
 num_matvecs_train_cg = 50  # match num_samples * num_matvecs_lanczos?
 num_matvecs_eval_cg = 20
 num_samples_batched = 1
 num_samples_sequential = 5
-num_partitions_train = 10
-rank_precon = 50
-num_epochs = 50  
+num_partitions_train = 1
+rank_precon = 5
+num_epochs = 50
 
 memory_bytes = (
     num_data**2
@@ -96,8 +96,9 @@ likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
 )
 
 # Set up a model
-k, p_prior = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
-prior = gp_util.model(gp_util.mean_zero(), k)
+m, p_mean = gp_util.mean_constant(shape_out=())
+k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
+prior = gp_util.model(m, k)
 
 # Build the loss and evaluate
 loss = gp_util.mll_exact(prior, likelihood)
@@ -107,28 +108,37 @@ loss = gp_util.mll_exact(prior, likelihood)
 
 # Initialise the parameters
 key, subkey = jax.random.split(key)
-p_prior, p_likelihood = exp_util.tree_random_like(subkey, (p_prior, p_likelihood))
-p_opt, unflatten = jax.flatten_util.ravel_pytree([p_prior, p_likelihood])
+ps = exp_util.tree_random_like(subkey, (p_mean, p_kernel, p_likelihood))
+p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 
 
 # Evaluate the loss function
 @jax.jit
 def mll_lanczos(params, *p_logdet, inputs, targets):
-    p1, p2 = unflatten(params)
-    val, info = loss(inputs, targets, *p_logdet, params_prior=p1, params_likelihood=p2)
+    p1, p2, p3 = unflatten(params)
+    val, info = loss(
+        inputs,
+        targets,
+        *p_logdet,
+        params_mean=p1,
+        params_kernel=p2,
+        params_likelihood=p3,
+    )
     return -val, info
 
 
 @jax.jit
 def mll_cholesky(params, inputs, targets):
-    p1, p2 = unflatten(params)
+    p1, p2, p3 = unflatten(params)
 
     # Build the loss and evaluate
     logpdf = gp_util.logpdf_scipy_stats()
     lklhd, _ = gp_util.likelihood_gaussian_pdf(gram_matvec, logpdf)
 
     loss_fun = gp_util.mll_exact(prior, lklhd)
-    val, info = loss_fun(inputs, targets, params_prior=p1, params_likelihood=p2)
+    val, info = loss_fun(
+        inputs, targets, params_mean=p1, params_kernel=p2, params_likelihood=p3
+    )
     return -val, info
 
 
@@ -141,10 +151,14 @@ posterior = gp_util.posterior_exact(prior, likelihood_)
 
 @jax.jit
 def predict_mean(params, x, inputs, targets):
-    p1, p2 = unflatten(params)
+    p1, p2, p3 = unflatten(params)
 
     postmean, _ = posterior(
-        inputs=inputs, targets=targets, params_prior=p1, params_likelihood=p2
+        inputs=inputs,
+        targets=targets,
+        params_mean=p1,
+        params_kernel=p2,
+        params_likelihood=p3,
     )
     return postmean(x)
 
@@ -194,7 +208,7 @@ print("A-priori NLL:", nll)
 print()
 
 optimizer = jaxopt.LBFGS(
-    value_and_grad, has_aux=True, value_and_grad=True, verbose=False
+    value_and_grad, has_aux=True, value_and_grad=True, maxls=3, tol=0.1, verbose=False
 )
 optim_init = jax.jit(optimizer.init_state)
 optim_update = jax.jit(optimizer.update)
@@ -205,7 +219,7 @@ progressbar.set_description(
     f"loss: {mll_train:.3F}, "
     f"test-nll: {nll:.3F}, "
     f"rmse: {rmse:.3F}, "
-    f"cg_error: {cg_error:.3e}"
+    f"cg_error: {cg_error:.3e}, "
 )
 start = time.perf_counter()
 
@@ -230,7 +244,7 @@ for _ in progressbar:
             p_opt, state, subkey, inputs=train_x, targets=train_y
         )
         aux = state.aux
-        value = state.value 
+        value = state.value
 
         residual = aux["logpdf"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
@@ -239,6 +253,7 @@ for _ in progressbar:
         predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
         rmse = root_mean_square_error(predicted, target=test_y)
         nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
+        print(unflatten(p_opt))
 
         # Save values
         current = time.perf_counter()
@@ -251,7 +266,7 @@ for _ in progressbar:
             f"loss: {value:.3F}, "
             f"test-nll: {nll:.3F}, "
             f"rmse: {rmse:.3F}, "
-            f"cg_error: {cg_error:.3e}"
+            f"cg_error: {cg_error:.3e}, "
         )
     except KeyboardInterrupt:
         break
