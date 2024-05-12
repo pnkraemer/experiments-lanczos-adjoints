@@ -104,7 +104,7 @@ for mv in labels:
         all_ = jax.lax.map(estimate, keys)
         means.append(jnp.mean(all_))
         stds.append(jnp.std(all_))
-        print(num, jnp.std(all_), jnp.mean(all_))
+        print(f"num={num}, std={jnp.std(all_)}, mean={jnp.mean(all_)}")
     print()
     plt.loglog(nums, stds, label=labels[mv], **styles[mv])
 

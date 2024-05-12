@@ -368,7 +368,6 @@ def _softplus(x, beta=1.0, threshold=20.0):
     )
 
 
-
 def _assert_shapes(x, y, shape_in):
     if jnp.shape(x) != jnp.shape(y):
         error = "The arguments have different shapes: "

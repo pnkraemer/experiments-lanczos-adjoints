@@ -1,11 +1,11 @@
+import argparse
 import os.path
 import time
 import urllib.request
-import argparse 
 
 import jax
 import jax.numpy as jnp
-import optax
+import jaxopt
 import scipy.io
 import tqdm
 from matfree import hutchinson
@@ -36,15 +36,15 @@ args = parser.parse_args()
 print(args)
 
 
-num_data = 42_500
+num_data = 4000
 num_matvecs_train_lanczos = 10
 num_matvecs_train_cg = 30  # match num_samples * num_matvecs_lanczos?
 num_matvecs_eval_cg = 20
 num_samples_batched = 1
 num_samples_sequential = 3
-num_partitions_train = 25
-rank_precon = 500  # Let's goooo
-num_epochs = 10 # maaan, let's use a better optimiser...
+num_partitions_train = 1
+rank_precon = 5
+num_epochs = 10  # maaan, let's use a better optimiser...
 
 memory_bytes = (
     num_data**2
@@ -193,10 +193,13 @@ print("A-priori NLL:", nll)
 
 print()
 
-optimizer = optax.adam(learning_rate=0.1)
+optimizer = jaxopt.LBFGS(
+    value_and_grad, has_aux=True, value_and_grad=True, tol=0.1, maxls=3, verbose=True
+)
+optim_init = jax.jit(optimizer.init_state)
+optim_update = jax.jit(optimizer.update)
+state = optim_init(p_opt, subkey, inputs=train_x, targets=train_y)
 
-
-state = optimizer.init(p_opt)
 progressbar = tqdm.tqdm(range(num_epochs))
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
@@ -215,16 +218,21 @@ cg_errors = [float(cg_error)]
 for _ in progressbar:
     try:
         # Take the value and gradient
-        key, subkey = jax.random.split(key, num=2)
-        (value, aux), grads = value_and_grad(
-            p_opt, subkey, inputs=train_x, targets=train_y
-        )
-        residual = aux["logpdf"]["residual"]
-        cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
+        # (value, aux), grads = value_and_grad(
+        #     p_opt, subkey, inputs=train_x, targets=train_y
+        # )
+        # updates, state = optimizer.update(grads, state)
+        # p_opt = optax.apply_updates(p_opt, updates)
 
         # Optimiser step
-        updates, state = optimizer.update(grads, state)
-        p_opt = optax.apply_updates(p_opt, updates)
+        key, subkey = jax.random.split(key, num=2)
+        p_opt, state = optim_update(
+            p_opt, state, subkey, inputs=train_x, targets=train_y
+        )
+        aux = state.aux
+
+        residual = aux["logpdf"]["residual"]
+        cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
         # # Test NLL and RMSE
         predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
