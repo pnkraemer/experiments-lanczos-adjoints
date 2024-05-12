@@ -151,3 +151,18 @@ def goldstein_price(X, Y, /):
         + (2 * X - 3 * Y) ** 2
         * (18 - 32 * X + 12 * X**2 + 48 * Y - 36 * X * Y + 27 * Y**2)
     )
+
+
+def softplus(x, beta=1.0, threshold=20.0):
+    # Shamelessly stolen from:
+    # https://github.com/google/jax/issues/18443
+
+    # mirroring the pytorch implementation
+    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
+    return jax.lax.select(
+        x * beta < threshold,
+        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
+        x,
+    )
+

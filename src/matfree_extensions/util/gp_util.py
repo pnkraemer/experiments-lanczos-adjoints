@@ -206,14 +206,14 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def likelihood_pdf(gram_matvec: Callable, logpdf: Callable) -> tuple[Callable, dict]:
+def likelihood_pdf(noise_greater_than, gram_matvec: Callable, logpdf: Callable) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         # todo: implement a box-constraint?
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise)
+        noise = _softplus(raw_noise) + noise_greater_than
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -233,7 +233,7 @@ def likelihood_pdf(gram_matvec: Callable, logpdf: Callable) -> tuple[Callable, d
     return likelihood, p
 
 
-def likelihood_pdf_p(
+def likelihood_pdf_p(noise_greater_than: float,
     gram_matvec: Callable, logpdf_p: Callable, precondition: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
@@ -241,11 +241,11 @@ def likelihood_pdf_p(
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise)
+        noise = _softplus(raw_noise) + noise_greater_than
 
         def lazy_kernel(i: int, j: int):
-            return kernel(inputs[i], inputs[j]) + noise * (i == j)
-
+            return kernel(inputs[i], inputs[j])
+            
         def cov_matvec(v):
             cov = gram_matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
@@ -259,7 +259,7 @@ def likelihood_pdf_p(
                 targets,
                 *p_logpdf,
                 mean=mean_array,
-                cov_matvec=cov_matvec,
+                cov_matvec=lambda v: cov_matvec(v) + noise*v,
                 P=lambda v: pre(v, noise),
             )
             return val, {"precondition": info, "logpdf": aux}
@@ -270,7 +270,7 @@ def likelihood_pdf_p(
     return likelihood, p
 
 
-def likelihood_condition(
+def likelihood_condition(noise_greater_than,
     gram_matvec: Callable, solve: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
@@ -278,7 +278,7 @@ def likelihood_condition(
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise)
+        noise = _softplus(raw_noise) + noise_greater_than
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -291,6 +291,48 @@ def likelihood_condition(
         def condition_partial(xs, targets):
             mean_array = jax.vmap(mean)(inputs)
             weights, info = solve(cov_matvec, targets - mean_array)
+
+            def cov_matvec_prior(v):
+                cov = gram_matvec(kernel)
+                return cov(xs, inputs, v)
+
+            mean_eval = jax.vmap(mean)(xs)
+            return mean_eval + cov_matvec_prior(weights), {"solve": info}
+
+        return condition_partial
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
+
+
+def likelihood_condition_p(noise_greater_than: float,
+    gram_matvec: Callable, solve_p: Callable, precondition
+) -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
+
+    def likelihood(inputs: jax.Array, mean: Callable, kernel: Callable, params: dict):
+        # Apply a soft-plus because GPyTorch does
+        raw_noise = params["raw_noise"]
+        noise = _softplus(raw_noise) + noise_greater_than
+
+        def lazy_kernel(i: int, j: int):
+            return kernel(inputs[i], inputs[j])
+
+        def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
+            idx = jnp.arange(len(inputs))
+            return cov(idx, idx, v)
+
+        pre, info = precondition(lazy_kernel, len(inputs))
+
+        def condition_partial(xs, targets):
+            mean_array = jax.vmap(mean)(inputs)
+
+            weights, info = solve_p(
+                lambda v: cov_matvec(v) + noise*v, 
+                targets - mean_array, 
+                P=lambda v: pre(v, noise),
+            )
 
             def cov_matvec_prior(v):
                 cov = gram_matvec(kernel)
