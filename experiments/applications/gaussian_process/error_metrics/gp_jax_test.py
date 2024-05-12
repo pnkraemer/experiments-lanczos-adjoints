@@ -5,13 +5,12 @@ import urllib.request
 
 import jax
 import jax.numpy as jnp
-import jaxopt
+import optax
 import scipy.io
 import tqdm
 from matfree import hutchinson
 from matfree_extensions import low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, gp_util_linalg
-import optax 
 
 
 def root_mean_square_error(x, *, target):
@@ -38,15 +37,15 @@ args = parser.parse_args()
 print(args)
 
 
-# todo: we _could_ give CG a different matvec 
+# todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
 #  but it might not be necessary?
 num_data = 40_000
 num_samples_batched = 1
 num_samples_sequential = 5
 num_matvecs_train_lanczos = 10
-num_matvecs_train_cg = 2*num_matvecs_train_lanczos
-num_matvecs_eval_cg = 10*num_matvecs_train_cg
+num_matvecs_train_cg = 2 * num_matvecs_train_lanczos
+num_matvecs_eval_cg = 10 * num_matvecs_train_cg
 num_partitions_train = 4
 rank_precon = 500
 num_epochs = 100
@@ -113,7 +112,7 @@ loss = gp_util.mll_exact(prior, likelihood)
 
 # Initialise the parameters
 key, subkey = jax.random.split(key)
-ps =  (p_mean, p_kernel, p_likelihood)
+ps = (p_mean, p_kernel, p_likelihood)
 # ps = exp_util.tree_random_like(subkey, ps)
 p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 
@@ -145,7 +144,7 @@ def mll_cholesky(params, inputs, targets):
     val, info = loss_fun(
         inputs, targets, params_mean=p1, params_kernel=p2, params_likelihood=p3
     )
-    return -val/ len(inputs), info
+    return -val / len(inputs), info
 
 
 # Use a Krylov solver with 2x as many steps for evaluation
@@ -256,7 +255,7 @@ for _ in progressbar:
         # )
         # aux = state.aux
         # value = state.value
-        slq_std_rel = aux["logpdf"]["logdet"]["std_rel"] 
+        slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
         residual = aux["logpdf"]["solve"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 

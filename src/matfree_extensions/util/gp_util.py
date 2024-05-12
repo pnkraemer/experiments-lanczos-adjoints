@@ -213,7 +213,6 @@ def logpdf_krylov(solve: Callable, logdet: Callable):
         tmp, info_solve = solve(cov_matvec, y - mean)
         mahalanobis = jnp.dot(y - mean, tmp)
 
-        
         # Combine the terms
         info = {"logdet": info_logdet, "solve": info_solve}
         (n,) = jnp.shape(mean)

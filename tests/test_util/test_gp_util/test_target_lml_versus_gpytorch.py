@@ -143,7 +143,7 @@ def test_mll_exact(logpdf, gram_matvec):
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)
-    assert jnp.allclose(value_ref, value, rtol=small_value, atol=small_value)
+    assert jnp.allclose(value_ref, value / len(x), rtol=small_value, atol=small_value)
 
 
 @pytest_cases.parametrize_with_cases(
@@ -190,7 +190,7 @@ def test_mll_exact_precondition(logpdf_p, gram_matvec, precon):
 
     # Assert that the values match
     small_value = jnp.sqrt(jnp.finfo(jnp.dtype(value)).eps)
-    assert jnp.allclose(value_ref, value, rtol=small_value, atol=small_value)
+    assert jnp.allclose(value_ref, value / len(x), rtol=small_value, atol=small_value)
 
 
 class _ExactGPModel(gpytorch.models.ExactGP):

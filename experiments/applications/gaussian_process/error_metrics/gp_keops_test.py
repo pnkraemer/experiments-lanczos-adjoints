@@ -1,11 +1,10 @@
 import os.path
+import time
 import urllib.request
 
 import gpytorch
 import torch
 from scipy.io import loadmat
-import time
-
 
 if not os.path.isfile("../3droad.mat"):
     print("Downloading '3droad' UCI dataset...")
@@ -26,8 +25,8 @@ N = 40_000
 training_iter = 100
 num_samples = 10
 num_matvecs_train_lanczos = 10
-num_matvecs_train_cg = 100*num_matvecs_train_lanczos
-num_matvecs_eval_cg = 100*num_matvecs_train_cg
+num_matvecs_train_cg = 100 * num_matvecs_train_lanczos
+num_matvecs_eval_cg = 100 * num_matvecs_train_cg
 rank_precon = 500
 
 # make train/val/test
@@ -86,19 +85,18 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
 
-
 # with (gpytorch.settings.max_preconditioner_size(500),gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.verbose_linalg(True)):
 # with gpytorch.settings.verbose_linalg(True):
 # with gpytorch.settings.verbose_linalg(True), gpytorch.settings.cg_tolerance(1e0), gpytorch.settings.max_preconditioner_size(250), gpytorch.settings.max_cg_iterations(100_000), gpytorch.settings.linalg_dtypes(default=torch.float32):
-with gpytorch.settings.max_preconditioner_size(rank_precon), gpytorch.settings.cg_tolerance(
-    1e-2
-), gpytorch.settings.num_trace_samples(
+with gpytorch.settings.max_preconditioner_size(
+    rank_precon
+), gpytorch.settings.cg_tolerance(1e-2), gpytorch.settings.num_trace_samples(
     num_samples
 ), gpytorch.settings.max_lanczos_quadrature_iterations(
     num_matvecs_train_lanczos
-), gpytorch.settings.deterministic_probes(
-    True
-), gpytorch.settings.max_cg_iterations(num_matvecs_train_cg), gpytorch.settings.verbose_linalg(False):
+), gpytorch.settings.deterministic_probes(True), gpytorch.settings.max_cg_iterations(
+    num_matvecs_train_cg
+), gpytorch.settings.verbose_linalg(False):
     for i in range(training_iter):
         try:
             start_time = time.time()
@@ -116,12 +114,7 @@ with gpytorch.settings.max_preconditioner_size(rank_precon), gpytorch.settings.c
             # print("CG iterations {:4d}".format(len(gpytorch.settings.record_residual.lst_residual_norm)))
             print(
                 "Iter %d/%d - Loss: %.3f    noise: %.3f"
-                % (
-                    i + 1,
-                    training_iter,
-                    loss.item(),
-                    model.likelihood.raw_noise.item(),
-                )
+                % (i + 1, training_iter, loss.item(), model.likelihood.raw_noise.item())
             )
             optimizer.step()
             # print(time.time() - start_time)
