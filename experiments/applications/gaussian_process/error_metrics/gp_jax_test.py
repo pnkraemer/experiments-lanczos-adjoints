@@ -47,7 +47,7 @@ print(args)
 num_samples_sequential = args.num_samples
 num_matvecs_train_lanczos = args.num_matvecs
 num_matvecs_train_cg = num_samples_sequential * args.num_matvecs
-num_matvecs_eval_cg = 10 * num_matvecs_train_cg
+num_matvecs_eval_cg = 100 * num_matvecs_train_cg
 
 
 memory_bytes = args.num_data**2 * num_matvecs_train_lanczos / args.num_partitions * 32
@@ -232,11 +232,6 @@ for _ in progressbar:
         print("grad", unflatten(grads))
 
         # Optimiser step
-        # p_opt, state = optim_update(
-        #     p_opt, state, subkey, inputs=train_x, targets=train_y
-        # )
-        # aux = state.aux
-        # value = state.value
         slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
         residual = aux["logpdf"]["solve"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
