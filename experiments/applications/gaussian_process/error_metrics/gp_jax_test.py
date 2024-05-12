@@ -36,15 +36,15 @@ args = parser.parse_args()
 print(args)
 
 
-num_data = 4000
+num_data = 400
 num_matvecs_train_lanczos = 10
-num_matvecs_train_cg = 30  # match num_samples * num_matvecs_lanczos?
+num_matvecs_train_cg = 50  # match num_samples * num_matvecs_lanczos?
 num_matvecs_eval_cg = 20
 num_samples_batched = 1
-num_samples_sequential = 3
-num_partitions_train = 1
-rank_precon = 5
-num_epochs = 10  # maaan, let's use a better optimiser...
+num_samples_sequential = 5
+num_partitions_train = 10
+rank_precon = 50
+num_epochs = 50  
 
 memory_bytes = (
     num_data**2
@@ -194,7 +194,7 @@ print("A-priori NLL:", nll)
 print()
 
 optimizer = jaxopt.LBFGS(
-    value_and_grad, has_aux=True, value_and_grad=True, tol=0.1, maxls=3, verbose=True
+    value_and_grad, has_aux=True, value_and_grad=True, verbose=False
 )
 optim_init = jax.jit(optimizer.init_state)
 optim_update = jax.jit(optimizer.update)
@@ -230,6 +230,7 @@ for _ in progressbar:
             p_opt, state, subkey, inputs=train_x, targets=train_y
         )
         aux = state.aux
+        value = state.value 
 
         residual = aux["logpdf"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
