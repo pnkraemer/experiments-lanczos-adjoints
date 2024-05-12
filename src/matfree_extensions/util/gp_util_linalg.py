@@ -205,7 +205,8 @@ def krylov_logdet_slq(
 
         # If a single batch, we never checkpoint.
         if num_batches == 1:
-            return estimate(key), {"std": None, "std_rel": None}
+            value = estimate(key)
+            return value, {"std": 0.0, "std_rel": 0.0}
 
         # Memory-efficient reverse-mode derivatives
         #  See gram_matvec_map_over_batch().

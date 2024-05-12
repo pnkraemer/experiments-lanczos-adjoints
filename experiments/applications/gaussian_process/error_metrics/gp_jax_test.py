@@ -30,7 +30,13 @@ print(jnp.shape(data))
 
 # Choose parameters
 parser = argparse.ArgumentParser()
-parser.add_argument("--seed", default=1)
+parser.add_argument("--seed", type=int, required=True)
+parser.add_argument("--num_data", type=int, required=True)
+parser.add_argument("--rank_precon", type=int, required=True)
+parser.add_argument("--num_partitions", type=int, required=True)
+parser.add_argument("--num_matvecs", type=int, required=True)
+parser.add_argument("--num_samples", type=int, required=True)
+parser.add_argument("--num_epochs", type=int, required=True)
 args = parser.parse_args()
 print(args)
 
@@ -38,29 +44,19 @@ print(args)
 # todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
 #  but it might not be necessary?
-num_data = 40
-num_samples_batched = 1
-num_samples_sequential = 5
-num_matvecs_train_lanczos = 10
-num_matvecs_train_cg = 2 * num_matvecs_train_lanczos
+num_samples_sequential = args.num_samples
+num_matvecs_train_lanczos = args.num_matvecs
+num_matvecs_train_cg = num_samples_sequential * args.num_matvecs
 num_matvecs_eval_cg = 10 * num_matvecs_train_cg
-num_partitions_train = 4
-rank_precon = 5
-num_epochs = 100
 
-memory_bytes = (
-    num_data**2
-    * num_matvecs_train_lanczos
-    * num_samples_batched
-    / num_partitions_train
-    * 32
-)
+
+memory_bytes = args.num_data**2 * num_matvecs_train_lanczos / args.num_partitions * 32
 memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
 key = jax.random.PRNGKey(args.seed)
 key, subkey = jax.random.split(key, num=2)
-data_sampled = data[:num_data, :-1], data[:num_data, -1]
+data_sampled = data[: args.num_data, :-1], data[: args.num_data, -1]
 train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.9)
 # train, test = data_util.split_train_test(*data_sampled, train=0.9)
 (train_x, train_y), (test_x, test_y) = train, test
@@ -83,14 +79,14 @@ test_y = (test_y - mean) / std
 # Set up linear algebra for training
 solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs_train_cg)
 v_like = jnp.ones((len(train_x),), dtype=float)
-sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
+sample = hutchinson.sampler_rademacher(v_like, num=1)
 logdet = gp_util_linalg.krylov_logdet_slq(
     num_matvecs_train_lanczos, sample=sample, num_batches=num_samples_sequential
 )
-cholesky = low_rank.cholesky_partial_pivot(rank=rank_precon)
+cholesky = low_rank.cholesky_partial_pivot(rank=args.rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-gram_matvec = gp_util_linalg.gram_matvec_partitioned(num_partitions_train)
+gram_matvec = gp_util_linalg.gram_matvec_partitioned(args.num_partitions)
 likelihood, p_likelihood = gp_util.likelihood_pdf_p(gram_matvec, logpdf_p, precondition)
 
 # Set up a model
@@ -100,9 +96,6 @@ prior = gp_util.model_gp(m, k)
 
 # Build the loss and evaluate
 loss = gp_util.target_logml(prior, likelihood)
-
-# Set up matrix-free linear algebra
-# todo: why does solve_pcg_fixed_step_reortho nan out??
 
 # Initialise the parameters
 key, subkey = jax.random.split(key)
@@ -210,7 +203,7 @@ print()
 optimizer = optax.adam(0.1)
 state = optimizer.init(p_opt)
 
-progressbar = tqdm.tqdm(range(num_epochs))
+progressbar = tqdm.tqdm(range(args.num_epochs))
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
     f"test-nll: {nll:.3F}, "
