@@ -1,6 +1,7 @@
 import argparse
 import os
 import os.path
+import time
 import urllib.request
 
 import gpytorch
@@ -91,6 +92,7 @@ likelihood.train()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
 progressbar = tqdm.tqdm(range(args.num_epochs))
 progressbar.set_description(f"Loss {1000.:.3f}, noise: {1000.:.3f}")
+time_start = time.perf_counter()
 
 # "Loss" for GPs - the marginal log likelihood
 mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
@@ -101,6 +103,7 @@ gradient_norms: dict = {}
 for name, _p in model.named_parameters():
     gradient_norms[name] = []
 loss_values = []
+loss_timestamps = []
 
 # Configs
 cfg_precon = cfg.max_preconditioner_size(args.rank_precon)
@@ -110,7 +113,6 @@ cfg_lanczos = cfg.max_lanczos_quadrature_iterations(num_matvecs_train_lanczos)
 cfg_probes = cfg.deterministic_probes(True)
 cfg_cg_maxiter = cfg.max_cg_iterations(num_matvecs_train_cg)
 with cfg_precon, cfg_cg_tol, cfg_smpls, cfg_lanczos, cfg_probes, cfg_cg_maxiter:
-    # Start training
     for _ in progressbar:
         try:
             optimizer.zero_grad()
@@ -120,6 +122,7 @@ with cfg_precon, cfg_cg_tol, cfg_smpls, cfg_lanczos, cfg_probes, cfg_cg_maxiter:
 
             # Store values
             loss_values.append(loss)
+            loss_timestamps.append(time.perf_counter() - time_start)
             for name, p in model.named_parameters():
                 gradient_norms[name].append(torch.norm(p.grad))
 
@@ -158,6 +161,9 @@ with torch.no_grad():
 
     array = jnp.asarray(torch.tensor(loss_values).numpy())
     jnp.save(f"{directory}gpytorch_loss_values.npy", array)
+
+    array = jnp.asarray(torch.tensor(loss_timestamps).numpy())
+    jnp.save(f"{directory}gpytorch_loss_timestamps.npy", array)
 
     array = jnp.asarray(rmse.numpy())
     jnp.save(f"{directory}gpytorch_rmse.npy", array)

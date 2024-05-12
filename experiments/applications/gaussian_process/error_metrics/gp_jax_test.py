@@ -26,7 +26,6 @@ if not os.path.isfile("../3droad.mat"):
     )
 
 data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
-print(jnp.shape(data))
 
 # Choose parameters
 parser = argparse.ArgumentParser()
@@ -62,7 +61,7 @@ train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.
 (train_x, train_y), (test_x, test_y) = train, test
 print("Train:", train_x.shape, train_y.shape)
 print("Test:", test_x.shape, test_y.shape)
-
+print()
 
 # Normalise features
 mean = train_x.mean(axis=-2, keepdims=True)
@@ -186,7 +185,7 @@ for _ in range(1):
     grad.block_until_ready()
 t1 = time.perf_counter()
 print("Runtime (value-and-gradient):", (t1 - t0) / 1)
-
+print()
 
 # Pre-compile the test-loss
 predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
@@ -203,23 +202,21 @@ print()
 optimizer = optax.adam(0.1)
 state = optimizer.init(p_opt)
 
+raw_noise = unflatten(p_opt)[-1]["raw_noise"]
 progressbar = tqdm.tqdm(range(args.num_epochs))
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
-    f"test-nll: {nll:.3F}, "
-    f"rmse: {rmse:.3F}, "
+    f"raw_noise: {raw_noise:.3F}, "
     f"cg_error: {cg_error:.1e}, "
     f"slq_std_rel: {slq_std_rel:.1e}, "
 )
-start = time.perf_counter()
 
-loss_timestamps = [0.0]
-test_nlls = [nll]
-test_rmses = [rmse]
+loss_timestamps = []
 loss_curve = [float(mll_train)]
 cg_errors = [float(cg_error)]
 slq_std_rels = [float(slq_std_rel)]
 
+start = time.perf_counter()
 for _ in progressbar:
     try:
         # Take the value and gradient
@@ -229,33 +226,22 @@ for _ in progressbar:
         )
         updates, state = optimizer.update(grads, state)
         p_opt = optax.apply_updates(p_opt, updates)
-        print("grad", unflatten(grads))
 
-        # Optimiser step
+        # Evaluate numerics-errors
         slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
         residual = aux["logpdf"]["solve"]["residual"]
         cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
-        # # Test NLL and RMSE
-        predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
-        rmse = root_mean_square_error(predicted, target=test_y)
-        nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
-        # print(state)
-        # print()
-        print(unflatten(p_opt)[-1]["raw_noise"])
-        print()
-
         # Save values
+        raw_noise = unflatten(p_opt)[-1]["raw_noise"]
         current = time.perf_counter()
         loss_curve.append(float(value))
+        loss_timestamps.append(time.perf_counter() - start)
         cg_errors.append(float(cg_error))
-        test_rmses.append(float(rmse))
-        test_nlls.append(float(nll))
-        loss_timestamps.append(current - start)
+        slq_std_rels.append(float(slq_std_rel))
         progressbar.set_description(
             f"loss: {value:.3F}, "
-            f"test-nll: {nll:.3F}, "
-            f"rmse: {rmse:.3F}, "
+            f"raw_noise: {raw_noise:.3F}, "
             f"cg_error: {cg_error:.1e}, "
             f"slq_std_rel: {slq_std_rel:.1e} "
         )
@@ -265,12 +251,20 @@ for _ in progressbar:
 end = time.perf_counter()
 print()
 
+
 # Complete the data collection
-loss_timestamps = jnp.asarray(loss_timestamps)
-test_nlls = jnp.asarray(test_nlls)
-test_rmses = jnp.asarray(test_rmses)
 loss_curve = jnp.asarray(loss_curve)
+loss_timestamps = jnp.asarray(loss_timestamps)
 cg_errors = jnp.asarray(cg_errors)
+slq_std_rels = jnp.asarray(slq_std_rels)
+
+
+# Evaluate: RMSE & NLL
+predicted, _ = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
+rmse = root_mean_square_error(predicted, target=test_y)
+nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
+test_nlls = jnp.asarray(nll)
+test_rmses = jnp.asarray(rmse)
 
 
 # Save results to a file
@@ -281,3 +275,4 @@ jnp.save(f"{directory}test_nlls.npy", test_nlls)
 jnp.save(f"{directory}test_rmses.npy", test_rmses)
 jnp.save(f"{directory}loss_curve.npy", loss_curve)
 jnp.save(f"{directory}cg_errors.npy", cg_errors)
+jnp.save(f"{directory}slq_std_rels.npy", cg_errors)
