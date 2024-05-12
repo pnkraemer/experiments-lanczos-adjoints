@@ -206,9 +206,7 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def likelihood_gaussian_pdf(
-    gram_matvec: Callable, logpdf: Callable
-) -> tuple[Callable, dict]:
+def likelihood_pdf(gram_matvec: Callable, logpdf: Callable) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
@@ -235,7 +233,7 @@ def likelihood_gaussian_pdf(
     return likelihood, p
 
 
-def likelihood_gaussian_pdf_p(
+def likelihood_pdf_p(
     gram_matvec: Callable, logpdf_p: Callable, precondition: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
@@ -272,7 +270,7 @@ def likelihood_gaussian_pdf_p(
     return likelihood, p
 
 
-def likelihood_gaussian_condition(
+def likelihood_condition(
     gram_matvec: Callable, solve: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
