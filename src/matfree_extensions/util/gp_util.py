@@ -9,124 +9,8 @@ import jax.numpy as jnp
 # todo: implement a logpdf with a custom vjp that reuses a CG call?!
 
 
-# todo: if we rename this to model_gp, we could
-#  even place it next to model_mlp and whatnot
-def model(mean_fun: Callable, kernel_fun: Callable) -> Callable:
-    """Construct a Gaussian process model."""
-
-    def prior(params_mean: dict, params_kernel: dict):
-        mean = mean_fun(**params_mean)
-        kernel = kernel_fun(**params_kernel)
-        return mean, kernel
-
-    return prior
-
-
-def likelihood_gaussian_pdf(
-    gram_matvec: Callable, logpdf: Callable
-) -> tuple[Callable, dict]:
-    """Construct a Gaussian likelihood."""
-
-    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
-        # todo: implement a box-constraint?
-        raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise)
-
-        def lazy_kernel(i: int, j: int):
-            return kernel(inputs[i], inputs[j]) + noise * (i == j)
-
-        def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
-            idx = jnp.arange(len(inputs))
-            return cov(idx, idx, v)
-
-        def logpdf_partial(targets, *p_logpdf):
-            mean_array = jax.vmap(mean)(inputs)
-            return logpdf(targets, *p_logpdf, mean=mean_array, cov_matvec=cov_matvec)
-
-        return logpdf_partial
-
-    p = {"raw_noise": jnp.empty(())}
-    return likelihood, p
-
-
-def likelihood_gaussian_pdf_p(
-    gram_matvec: Callable, logpdf_p: Callable, precondition: Callable
-) -> tuple[Callable, dict]:
-    """Construct a Gaussian likelihood."""
-
-    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
-        raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise)
-
-        def lazy_kernel(i: int, j: int):
-            return kernel(inputs[i], inputs[j]) + noise * (i == j)
-
-        def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
-            idx = jnp.arange(len(inputs))
-            return cov(idx, idx, v)
-
-        pre, info = precondition(lazy_kernel, len(inputs))
-
-        def logpdf_partial(targets, *p_logpdf):
-            mean_array = jax.vmap(mean)(inputs)
-            val, aux = logpdf_p(
-                targets,
-                *p_logpdf,
-                mean=mean_array,
-                cov_matvec=cov_matvec,
-                P=lambda v: pre(v, noise),
-            )
-            return val, {"precondition": info, "logpdf": aux}
-
-        return logpdf_partial
-
-    p = {"raw_noise": jnp.empty(())}
-    return likelihood, p
-
-
-def likelihood_gaussian_condition(
-    gram_matvec: Callable, solve: Callable
-) -> tuple[Callable, dict]:
-    """Construct a Gaussian likelihood."""
-
-    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
-        raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise)
-
-        def lazy_kernel(i: int, j: int):
-            return kernel(inputs[i], inputs[j]) + noise * (i == j)
-
-        def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
-            idx = jnp.arange(len(inputs))
-            return cov(idx, idx, v)
-
-        def condition_partial(xs, targets):
-            mean_array = jax.vmap(mean)(inputs)
-            weights, info = solve(cov_matvec, targets - mean_array)
-
-            def cov_matvec_prior(v):
-                cov = gram_matvec(kernel)
-                return cov(xs, inputs, v)
-
-            mean_eval = jax.vmap(mean)(xs)
-            return mean_eval + cov_matvec_prior(weights), {"solve": info}
-
-        return condition_partial
-
-    p = {"raw_noise": jnp.empty(())}
-    return likelihood, p
-
-
-# todo: if we build the preconditioner internally,
-#  GP-model constructors simplify a lot
-def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
-    """Construct a marginal log-likelihood function."""
+def target_logml(model: Callable, /, likelihood_pdf: Callable) -> Callable:
+    """Construct a log-marginal-likelihood function."""
 
     def mll(
         inputs,
@@ -137,7 +21,7 @@ def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
         params_likelihood: dict,
     ):
         # Evaluate the marginal data likelihood
-        mean, kernel = prior(params_mean=params_mean, params_kernel=params_kernel)
+        mean, kernel = model(params_mean=params_mean, params_kernel=params_kernel)
         loss = likelihood_pdf(
             inputs, mean=mean, kernel=kernel, params=params_likelihood
         )
@@ -147,98 +31,28 @@ def mll_exact(prior: Callable, likelihood_pdf: Callable) -> Callable:
     return mll
 
 
-def posterior_exact(prior: Callable, likelihood: Callable) -> Callable:
+def target_posterior(model: Callable, /, likelihood: Callable) -> Callable:
     """Construct a marginal log-likelihood function."""
 
     def posterior(
         inputs, targets, params_mean: dict, params_kernel: dict, params_likelihood: dict
     ):
-        # Evaluate the marginal data likelihood
-        mean, kernel = prior(params_mean, params_kernel)
+        mean, kernel = model(params_mean, params_kernel)
         condition = likelihood(inputs, mean, kernel, params=params_likelihood)
         return functools.partial(condition, targets=targets), {}
 
     return posterior
 
 
-def logpdf_scipy_stats() -> Callable:
-    """Construct a logpdf function that wraps jax.scipy.stats."""
+def model_gp(mean_fun: Callable, kernel_fun: Callable) -> Callable:
+    """Construct a Gaussian process model."""
 
-    def logpdf(y, /, *, mean, cov_matvec: Callable):
-        # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov_matvec)(mean)
+    def prior(params_mean: dict, params_kernel: dict):
+        mean = mean_fun(**params_mean)
+        kernel = kernel_fun(**params_kernel)
+        return mean, kernel
 
-        _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
-        return _logpdf_fun(y, mean=mean, cov=cov_matrix), {}
-
-    return logpdf
-
-
-def logpdf_cholesky() -> Callable:
-    """Construct a logpdf function that relies on a Cholesky decomposition."""
-
-    def logpdf(y, /, *, mean, cov_matvec: Callable):
-        # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov_matvec)(mean)
-
-        # Cholesky-decompose
-        cholesky = jnp.linalg.cholesky(cov_matrix)
-
-        # Log-determinant
-        logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
-
-        # Mahalanobis norm
-
-        def solve_triangular(A, b):
-            return jax.scipy.linalg.solve_triangular(A, b, lower=True, trans=False)
-
-        tmp = solve_triangular(cholesky, y - mean)
-        mahalanobis = jnp.dot(tmp, tmp)
-
-        # Combine the terms
-        (n,) = jnp.shape(mean)
-
-        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), {}
-
-    return logpdf
-
-
-def logpdf_krylov(solve: Callable, logdet: Callable):
-    def logpdf(y, *params_logdet, mean, cov_matvec: Callable):
-        # Log-determinant
-        logdet_, info_logdet = logdet(cov_matvec, *params_logdet)
-        logdet_ /= 2
-
-        # Mahalanobis norm
-        tmp, info_solve = solve(cov_matvec, y - mean)
-        mahalanobis = jnp.dot(y - mean, tmp)
-
-        # Combine the terms
-        info = {"logdet": info_logdet, "solve": info_solve}
-        (n,) = jnp.shape(mean)
-        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
-
-    return logpdf
-
-
-def logpdf_krylov_p(solve_p: Callable, logdet: Callable):
-    """Evaluate a logpdf via preconditioned Krylov methods."""
-
-    def logpdf(y, *params_logdet, mean, cov_matvec, P: Callable):
-        # Log-determinant
-        logdet_, info_logdet = logdet(cov_matvec, *params_logdet)
-        logdet_ /= 2
-
-        # Mahalanobis norm
-        tmp, info_solve = solve_p(cov_matvec, y - mean, P=P)
-        mahalanobis = jnp.dot(y - mean, tmp)
-
-        # Combine the terms
-        info = {"logdet": info_logdet, "solve": info_solve}
-        (n,) = jnp.shape(mean)
-        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
-
-    return logpdf
+    return prior
 
 
 def mean_constant(*, shape_out) -> tuple[Callable, dict]:
@@ -390,3 +204,184 @@ def _assert_shapes(x, y, shape_in):
         error = f"The shape {jnp.shape(x)} of the first argument "
         error += "does not match 'shape_in'={shape_in}"
         raise ValueError(error)
+
+
+def likelihood_gaussian_pdf(
+    gram_matvec: Callable, logpdf: Callable
+) -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
+
+    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
+        # Apply a soft-plus because GPyTorch does
+        # todo: implement a box-constraint?
+        raw_noise = params["raw_noise"]
+        noise = _softplus(raw_noise)
+
+        def lazy_kernel(i: int, j: int):
+            return kernel(inputs[i], inputs[j]) + noise * (i == j)
+
+        def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
+            idx = jnp.arange(len(inputs))
+            return cov(idx, idx, v)
+
+        def logpdf_partial(targets, *p_logpdf):
+            mean_array = jax.vmap(mean)(inputs)
+            return logpdf(targets, *p_logpdf, mean=mean_array, cov_matvec=cov_matvec)
+
+        return logpdf_partial
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
+
+
+def likelihood_gaussian_pdf_p(
+    gram_matvec: Callable, logpdf_p: Callable, precondition: Callable
+) -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
+
+    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
+        # Apply a soft-plus because GPyTorch does
+        raw_noise = params["raw_noise"]
+        noise = _softplus(raw_noise)
+
+        def lazy_kernel(i: int, j: int):
+            return kernel(inputs[i], inputs[j]) + noise * (i == j)
+
+        def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
+            idx = jnp.arange(len(inputs))
+            return cov(idx, idx, v)
+
+        pre, info = precondition(lazy_kernel, len(inputs))
+
+        def logpdf_partial(targets, *p_logpdf):
+            mean_array = jax.vmap(mean)(inputs)
+            val, aux = logpdf_p(
+                targets,
+                *p_logpdf,
+                mean=mean_array,
+                cov_matvec=cov_matvec,
+                P=lambda v: pre(v, noise),
+            )
+            return val, {"precondition": info, "logpdf": aux}
+
+        return logpdf_partial
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
+
+
+def likelihood_gaussian_condition(
+    gram_matvec: Callable, solve: Callable
+) -> tuple[Callable, dict]:
+    """Construct a Gaussian likelihood."""
+
+    def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
+        # Apply a soft-plus because GPyTorch does
+        raw_noise = params["raw_noise"]
+        noise = _softplus(raw_noise)
+
+        def lazy_kernel(i: int, j: int):
+            return kernel(inputs[i], inputs[j]) + noise * (i == j)
+
+        def cov_matvec(v):
+            cov = gram_matvec(lazy_kernel)
+            idx = jnp.arange(len(inputs))
+            return cov(idx, idx, v)
+
+        def condition_partial(xs, targets):
+            mean_array = jax.vmap(mean)(inputs)
+            weights, info = solve(cov_matvec, targets - mean_array)
+
+            def cov_matvec_prior(v):
+                cov = gram_matvec(kernel)
+                return cov(xs, inputs, v)
+
+            mean_eval = jax.vmap(mean)(xs)
+            return mean_eval + cov_matvec_prior(weights), {"solve": info}
+
+        return condition_partial
+
+    p = {"raw_noise": jnp.empty(())}
+    return likelihood, p
+
+
+def logpdf_scipy_stats() -> Callable:
+    """Construct a logpdf function that wraps jax.scipy.stats."""
+
+    def logpdf(y, /, *, mean, cov_matvec: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov_matvec)(mean)
+
+        _logpdf_fun = jax.scipy.stats.multivariate_normal.logpdf
+        return _logpdf_fun(y, mean=mean, cov=cov_matrix), {}
+
+    return logpdf
+
+
+def logpdf_cholesky() -> Callable:
+    """Construct a logpdf function that relies on a Cholesky decomposition."""
+
+    def logpdf(y, /, *, mean, cov_matvec: Callable):
+        # Materialise the covariance matrix
+        cov_matrix = jax.jacfwd(cov_matvec)(mean)
+
+        # Cholesky-decompose
+        cholesky = jnp.linalg.cholesky(cov_matrix)
+
+        # Log-determinant
+        logdet = jnp.sum(jnp.log(jnp.diag(cholesky)))
+
+        # Mahalanobis norm
+
+        def solve_triangular(A, b):
+            return jax.scipy.linalg.solve_triangular(A, b, lower=True, trans=False)
+
+        tmp = solve_triangular(cholesky, y - mean)
+        mahalanobis = jnp.dot(tmp, tmp)
+
+        # Combine the terms
+        (n,) = jnp.shape(mean)
+
+        return -logdet - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), {}
+
+    return logpdf
+
+
+def logpdf_krylov(solve: Callable, logdet: Callable):
+    def logpdf(y, *params_logdet, mean, cov_matvec: Callable):
+        # Log-determinant
+        logdet_, info_logdet = logdet(cov_matvec, *params_logdet)
+        logdet_ /= 2
+
+        # Mahalanobis norm
+        tmp, info_solve = solve(cov_matvec, y - mean)
+        mahalanobis = jnp.dot(y - mean, tmp)
+
+        # Combine the terms
+        info = {"logdet": info_logdet, "solve": info_solve}
+        (n,) = jnp.shape(mean)
+        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
+
+    return logpdf
+
+
+def logpdf_krylov_p(solve_p: Callable, logdet: Callable):
+    """Evaluate a logpdf via preconditioned Krylov methods."""
+
+    def logpdf(y, *params_logdet, mean, cov_matvec, P: Callable):
+        # Log-determinant
+        logdet_, info_logdet = logdet(cov_matvec, *params_logdet)
+        logdet_ /= 2
+
+        # Mahalanobis norm
+        tmp, info_solve = solve_p(cov_matvec, y - mean, P=P)
+        mahalanobis = jnp.dot(y - mean, tmp)
+
+        # Combine the terms
+        info = {"logdet": info_logdet, "solve": info_solve}
+        (n,) = jnp.shape(mean)
+        return -logdet_ - 0.5 * mahalanobis - n / 2 * jnp.log(2 * jnp.pi), info
+
+    return logpdf

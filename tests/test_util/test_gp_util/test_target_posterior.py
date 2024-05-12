@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from matfree_extensions.util import gp_util, gp_util_linalg
 
 
-def test_predict_posterior(n=100):
+def test_posterior_mean_interpolates_data_if_noise_is_small(n=100):
     # Set up: data
     xs = jnp.linspace(0, 1, num=n)
     ys = jnp.linspace(0, 1, num=n)
@@ -19,7 +19,7 @@ def test_predict_posterior(n=100):
     # Set up: model
     m, p_mean = gp_util.mean_constant(shape_out=())
     k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
-    prior = gp_util.model(m, k)
+    prior = gp_util.model_gp(m, k)
     gram_matvec = gp_util_linalg.gram_matvec_full_batch()
     likelihood, p_likelihood = gp_util.likelihood_gaussian_condition(
         gram_matvec, solve=solve
@@ -27,7 +27,7 @@ def test_predict_posterior(n=100):
     p_likelihood["raw_noise"] = -10.0
 
     # Evaluate the posterior
-    posterior = gp_util.posterior_exact(prior, likelihood)
+    posterior = gp_util.target_posterior(prior, likelihood)
     mean, _ = posterior(
         xs,
         ys,

@@ -107,7 +107,7 @@ def case_preconditioner_partial_cholesky_pivot():
 
 @pytest_cases.parametrize_with_cases("logpdf", cases=".", prefix="case_logpdf_")
 @pytest_cases.parametrize_with_cases("gram_matvec", cases=".", prefix="case_gram_")
-def test_mll_exact(logpdf, gram_matvec):
+def test_logml_matches_gpytorch_mll(logpdf, gram_matvec):
     # Compute the reference model
     reference = _model_and_mll_via_gpytorch()
     (x, y), value_ref, ((lengthscale, outputscale), noise) = reference
@@ -118,9 +118,9 @@ def test_mll_exact(logpdf, gram_matvec):
     # Set up a GP model
     m, p_mean = gp_util.mean_constant(shape_out=())
     k, p_kernel = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp_util.model(m, k)
+    prior = gp_util.model_gp(m, k)
     likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf(gram_matvec, logpdf_fun)
-    loss = gp_util.mll_exact(prior, likelihood)
+    loss = gp_util.target_logml(prior, likelihood)
 
     # Ensure that the parameters match
     p_mean["constant_value"] = 0.0
@@ -151,7 +151,7 @@ def test_mll_exact(logpdf, gram_matvec):
 )
 @pytest_cases.parametrize_with_cases("gram_matvec", cases=".", prefix="case_gram_")
 @pytest_cases.parametrize_with_cases("precon", cases=".", prefix="case_preconditioner_")
-def test_mll_exact_precondition(logpdf_p, gram_matvec, precon):
+def test_logml_matches_gpytorch_mll_preconditioned(logpdf_p, gram_matvec, precon):
     # Compute the reference model
     reference = _model_and_mll_via_gpytorch()
     (x, y), value_ref, ((lengthscale, outputscale), noise) = reference
@@ -162,12 +162,12 @@ def test_mll_exact_precondition(logpdf_p, gram_matvec, precon):
     # Set up a GP model
     m, p_mean = gp_util.mean_constant(shape_out=())
     k, p_kernel = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
-    prior = gp_util.model(m, k)
+    prior = gp_util.model_gp(m, k)
 
     likelihood, p_likelihood = gp_util.likelihood_gaussian_pdf_p(
         gram_matvec, logpdf_fun, precon
     )
-    loss = gp_util.mll_exact(prior, likelihood)
+    loss = gp_util.target_logml(prior, likelihood)
 
     # Ensure that the parameters match
     p_mean["constant_value"] = 0.0
