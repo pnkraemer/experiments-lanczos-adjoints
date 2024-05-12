@@ -24,19 +24,24 @@ data = torch.Tensor(loadmat("../3droad.mat")["data"])
 
 # Choose parameters
 parser = argparse.ArgumentParser()
+parser.add_argument("--name", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--num_data", type=int, required=True)
 parser.add_argument("--rank_precon", type=int, required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
 parser.add_argument("--num_samples", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
+parser.add_argument("--cg_tol", type=float, required=True)
 args = parser.parse_args()
+print()
+print(f"RUNNING: {args.name}")
+print()
 print(args)
 
 # Process parameters
 torch.manual_seed(args.seed)
 num_matvecs_train_lanczos = args.num_matvecs
-num_matvecs_train_cg = 2 * num_matvecs_train_lanczos
+num_matvecs_train_cg = args.num_samples * num_matvecs_train_lanczos
 num_matvecs_eval_cg = 100 * num_matvecs_train_cg
 
 # Make train/test split
@@ -60,9 +65,9 @@ train_x, train_y = train_x.contiguous(), train_y.contiguous()
 test_x, test_y = test_x.contiguous(), test_y.contiguous()
 
 # Put on CUDA
-# output_device = torch.device("cuda:0")
-# train_x, train_y = train_x.to(output_device), train_y.to(output_device)
-# test_x, test_y = test_x.to(output_device), test_y.to(output_device)
+output_device = torch.device("cuda:0")
+train_x, train_y = train_x.to(output_device), train_y.to(output_device)
+test_x, test_y = test_x.to(output_device), test_y.to(output_device)
 
 
 class ExactGPModel(gpytorch.models.ExactGP):
@@ -80,10 +85,10 @@ class ExactGPModel(gpytorch.models.ExactGP):
 
 
 # Initialise likelihood and model
-likelihood = gpytorch.likelihoods.GaussianLikelihood()
-model = ExactGPModel(train_x, train_y, likelihood)
-# likelihood = gpytorch.likelihoods.GaussianLikelihood().cuda()
-# model = ExactGPModel(train_x, train_y, likelihood).cuda()
+# likelihood = gpytorch.likelihoods.GaussianLikelihood()
+# model = ExactGPModel(train_x, train_y, likelihood)
+likelihood = gpytorch.likelihoods.GaussianLikelihood().cuda()
+model = ExactGPModel(train_x, train_y, likelihood).cuda()
 
 
 # Train with Adam
@@ -107,12 +112,11 @@ loss_timestamps = []
 
 # Configs
 cfg_precon = cfg.max_preconditioner_size(args.rank_precon)
-cfg_cg_tol = cfg.cg_tolerance(1e-2)
+cfg_cg_tol = cfg.cg_tolerance(args.cg_tol)
 cfg_smpls = cfg.num_trace_samples(args.num_samples)
 cfg_lanczos = cfg.max_lanczos_quadrature_iterations(num_matvecs_train_lanczos)
-cfg_probes = cfg.deterministic_probes(True)
 cfg_cg_maxiter = cfg.max_cg_iterations(num_matvecs_train_cg)
-with cfg_precon, cfg_cg_tol, cfg_smpls, cfg_lanczos, cfg_probes, cfg_cg_maxiter:
+with cfg_precon, cfg_cg_tol, cfg_smpls, cfg_lanczos, cfg_cg_maxiter:
     for _ in progressbar:
         try:
             optimizer.zero_grad()
@@ -141,31 +145,35 @@ likelihood.eval()
 with torch.no_grad():
     # RMSE
     cfg_cg_maxiter = cfg.max_cg_iterations(num_matvecs_eval_cg)
-    cfg_cg_tol = cfg.eval_cg_tolerance(1e-4)
+    cfg_cg_tol = cfg.eval_cg_tolerance(1e-2)
     cfg_skip_var = cfg.skip_posterior_variances()
-    cfg_comp = cfg.fast_computations(False, False, False)
-    with cfg_cg_maxiter, cfg_cg_tol, cfg_skip_var, cfg_comp:
+    with cfg_cg_maxiter, cfg_cg_tol, cfg_skip_var:
         pred_dist = likelihood(model(test_x))
         mean = pred_dist.mean
         rmse = mean.sub(test_y).pow(2).mean().sqrt()
 
     # NLL ??
+    print()
+    print("RMSE:", rmse)
+    print("NLL: (todo)")
+    print()    
 
     # Save results to a file
     directory = exp_util.matching_directory(__file__, "results/")
     os.makedirs(directory, exist_ok=True)
+    path = f"{directory}{args.name}_s{args.seed}_n{args.num_data}"
 
     for name, _ in model.named_parameters():
         array = jnp.asarray(torch.tensor(gradient_norms[name]).numpy())
-        jnp.save(f"{directory}gpytorch_gradient_norms_{name}.npy", array)
+        jnp.save(f"{path}_gradient_norms_{name}.npy", array)
 
     array = jnp.asarray(torch.tensor(loss_values).numpy())
-    jnp.save(f"{directory}gpytorch_loss_values.npy", array)
+    jnp.save(f"{path}_loss_values.npy", array)
 
     array = jnp.asarray(torch.tensor(loss_timestamps).numpy())
-    jnp.save(f"{directory}gpytorch_loss_timestamps.npy", array)
+    jnp.save(f"{path}_loss_timestamps.npy", array)
 
-    array = jnp.asarray(rmse.numpy())
-    jnp.save(f"{directory}gpytorch_rmse.npy", array)
+    array = jnp.asarray(rmse.detach().cpu().numpy())
+    jnp.save(f"{path}_rmse.npy", array)
 
     print()

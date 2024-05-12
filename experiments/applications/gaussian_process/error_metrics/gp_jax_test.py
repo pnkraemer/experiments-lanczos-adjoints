@@ -29,6 +29,7 @@ data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
 
 # Choose parameters
 parser = argparse.ArgumentParser()
+parser.add_argument("--name", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--num_data", type=int, required=True)
 parser.add_argument("--rank_precon", type=int, required=True)
@@ -37,6 +38,9 @@ parser.add_argument("--num_matvecs", type=int, required=True)
 parser.add_argument("--num_samples", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
 args = parser.parse_args()
+print()
+print(f"RUNNING: {args.name}")
+print()
 print(args)
 
 
@@ -45,7 +49,7 @@ print(args)
 #  but it might not be necessary?
 num_samples_sequential = args.num_samples
 num_matvecs_train_lanczos = args.num_matvecs
-num_matvecs_train_cg = num_samples_sequential * args.num_matvecs
+num_matvecs_train_cg = args.num_samples * args.num_matvecs
 num_matvecs_eval_cg = 100 * num_matvecs_train_cg
 
 
@@ -56,8 +60,8 @@ print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 key = jax.random.PRNGKey(args.seed)
 key, subkey = jax.random.split(key, num=2)
 data_sampled = data[: args.num_data, :-1], data[: args.num_data, -1]
-train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.9)
-# train, test = data_util.split_train_test(*data_sampled, train=0.9)
+# train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.9)
+train, test = data_util.split_train_test(*data_sampled, train=0.9)
 (train_x, train_y), (test_x, test_y) = train, test
 print("Train:", train_x.shape, train_y.shape)
 print("Test:", test_x.shape, test_y.shape)
@@ -274,16 +278,21 @@ nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
 test_nlls = jnp.asarray(nll)
 test_rmses = jnp.asarray(rmse)
 
+print()
+print("RMSE:", rmse)
+print("NLL:", nll)
+print()
 
 # Save results to a file
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
-jnp.save(f"{directory}loss_timestamps.npy", loss_timestamps)
-jnp.save(f"{directory}test_nlls.npy", test_nlls)
-jnp.save(f"{directory}test_rmses.npy", test_rmses)
-jnp.save(f"{directory}loss_curve.npy", loss_curve)
-jnp.save(f"{directory}cg_errors.npy", cg_errors)
-jnp.save(f"{directory}slq_std_rels.npy", cg_errors)
+path = f"{directory}{args.name}_s{args.seed}_n{args.num_data}"
+jnp.save(f"{path}_loss_timestamps.npy", loss_timestamps)
+jnp.save(f"{path}_test_nlls.npy", test_nlls)
+jnp.save(f"{path}_test_rmses.npy", test_rmses)
+jnp.save(f"{path}_loss_curve.npy", loss_curve)
+jnp.save(f"{path}_cg_errors.npy", cg_errors)
+jnp.save(f"{path}_slq_std_rels.npy", cg_errors)
 
 for name, value in gradient_norms.items():
-    jnp.save(f"{directory}gradient_norms_{name}.npy", jnp.asarray(value))
+    jnp.save(f"{path}_gradient_norms_{name}.npy", jnp.asarray(value))
