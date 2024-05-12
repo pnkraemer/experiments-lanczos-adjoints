@@ -3,18 +3,22 @@ import os
 
 import jax
 import jax.numpy as jnp
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matfree import hutchinson, lanczos
 from matfree_extensions.util import exp_util
 from tueplots import axes
 
+# todo: set fig- and fontsizes correctly
+# todo: display the error of the mean
+# todo: use a bigger matrix?
+
 plt.rcParams.update(axes.lines())
 plt.rcParams.update(axes.legend())
 plt.rcParams.update({"font.size": 9})
 
-matplotlib.rc("xtick", labelsize=8)
-matplotlib.rc("ytick", labelsize=8)
+mpl.rc("xtick", labelsize=8)
+mpl.rc("ytick", labelsize=8)
 
 
 ndata = 6
