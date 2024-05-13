@@ -9,6 +9,7 @@ import tqdm
 from matfree import hutchinson
 from matfree_extensions import cg, low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, uci_util
+import jaxopt
 
 
 def load_data(which: str, /):
@@ -39,7 +40,6 @@ def root_mean_square_error(x, *, target):
     error_abs = x - target
     error = error_abs
     return jnp.sqrt(jnp.mean(error**2))
-
 
 
 # Choose parameters
@@ -108,7 +108,7 @@ train, test = data_util.split_train_test_shuffle(
 
 
 # Set up linear algebra for training
-solve_p = cg.pcg_adaptive(rtol=0., atol=args.cg_tol, maxiter=100, miniter=10)
+solve_p = cg.pcg_adaptive(rtol=0.0, atol=args.cg_tol, maxiter=100, miniter=10)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
 logdet = gp_util.krylov_logdet_slq(
@@ -151,12 +151,7 @@ p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 def mll_lanczos(params, *p_logdet, Xs, ys):
     p1, p2, p3 = unflatten(params)
     val, info = loss(
-        Xs,
-        ys,
-        *p_logdet,
-        params_mean=p1,
-        params_kernel=p2,
-        params_likelihood=p3,
+        Xs, ys, *p_logdet, params_mean=p1, params_kernel=p2, params_likelihood=p3
     )
     return -1.0 * val / len(Xs), info
 
@@ -170,11 +165,8 @@ def mll_cholesky(params, Xs, ys):
     lklhd, _ = gp_util.likelihood_pdf(gram_matvec, logpdf, constrain=constrain)
 
     loss_fun = gp_util.target_logml(prior, lklhd)
-    val, info = loss_fun(
-        Xs, ys, params_mean=p1, params_kernel=p2, params_likelihood=p3
-    )
+    val, info = loss_fun(Xs, ys, params_mean=p1, params_kernel=p2, params_likelihood=p3)
     return -1.0 * val / len(Xs), info
-
 
 
 @jax.jit
@@ -188,11 +180,7 @@ def predict_mean(params, x, Xs, ys):
     posterior = gp_util.target_posterior(prior, likelihood_)
 
     postmean, _ = posterior(
-        inputs=Xs,
-        targets=ys,
-        params_mean=p1,
-        params_kernel=p2,
-        params_likelihood=p3,
+        inputs=Xs, targets=ys, params_mean=p1, params_kernel=p2, params_likelihood=p3
     )
     return postmean(x)
 
@@ -245,16 +233,14 @@ def predict_mean(params, x, Xs, ys):
 # # print("Initial params:", unflatten(p_opt))
 
 
-optimizer = optax.sgd(0.2)
+optimizer = optax.adam(0.1)
 state = optimizer.init(p_opt)
-# optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True, stepsize=0.1, linesearch="backtracking")
-# state = optimizer.init_state(p_opt, subkey, inputs=train_x, targets=train_y)
-
 value_and_grad = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0, has_aux=True))
+# optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True)
+# state = optimizer.init_state(p_opt, subkey, Xs=train_x, ys=train_y)
 
-(value, aux), grads = value_and_grad(
-    p_opt, subkey, Xs=train_x, ys=train_y
-)
+
+(value, aux), grads = value_and_grad(p_opt, subkey, Xs=train_x, ys=train_y)
 noise = constrain(unflatten(p_opt)[-1]["raw_noise"])
 progressbar = tqdm.tqdm(range(args.num_epochs))
 residual = aux["logpdf"]["solve"]["residual_abs"]
@@ -284,11 +270,13 @@ for _ in progressbar:
     try:
         # Take the value and gradient
         key, subkey = jax.random.split(key, num=2)
-        (value, aux), grads = value_and_grad(
-            p_opt, subkey, Xs=train_x, ys=train_y
-        )
+        (value, aux), grads = value_and_grad(p_opt, subkey, Xs=train_x, ys=train_y)
         updates, state = optimizer.update(grads, state)
         p_opt = optax.apply_updates(p_opt, updates)
+        # p_opt, state = optimizer.update(p_opt, state, subkey, Xs=train_x, ys=train_y)
+        # value = state.value
+        # aux = state.aux
+        # grads = state.grad
 
         # Evaluate relevant quantities
         slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
@@ -299,9 +287,7 @@ for _ in progressbar:
             for name, gradval in p_dict.items():
                 gradient_norms[name].append(jnp.linalg.norm(gradval))
 
-        predicted, predict_info = predict_mean(
-            p_opt, test_x, Xs=train_x, ys=train_y
-        )
+        predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
         # rmse = root_mean_square_error(predicted, target=test_y)
 
         # Save values
@@ -338,7 +324,7 @@ cg_numsteps_all = jnp.asarray(cg_numsteps_all)
 
 
 # Evaluate: RMSE & NLL
-predicted, predict_info = predict_mean(p_opt, test_x,Xs=train_x, ys=train_y)
+predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
 rmse = root_mean_square_error(predicted, target=test_y)
 nll, _ = mll_cholesky(p_opt, Xs=test_x, ys=test_y)
 test_nlls = jnp.asarray(nll)

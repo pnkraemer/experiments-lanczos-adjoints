@@ -129,10 +129,12 @@ with (
 
     # Initialise randomly
     hypers = {
-        'likelihood.noise_covar.raw_noise': torch.randn(()).cuda(),
-        'covar_module.base_kernel.raw_lengthscale': torch.randn((train_x.size(-1),)).cuda(),
-        'covar_module.raw_outputscale': torch.randn(()).cuda(),
-        'mean_module.raw_constant': torch.randn(()).cuda(),
+        "likelihood.noise_covar.raw_noise": torch.randn(()).cuda(),
+        "covar_module.base_kernel.raw_lengthscale": torch.randn(
+            (train_x.size(-1),)
+        ).cuda(),
+        "covar_module.raw_outputscale": torch.randn(()).cuda(),
+        "mean_module.raw_constant": torch.randn(()).cuda(),
     }
     model.initialize(**hypers)
 
@@ -141,7 +143,8 @@ with (
     likelihood.train()
 
     # "Loss" for GPs - the marginal log likelihood
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    # optimizer = torch.optim.LBFGS(model.parameters())
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
     # Prepare saving some results
@@ -168,12 +171,9 @@ with (
             # print()
             # print()
 
-            # print(loss)
             optimizer.zero_grad()
             output = model(train_x)
             loss = -mll(output, train_y)
-            # print(loss)
-
             loss.backward()
             optimizer.step()
 

@@ -14,10 +14,8 @@
 module load cuda/12.4
 source ../penv/bin/activate
 
-# Optimisation with SGD(0.2) is built in.
-# (Unlike most tutorials, we don't use Adam 
-#  because Pytorch's and Optax's implementations differ)
-# (learning rate 0.2 because no method converged with 0.1)
+# Optimisation with Adam(0.1) is built in.
+# (Even though Pytorch's and Optax's implementations differ slightly)
 # 
 # Eval-CG tolerance 1e-4 is built in.
 # 80/20 Train/test splits are built in.
@@ -27,18 +25,19 @@ source ../penv/bin/activate
 num_matvecs=10  
 
 # Like in GPyTorch
-cg_tol=1e0      
-rank_precon=15 
+cg_tol=1e0       
+rank_precon=15  
 
 # Similar to GPyTorch (slightly less, but checkpoints...)
 num_samples=10  
 
 # Like in most papers
-num_epochs=50    
+num_epochs=50
 
-for seed in 1 2 3
+
+for seed in 1 2 3 4 5
 do
-  for dataset in elevators protein concrete power_plant elevators protein kin40k kegg_directed kegg_undirected
+  for dataset in concrete power_plant elevators protein kin40k kegg_directed kegg_undirected 
   do
     python experiments/applications/gaussian_process/train/optim_logml_gpytorch_adaptive.py \
       --name final-gpytorch --seed $seed --num_matvecs $num_matvecs \
