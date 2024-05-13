@@ -72,14 +72,15 @@ def kernel_scaled_matern_32(*, shape_in, shape_out) -> tuple[Callable, dict]:
     The parametrisation equals that of GPyTorch's
     `ScaleKernel(MaternKernel(nu=1.5, constraint=Positive), constraint=Positive)`
     """
+    constrain = constraint_greater_than(0.0)
 
     def parametrize(*, raw_lengthscale, raw_outputscale):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
 
             # Apply a soft-plus because GPyTorch does
-            lengthscale = _softplus(raw_lengthscale)
-            outputscale = _softplus(raw_outputscale)
+            lengthscale = constrain(raw_lengthscale)
+            outputscale = constrain(raw_outputscale)
 
             # Evaluate the scaled norm of differences
             # (expanding |x-y|^2 for GPU-speed)
@@ -112,14 +113,15 @@ def kernel_scaled_matern_12(*, shape_in, shape_out) -> tuple[Callable, dict]:
     The parametrisation equals that of GPyTorch's
     `ScaleKernel(MaternKernel(nu=0.5, constraint=Positive), constraint=Positive)`
     """
+    constrain = constraint_greater_than(0.0)
 
     def parametrize(*, raw_lengthscale, raw_outputscale):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
 
             # Apply a soft-plus because GPyTorch does
-            lengthscale = _softplus(raw_lengthscale)
-            outputscale = _softplus(raw_outputscale)
+            lengthscale = constrain(raw_lengthscale)
+            outputscale = constrain(raw_outputscale)
 
             # Evaluate the scaled norm of differences
             # (expanding |x-y|^2 for GPU-speed)
@@ -152,14 +154,15 @@ def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
     The parametrisation equals that of GPyTorch's
     `ScaleKernel(RBFKernel(constraint=Positive), constraint=Positive)`
     """
+    constrain = constraint_greater_than(0.0)
 
     def parametrize(*, raw_lengthscale, raw_outputscale):
         def k(x, y):
             _assert_shapes(x, y, shape_in)
 
             # Apply a soft-plus because GPyTorch does
-            lengthscale = _softplus(raw_lengthscale)
-            outputscale = _softplus(raw_outputscale)
+            lengthscale = constrain(raw_lengthscale)
+            outputscale = constrain(raw_outputscale)
 
             # Compute the norm of the differences:
             x /= lengthscale
@@ -181,18 +184,21 @@ def kernel_scaled_rbf(*, shape_in, shape_out) -> tuple[Callable, dict]:
     return parametrize, params_like
 
 
-def _softplus(x, beta=1.0, threshold=20.0):
-    # Shamelessly stolen from:
-    # https://github.com/google/jax/issues/18443
+def constraint_greater_than(minval, /):
+    def softplus(x, beta=1.0, threshold=20.0):
+        # Shamelessly stolen from:
+        # https://github.com/google/jax/issues/18443
 
-    # mirroring the pytorch implementation
-    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
-    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
-    return jax.lax.select(
-        x * beta < threshold,
-        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
-        x,
-    )
+        # mirroring the pytorch implementation
+        #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
+        x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
+        return jax.lax.select(
+            x * beta < threshold,
+            1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
+            x,
+        )
+
+    return lambda s: minval + softplus(s)
 
 
 def _assert_shapes(x, y, shape_in):
@@ -208,21 +214,19 @@ def _assert_shapes(x, y, shape_in):
 
 
 def likelihood_pdf(
-    gram_matvec: Callable, logpdf: Callable, *, noise_min: float
+    matvec: Callable, logpdf: Callable, *, constrain: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
-        # todo: implement a box-constraint?
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_min
+        noise = constrain(raw_noise)
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
 
         def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
+            cov = matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
@@ -237,24 +241,19 @@ def likelihood_pdf(
 
 
 def likelihood_pdf_p(
-    gram_matvec: Callable,
-    logpdf_p: Callable,
-    precondition: Callable,
-    *,
-    noise_min: float,
+    matvec: Callable, logpdf_p: Callable, precondition: Callable, *, constrain: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_min
+        noise = constrain(raw_noise)
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j])
 
         def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
+            cov = matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
@@ -278,20 +277,19 @@ def likelihood_pdf_p(
 
 
 def likelihood_condition(
-    gram_matvec: Callable, solve: Callable, *, noise_min: float
+    matvec: Callable, solve: Callable, *, constrain: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_min
+        noise = constrain(raw_noise)
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
 
         def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
+            cov = matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
@@ -300,7 +298,7 @@ def likelihood_condition(
             weights, info = solve(cov_matvec, targets - mean_array)
 
             def cov_matvec_prior(v):
-                cov = gram_matvec(kernel)
+                cov = matvec(kernel)
                 return cov(xs, inputs, v)
 
             mean_eval = jax.vmap(mean)(xs)
@@ -313,20 +311,19 @@ def likelihood_condition(
 
 
 def likelihood_condition_p(
-    gram_matvec: Callable, solve_p: Callable, precondition, *, noise_min: float
+    matvec: Callable, solve_p: Callable, *, precondition: Callable, constrain: Callable
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs: jax.Array, mean: Callable, kernel: Callable, params: dict):
-        # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_min
+        noise = constrain(raw_noise)
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j])
 
         def cov_matvec(v):
-            cov = gram_matvec(lazy_kernel)
+            cov = matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
             return cov(idx, idx, v)
 
@@ -342,7 +339,7 @@ def likelihood_condition_p(
             )
 
             def cov_matvec_prior(v):
-                cov = gram_matvec(kernel)
+                cov = matvec(kernel)
                 return cov(xs, inputs, v)
 
             mean_eval = jax.vmap(mean)(xs)

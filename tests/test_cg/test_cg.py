@@ -18,14 +18,14 @@ def test_cg_fixed():
     assert jnp.allclose(approximation, solution)
 
 
-def test_pcg_adaptive():
+def test_cg_adaptive():
     eigvals = jnp.arange(1.0, 10.0)
     A = test_util.symmetric_matrix_from_eigenvalues(eigvals)
     b = jnp.arange(1.0, 10.0)
     solution = jnp.linalg.solve(A, b)
 
-    solve = cg.pcg_adaptive(atol=1e-5, rtol=1e-5)
-    approximation, _info = solve(lambda v: A @ v, b, lambda v: v)
+    solve = cg.cg_adaptive(atol=1e-5, rtol=1e-5, maxiter=100)
+    approximation, _info = solve(lambda v: A @ v, b)
     assert jnp.allclose(approximation, solution)
 
 
@@ -83,7 +83,7 @@ def test_pcg_fixed_reortho():
     _approximation, info = solve(lambda v: A @ v + sigma * v, b, lambda v: P @ v)
     Q = info["Q"]
     jnp.allclose(Q.T @ P @ Q, jnp.eye(len(Q.T)))
-    pytest.fail()  # something is still not great...
+    pytest.fail("PCG+reortho needs more work.")
 
 
 def test_cg_more_matvecs_improve_error():

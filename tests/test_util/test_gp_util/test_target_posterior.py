@@ -21,8 +21,9 @@ def test_posterior_mean_interpolates_data_if_noise_is_small(n=100):
     k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(), shape_out=())
     prior = gp_util.model_gp(m, k)
     gram_matvec = gp_util.gram_matvec()
+    constrain = gp_util.constraint_greater_than(1e-4)
     likelihood, p_likelihood = gp_util.likelihood_condition(
-        gram_matvec, solve=solve, noise_min=1e-4
+        gram_matvec, solve=solve, constrain=constrain
     )
     p_likelihood["raw_noise"] = -10.0
 
