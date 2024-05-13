@@ -11,6 +11,14 @@ from matfree_extensions import cg, low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, uci_util
 
 
+def load_data(which: str, /):
+    if which == "concrete":
+        return uci_util.uci_concrete()
+    if which == "power_plant":
+        return uci_util.uci_power_plant()
+    raise ValueError
+
+
 def root_mean_square_error(x, *, target):
     error_abs = x - target
     return jnp.sqrt(jnp.mean(error_abs**2))
@@ -20,6 +28,7 @@ def root_mean_square_error(x, *, target):
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
+parser.add_argument("--dataset", type=str, required=True)
 parser.add_argument("--rank_precon", type=int, required=True)
 parser.add_argument("--num_partitions", type=int, required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
@@ -42,8 +51,7 @@ train_test_split = 0.9
 # Load data
 key = jax.random.PRNGKey(args.seed)
 key, subkey = jax.random.split(key, num=2)
-# inputs, targets = uci_util.uci_road_network()
-inputs, targets = uci_util.uci_concrete()
+inputs, targets = load_data(args.dataset)
 
 # Subsample data to a multiple of num_partitions
 num_data_raw = len(inputs)
@@ -314,7 +322,7 @@ print()
 # Save results to a file
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
-path = f"{directory}{args.name}_s{args.seed}_n{num_data}"
+path = f"{directory}{args.name}_{args.dataset}_s{args.seed}"
 jnp.save(f"{path}_loss_timestamps.npy", loss_timestamps)
 jnp.save(f"{path}_test_nlls.npy", test_nlls)
 jnp.save(f"{path}_test_rmses.npy", test_rmses)
