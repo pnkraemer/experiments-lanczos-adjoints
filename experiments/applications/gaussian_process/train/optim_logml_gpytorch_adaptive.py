@@ -141,7 +141,7 @@ with (
     likelihood.train()
 
     # "Loss" for GPs - the marginal log likelihood
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
     # Prepare saving some results

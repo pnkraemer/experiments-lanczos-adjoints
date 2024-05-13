@@ -245,7 +245,7 @@ def predict_mean(params, x, Xs, ys):
 # # print("Initial params:", unflatten(p_opt))
 
 
-optimizer = optax.sgd(0.1)
+optimizer = optax.sgd(0.2)
 state = optimizer.init(p_opt)
 # optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True, stepsize=0.1, linesearch="backtracking")
 # state = optimizer.init_state(p_opt, subkey, inputs=train_x, targets=train_y)
