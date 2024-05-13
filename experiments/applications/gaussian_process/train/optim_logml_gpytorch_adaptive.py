@@ -49,10 +49,8 @@ parser.add_argument("--num_samples", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--cg_tol", type=float, required=True)
 args = parser.parse_args()
-# print()
-# print(f"RUNNING: {args.name}")
-# print()
-# print(args)
+print(args)
+
 
 # Process parameters
 torch.manual_seed(args.seed)
@@ -70,13 +68,13 @@ inputs, targets = inputs[idx], targets[idx]
 num_data_raw = len(inputs)
 coeff = num_data_raw // (5 * args.num_partitions)
 num_data = int(coeff * 5 * args.num_partitions)
-print(
-    f"Subsampling data from N={num_data_raw} points "
-    f"to N={num_data} points to match "
-    f"P={args.num_partitions} partitions "
-    f"and the train-test-split "
-    f"from the other code."
-)
+# print(
+#     f"Subsampling data from N={num_data_raw} points "
+#     f"to N={num_data} points to match "
+#     f"P={args.num_partitions} partitions "
+#     f"and the train-test-split "
+#     f"from the other code."
+# )
 inputs, targets = inputs[:num_data], targets[:num_data]
 
 # Configs
@@ -89,11 +87,9 @@ with (
     cfg.deterministic_probes(False),
     cfg.skip_logdet_forward(False),
     cfg.fast_computations(True, True, True),
-    # cfg.max_cholesky_size(1),
     cfg.max_root_decomposition_size(args.num_matvecs),
     cfg.min_preconditioning_size(10),
     cfg.tridiagonal_jitter(0.0),
-    # cfg.min_variance(0.),
 ):
     # Make train/test split
     n_train = int(0.8 * len(inputs))
@@ -145,7 +141,7 @@ with (
     likelihood.train()
 
     # "Loss" for GPs - the marginal log likelihood
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
     # Prepare saving some results
@@ -235,3 +231,5 @@ with torch.no_grad():
     jnp.save(f"{path}_rmse.npy", array)
 
     # print()
+print()
+print()

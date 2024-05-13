@@ -1,20 +1,22 @@
 #!/bin/bash
 #BSUB -q gpuv100
-#BSUB -J gp_jax
+#BSUB -J gp-train-final-run
 #BSUB -n 8
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 4:00
+#BSUB -W 24:00
 #BSUB -R "select[gpu32gb]"
 #BSUB -R "rusage[mem=10GB]"
 #BSUB -R "span[hosts=1]"
-#BSUB -o logs/final_run_uci-%J.out
-#BSUB -e logs/final_run_uci-%J.err
+#BSUB -o logs/gp-train-final-run-%J.out
+#BSUB -e logs/gp-train-final-run-%J.err
 
 ### Load the cuda module
 module load cuda/12.4
 source ../penv/bin/activate
 
-# Optimisation with Adam(0.1) is built in.
+# Optimisation with SGD(0.1) is built in.
+# (Unlike most tutorials, we don't use Adam 
+#  because Pytorch's and Optax's implementations differ)
 # Eval-CG tolerance 1e-4 is built in.
 # 80/20 Train/test splits are built in.
 
@@ -31,7 +33,7 @@ num_samples=10
 # Like in most papers
 num_epochs=50    
 
-for seed in 1
+for seed in 1 2 3
 do
   for dataset in concrete power_plant elevators protein kin40k kegg_directed kegg_undirected
   do

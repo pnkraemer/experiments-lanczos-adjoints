@@ -41,6 +41,7 @@ def root_mean_square_error(x, *, target):
     return jnp.sqrt(jnp.mean(error**2))
 
 
+
 # Choose parameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, required=True)
@@ -53,15 +54,15 @@ parser.add_argument("--num_samples", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--cg_tol", type=float, required=True)
 args = parser.parse_args()
-
+print(args)
 # print("Arguments:", args)
 
 
 # todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
 #  but it might not be necessary?
-num_samples_sequential = 1
-num_samples_batched = args.num_samples
+num_samples_sequential = args.num_samples
+num_samples_batched = 1
 num_matvecs_train_lanczos = args.num_matvecs
 noise_minval = 1e-4
 train_test_split = 0.8
@@ -75,12 +76,12 @@ inputs, targets = load_data(args.dataset)
 num_data_raw = len(inputs)
 coeff = num_data_raw // (5 * args.num_partitions)
 num_data = int(coeff * 5 * args.num_partitions)
-print(
-    f"Subsampling data from N={num_data_raw} points "
-    f"to N={num_data} points to satisfy "
-    f"P={args.num_partitions} partitions "
-    f"and the train-test-split."
-)
+# print(
+#     f"Subsampling data from N={num_data_raw} points "
+#     f"to N={num_data} points to satisfy "
+#     f"P={args.num_partitions} partitions "
+#     f"and the train-test-split."
+# )
 
 
 # Predict memory consumption
@@ -107,7 +108,7 @@ train, test = data_util.split_train_test_shuffle(
 
 
 # Set up linear algebra for training
-solve_p = cg.pcg_adaptive(rtol=args.cg_tol, atol=args.cg_tol, maxiter=100, miniter=10)
+solve_p = cg.pcg_adaptive(rtol=0., atol=args.cg_tol, maxiter=100, miniter=10)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
 logdet = gp_util.krylov_logdet_slq(
@@ -244,7 +245,7 @@ def predict_mean(params, x, Xs, ys):
 # # print("Initial params:", unflatten(p_opt))
 
 
-optimizer = optax.adam(0.1)
+optimizer = optax.sgd(0.1)
 state = optimizer.init(p_opt)
 # optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True, stepsize=0.1, linesearch="backtracking")
 # state = optimizer.init_state(p_opt, subkey, inputs=train_x, targets=train_y)
@@ -261,7 +262,7 @@ cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 cg_numsteps = aux["logpdf"]["solve"]["num_steps"]
 progressbar.set_description(
     f"loss: {value}, "
-    f"rmse: {None}, "
+    # f"rmse: {None}, "
     f"cg_error: {cg_error}, "
     f"cg_numsteps: {cg_numsteps}, "
 )
@@ -301,13 +302,13 @@ for _ in progressbar:
         predicted, predict_info = predict_mean(
             p_opt, test_x, Xs=train_x, ys=train_y
         )
-        rmse = root_mean_square_error(predicted, target=test_y)
+        # rmse = root_mean_square_error(predicted, target=test_y)
 
         # Save values
         raw_noise = unflatten(p_opt)[-1]["raw_noise"]
         noise = constrain(raw_noise)
         current = time.perf_counter()
-        test_rmses.append(float(rmse))
+        # test_rmses.append(float(rmse))
         loss_curve.append(float(value))
         loss_timestamps.append(time.perf_counter() - start)
         cg_errors.append(float(cg_error))
@@ -315,7 +316,7 @@ for _ in progressbar:
         # slq_std_rels.append(float(slq_std_rel))
         progressbar.set_description(
             f"loss: {value:.3F}, "
-            f"rmse: {rmse:.3E}, "
+            # f"rmse: {rmse:.3E}, "
             f"cg_error: {cg_error:.1e}, "
             f"cg_numsteps: {int(cg_numsteps)}, "
         )
@@ -345,8 +346,9 @@ test_rmses = jnp.asarray(test_rmses)
 
 
 print("RMSE:", rmse)
+# print("RMSE (rel -> saved):", rmse)
 # print("NLL:", nll)
-predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
+# predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
 # print("RMSE-error:", predict_error)
 # print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
 
@@ -365,3 +367,6 @@ jnp.save(f"{path}_cg_numsteps_all.npy", cg_numsteps_all)
 
 for name, value in gradient_norms.items():
     jnp.save(f"{path}_gradient_norms_{name}.npy", jnp.asarray(value))
+
+print()
+print()
