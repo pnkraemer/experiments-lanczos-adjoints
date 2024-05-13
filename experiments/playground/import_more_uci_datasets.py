@@ -25,6 +25,10 @@ print("\nKEGG undirected:")
 inputs, targets = uci_util.uci_kegg_undirected()
 print(inputs.shape, targets.shape)
 
+print("\nKEGG directed:")
+inputs, targets = uci_util.uci_kegg_directed()
+print(inputs.shape, targets.shape)
+
 
 print("\nParkinson:")
 inputs, targets = uci_util.uci_parkinson()
@@ -48,4 +52,19 @@ print(inputs.shape, targets.shape)
 
 print("\nPower plant:")
 inputs, targets = uci_util.uci_power_plant()
+print(inputs.shape, targets.shape)
+
+
+print("\nKin40k:")
+inputs, targets = uci_util.uci_kin40k()
+print(inputs.shape, targets.shape)
+
+
+print("\nElevators:")
+inputs, targets = uci_util.uci_elevators()
+print(inputs.shape, targets.shape)
+
+
+print("\nSlice:")
+inputs, targets = uci_util.uci_slice()
 print(inputs.shape, targets.shape)

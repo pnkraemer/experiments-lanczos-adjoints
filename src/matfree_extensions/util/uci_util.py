@@ -6,6 +6,16 @@ https://github.com/kayween/alternating-projection-for-gp/blob/main/datasets/uci/
 The adaptations are:
 - Port to JAX
 - Replace Dataset objects with load()-style functions.
+
+
+For some of these, we need to run
+
+python -m pip install git+https://github.com/treforevans/uci_datasets.git
+
+respectively:
+
+python -m pip install ucimlrepo
+
 """
 
 import functools
@@ -18,6 +28,7 @@ import jax.numpy as jnp
 import pandas as pd
 import requests  # type: ignore
 import scipy.io
+import uci_datasets
 import ucimlrepo
 
 
@@ -265,6 +276,42 @@ def uci_power_plant():
     y = jnp.asarray(dataset.data.targets.values).squeeze()
 
     # Normalise
+    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    y = y - jnp.mean(y)
+    return X, y
+
+
+@_use_cache_if_possible_otherwise_download_and_cache("kin40k")
+def uci_kin40k():
+    data = uci_datasets.Dataset("kin40k")
+    X, y = jnp.asarray(data.x), jnp.asarray(data.y).squeeze()
+    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    y = y - jnp.mean(y)
+    return X, y
+
+
+@_use_cache_if_possible_otherwise_download_and_cache("elevators")
+def uci_elevators():
+    data = uci_datasets.Dataset("elevators")
+    X, y = jnp.asarray(data.x), jnp.asarray(data.y).squeeze()
+    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    y = y - jnp.mean(y)
+    return X, y
+
+
+@_use_cache_if_possible_otherwise_download_and_cache("slice")
+def uci_slice():
+    data = uci_datasets.Dataset("slice")
+    X, y = jnp.asarray(data.x), jnp.asarray(data.y).squeeze()
+    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    y = y - jnp.mean(y)
+    return X, y
+
+
+@_use_cache_if_possible_otherwise_download_and_cache("kegg_directed")
+def uci_kegg_directed():
+    data = uci_datasets.Dataset("kegg_directed")
+    X, y = jnp.asarray(data.x), jnp.asarray(data.y).squeeze()
     X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
     y = y - jnp.mean(y)
     return X, y
