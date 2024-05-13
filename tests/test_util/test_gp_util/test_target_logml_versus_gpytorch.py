@@ -7,7 +7,7 @@ import pytest_cases
 import torch
 from matfree import hutchinson
 from matfree_extensions import cg, low_rank
-from matfree_extensions.util import gp_util, gp_util_linalg
+from matfree_extensions.util import gp_util
 
 
 @pytest_cases.case
@@ -32,7 +32,7 @@ def case_logpdf_krylov():
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
 
     solve = cg.cg_adaptive(atol=1e-4, rtol=0.0, maxiter=1000)
-    logdet = gp_util_linalg.krylov_logdet_slq(
+    logdet = gp_util.krylov_logdet_slq(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
     logpdf = gp_util.logpdf_krylov(solve=solve, logdet=logdet)
@@ -51,7 +51,7 @@ def case_logpdf_krylov_reuse():
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
     solve = cg.cg_adaptive(atol=1e-4, rtol=0.0, maxiter=1000)
-    logdet = gp_util_linalg.krylov_logdet_slq_vjp_reuse(
+    logdet = gp_util.krylov_logdet_slq_vjp_reuse(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
     logpdf = gp_util.logpdf_krylov(solve, logdet)
@@ -69,7 +69,7 @@ def case_precon_logpdf_krylov():
 
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    logdet = gp_util_linalg.krylov_logdet_slq(
+    logdet = gp_util.krylov_logdet_slq(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
 
@@ -81,17 +81,17 @@ def case_precon_logpdf_krylov():
 
 @pytest_cases.case
 def case_gram_matvec_full_batch():
-    return gp_util_linalg.gram_matvec()
+    return gp_util.gram_matvec()
 
 
 @pytest_cases.case
 def case_gram_matvec_partitioned_checkpoint():
-    return gp_util_linalg.gram_matvec_partitioned(1, checkpoint=True)
+    return gp_util.gram_matvec_partitioned(1, checkpoint=True)
 
 
 @pytest_cases.case
 def case_gram_matvec_sequential():
-    return gp_util_linalg.gram_matvec_sequential(checkpoint=False)
+    return gp_util.gram_matvec_sequential(checkpoint=False)
 
 
 @pytest_cases.case

@@ -10,7 +10,7 @@ import scipy.io
 import tqdm
 from matfree import hutchinson
 from matfree_extensions import cg, low_rank
-from matfree_extensions.util import data_util, exp_util, gp_util, gp_util_linalg
+from matfree_extensions.util import data_util, exp_util, gp_util
 
 
 def root_mean_square_error(x, *, target):
@@ -80,17 +80,17 @@ test_y = (test_y - mean) / std
 
 
 # Set up linear algebra for training
-# solve_p = gp_util_linalg.krylov_solve_pcg_fixed_step(num_matvecs_train_cg)
+# solve_p = gp_util.krylov_solve_pcg_fixed_step(num_matvecs_train_cg)
 solve_p = cg.pcg_adaptive(atol=args.cg_tol, rtol=0.0, maxiter=1_000)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=1)
-logdet = gp_util_linalg.krylov_logdet_slq(
+logdet = gp_util.krylov_logdet_slq(
     num_matvecs_train_lanczos, sample=sample, num_batches=num_samples_sequential
 )
 cholesky = low_rank.cholesky_partial_pivot(rank=args.rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-gram_matvec = gp_util_linalg.gram_matvec_partitioned(args.num_partitions)
+gram_matvec = gp_util.gram_matvec_partitioned(args.num_partitions)
 likelihood, p_likelihood = gp_util.likelihood_pdf_p(
     noise_bd, gram_matvec, logpdf_p, precondition
 )
