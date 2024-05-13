@@ -89,7 +89,6 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
             
             error_rel = r / (atol + jnp.abs(x)*rtol)
             is_error_large = jnp.sqrt(jnp.mean(error_rel**2)) > 1.
-            # is_error_large = jnp.any(jnp.abs(r) > (atol + rtol*jnp.abs(x)))
             is_first_step = nsteps == 0.
             is_not_beyond_maxiter = nsteps < maxiter            
             proceed= jnp.logical_or(is_error_large, is_first_step)

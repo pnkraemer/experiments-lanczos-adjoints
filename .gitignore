@@ -2,7 +2,10 @@
 mfe/
 
 # Results
-results/applications/gaussian_process/benchmark_matvecs_versus_keops/*
+results/applications/gaussian_process/*
+
+# HPC logs
+logs/
 
 # Data
 .ssgetpy

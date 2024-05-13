@@ -11,9 +11,9 @@ from matfree import hutchinson
 from matfree_extensions import cg, lanczos
 
 # todo: delete all lineax and jax wrappers for CG
+# (actually, delete all CG from here and move code back to gp_util?)
 
-
-def gram_matvec_sequential(*, checkpoint: bool = True):
+def gram_matvec_sequential(*, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by row-wise mapping.
@@ -49,7 +49,7 @@ def gram_matvec_sequential(*, checkpoint: bool = True):
     return matvec
 
 
-def gram_matvec_partitioned(num: int, *, checkpoint: bool = True):
+def gram_matvec_partitioned(num: int, *, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 
     Compute the matrix-vector product by mapping over full batches.
@@ -197,7 +197,7 @@ def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
 
 
 def krylov_logdet_slq(
-    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool = False
+    krylov_depth, /, *, sample: Callable, num_batches: int, checkpoint: bool
 ):
     def logdet(A: Callable, /, key):
         integrand = lanczos.integrand_spd(jnp.log, krylov_depth, A)
