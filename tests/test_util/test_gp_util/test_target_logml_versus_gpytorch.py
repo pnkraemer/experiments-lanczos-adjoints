@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import pytest_cases
 import torch
 from matfree import hutchinson
-from matfree_extensions import low_rank
+from matfree_extensions import cg, low_rank
 from matfree_extensions.util import gp_util, gp_util_linalg
 
 
@@ -31,7 +31,7 @@ def case_logpdf_krylov():
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
 
-    solve = gp_util_linalg.krylov_solve_cg_jax(tol=1e-4, maxiter=1000)
+    solve = cg.cg_adaptive(atol=1e-4, rtol=0.0, maxiter=1000)
     logdet = gp_util_linalg.krylov_logdet_slq(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
@@ -50,7 +50,7 @@ def case_logpdf_krylov_reuse():
 
     x_like = jnp.ones((3,), dtype=float)
     sample = hutchinson.sampler_rademacher(x_like, num=num_samples)
-    solve = gp_util_linalg.krylov_solve_cg_jax(tol=1e-4, maxiter=1000)
+    solve = cg.cg_adaptive(atol=1e-4, rtol=0.0, maxiter=1000)
     logdet = gp_util_linalg.krylov_logdet_slq_vjp_reuse(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
@@ -72,7 +72,8 @@ def case_precon_logpdf_krylov():
     logdet = gp_util_linalg.krylov_logdet_slq(
         krylov_depth, sample=sample, num_batches=num_batches, checkpoint=False
     )
-    solve = gp_util_linalg.krylov_solve_pcg_fixed_step(3)
+
+    solve = cg.pcg_fixed_step(3)
     logpdf = gp_util.logpdf_krylov_p(solve_p=solve, logdet=logdet)
     params = (jax.random.PRNGKey(1),)
     return logpdf, params

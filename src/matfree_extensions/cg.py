@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 
 
-def cg_fixed_step(num_matvecs: int, /):
-    pcg_solve = pcg_fixed_step(num_matvecs)
+def cg_fixed_step(*args, **kwargs):
+    pcg_solve = pcg_fixed_step(*args, **kwargs)
 
     def cg(A: Callable, b: jax.Array):
         return pcg_solve(A, b, lambda v: v)
@@ -57,6 +57,15 @@ def pcg_fixed_step(num_matvecs: int, /):
         return body_fun
 
     return pcg
+
+
+def cg_adaptive(**kwargs):
+    pcg_solve = pcg_adaptive(**kwargs)
+
+    def cg(A: Callable, b: jax.Array):
+        return pcg_solve(A, b, lambda v: v)
+
+    return cg
 
 
 # atol and rtol follow jnp.allclose logic
@@ -122,8 +131,8 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
     return pcg
 
 
-def cg_fixed_step_reortho(num_matvecs: int, /):
-    pcg_solve = pcg_fixed_step_reortho(num_matvecs)
+def cg_fixed_step_reortho(*args, **kwargs):
+    pcg_solve = pcg_fixed_step_reortho(*args, **kwargs)
 
     def cg(A: Callable, b: jax.Array):
         return pcg_solve(A, b, lambda v: v)

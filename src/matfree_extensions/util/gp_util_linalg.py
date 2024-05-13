@@ -1,14 +1,12 @@
 """Linear algebra for Gaussian processes and Gram matrices."""
 
-import warnings
 from typing import Callable
 
 import jax
 import jax.numpy as jnp
-import lineax
 from matfree import hutchinson
 
-from matfree_extensions import cg, lanczos
+from matfree_extensions import lanczos
 
 # todo: delete all lineax and jax wrappers for CG
 # (actually, delete all CG from here and move code back to gp_util?)
@@ -130,71 +128,6 @@ def gram_matrix(fun: Callable, /) -> Callable:
     """Turn a covariance function into a gram-matrix function."""
     tmp = jax.vmap(fun, in_axes=(None, 0), out_axes=-1)
     return jax.vmap(tmp, in_axes=(0, None), out_axes=-2)
-
-
-def krylov_solve_cg_jax(*, tol, maxiter):
-    def solve(A: Callable, /, b: jax.Array):
-        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter)
-        return result, info
-
-    return solve
-
-
-def krylov_solve_pcg_jax(*, tol, maxiter):
-    def solve(A: Callable, /, b: jax.Array, P: Callable):
-        result, info = jax.scipy.sparse.linalg.cg(A, b, tol=tol, maxiter=maxiter, M=P)
-        return result, info
-
-    return solve
-
-
-def krylov_solve_cg_lineax(*, atol, rtol, max_steps):
-    msg = "Lineax's CG is not differentiable. Use for debugging only."
-    warnings.warn(msg, stacklevel=1)
-
-    def solve(A: Callable, /, b: jax.Array):
-        spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
-        op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
-        solver = lineax.CG(atol=atol, rtol=rtol, max_steps=max_steps)
-        solution = lineax.linear_solve(op, b, solver=solver)
-        return solution.value, solution.stats
-
-    return solve
-
-
-def krylov_solve_pcg_lineax(*, atol, rtol, max_steps):
-    msg = "Preconditioning with lineax is potentially broken."
-    warnings.warn(msg, stacklevel=1)
-    msg = "Lineax's CG is not differentiable. Use for debugging only."
-    warnings.warn(msg, stacklevel=1)
-
-    def solve(A: Callable, /, b: jax.Array, P: Callable):
-        spd_tag = [lineax.symmetric_tag, lineax.positive_semidefinite_tag]
-        op = lineax.FunctionLinearOperator(A, b, tags=spd_tag)
-        solver = lineax.CG(atol=atol, rtol=rtol, max_steps=max_steps)
-
-        precon = lineax.FunctionLinearOperator(P, b, tags=spd_tag)
-        options = {"preconditioner": precon}
-        solution = lineax.linear_solve(op, b, solver=solver, options=options)
-        return solution.value, solution.stats
-
-    return solve
-
-
-def krylov_solve_cg_fixed_step(num_matvecs: int, /):
-    return cg.cg_fixed_step(num_matvecs)
-
-
-def krylov_solve_cg_fixed_step_reortho(num_matvecs: int, /):
-    return cg.cg_fixed_step_reortho(num_matvecs)
-
-
-def krylov_solve_pcg_fixed_step(num_matvecs: int, /):
-    return cg.pcg_fixed_step(num_matvecs)
-
-
-def krylov_solve_pcg_fixed_step_reortho(num_matvecs: int, /):
-    return cg.pcg_fixed_step_reortho(num_matvecs)
 
 
 def krylov_logdet_slq(
