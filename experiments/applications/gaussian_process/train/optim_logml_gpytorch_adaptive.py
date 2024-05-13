@@ -42,6 +42,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--dataset", type=str, required=True)
+parser.add_argument("--num_partitions", type=int, required=True)
 parser.add_argument("--rank_precon", type=int, required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
 parser.add_argument("--num_samples", type=int, required=True)
@@ -61,9 +62,22 @@ num_matvecs_train_lanczos = args.num_matvecs
 inputs, targets = load_data(args.dataset)
 inputs = torch.from_numpy(onp.asarray(inputs).copy())
 targets = torch.from_numpy(onp.asarray(targets).copy())
-# idx = torch.randperm(len(inputs))
-# inputs, targets = inputs[idx], targets[idx]
+idx = torch.randperm(len(inputs))
+inputs, targets = inputs[idx], targets[idx]
 
+# Subsample data to a multiple of num_partitions
+# This script doesn't have to, but we the other code does.
+num_data_raw = len(inputs)
+coeff = num_data_raw // (5 * args.num_partitions)
+num_data = int(coeff * 5 * args.num_partitions)
+print(
+    f"Subsampling data from N={num_data_raw} points "
+    f"to N={num_data} points to match "
+    f"P={args.num_partitions} partitions "
+    f"and the train-test-split "
+    f"from the other code."
+)
+inputs, targets = inputs[:num_data], targets[:num_data]
 
 # Configs
 with (
@@ -118,19 +132,20 @@ with (
     model = ExactGPModel(train_x, train_y, likelihood).cuda()
 
     # Initialise randomly
-    # hypers = {
-    #     'likelihood.noise_covar.raw_noise': torch.randn(()),
-    #     'covar_module.base_kernel.raw_lengthscale': torch.randn(()),
-    #     'covar_module.raw_outputscale': torch.randn(()),
-    # }
-    # model.initialize(**hypers)
+    hypers = {
+        'likelihood.noise_covar.raw_noise': torch.randn(()).cuda(),
+        'covar_module.base_kernel.raw_lengthscale': torch.randn((train_x.size(-1),)).cuda(),
+        'covar_module.raw_outputscale': torch.randn(()).cuda(),
+        'mean_module.raw_constant': torch.randn(()).cuda(),
+    }
+    model.initialize(**hypers)
 
     # Train with Adam
     model.train()
     likelihood.train()
 
     # "Loss" for GPs - the marginal log likelihood
-    optimizer = torch.optim.SGD(model.parameters(), lr=1.0)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
 
     # Prepare saving some results
@@ -171,13 +186,13 @@ with (
             # Store values
             loss_values.append(loss)
             loss_timestamps.append(time.perf_counter() - time_start)
-            for name, p in model.named_parameters():
-                gradient_norms[name].append(torch.norm(p.grad))
-                # print(name, p.grad)
-                # print()
+            # for name, p in model.named_parameters():
+            #     gradient_norms[name].append(torch.norm(p.grad))
+            #     print(name, p.grad)
+            # print()
 
             # assert False
-            # progressbar.set_description(f"Loss {loss:.3f}")
+            progressbar.set_description(f"Loss {loss:.3f}")
         except KeyboardInterrupt:
             break
 
@@ -198,7 +213,7 @@ with torch.no_grad():
 
     # NLL ??
 
-    # print("RMSE:", rmse)
+    print("RMSE:", rmse)
     # print("NLL: (todo)")
 
     # Save results to a file
