@@ -17,6 +17,7 @@ data/uci_processed/*
 !data/uci_processed/power_plant
 data/pde_wave/*
 !data/pde_wave/16x16*
+!data/uci/
 
 
 # Byte-compiled / optimized / DLL files
