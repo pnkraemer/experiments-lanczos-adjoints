@@ -6,7 +6,6 @@ https://github.com/kayween/alternating-projection-for-gp/blob/main/datasets/uci/
 The adaptations are:
 - Port to JAX
 - Replace Dataset objects with load()-style functions.
-
 """
 
 import functools
@@ -19,6 +18,7 @@ import jax.numpy as jnp
 import pandas as pd
 import requests  # type: ignore
 import scipy.io
+import ucimlrepo
 
 
 def _use_cache_if_possible_otherwise_download_and_cache(name: str):
@@ -239,4 +239,32 @@ def uci_sgemm():
     X = raw_data[:, :-1]
     y = raw_data[:, -1]
     y = jnp.log(y)
+    return X, y
+
+
+@_use_cache_if_possible_otherwise_download_and_cache("concrete")
+def uci_concrete():
+    dataset = ucimlrepo.fetch_ucirepo(id=165)
+
+    # data (as pandas dataframes)
+    X = jnp.asarray(dataset.data.features.values)
+    y = jnp.asarray(dataset.data.targets.values).squeeze()
+
+    # Normalise
+    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    y = y - jnp.mean(y)
+    return X, y
+
+
+@_use_cache_if_possible_otherwise_download_and_cache("power_plant")
+def uci_power_plant():
+    dataset = ucimlrepo.fetch_ucirepo(id=294)
+
+    # data (as pandas dataframes)
+    X = jnp.asarray(dataset.data.features.values)
+    y = jnp.asarray(dataset.data.targets.values).squeeze()
+
+    # Normalise
+    X = (X - jnp.mean(X, axis=0)) / jnp.std(X, axis=0)
+    y = y - jnp.mean(y)
     return X, y

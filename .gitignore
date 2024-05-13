@@ -13,7 +13,8 @@ data/matrices/*
 !data/matrices/gyro
 !data/matrices/1138_bus
 data/uci_processed/*
-!data/uci_processed/bike_sharing
+!data/uci_processed/concrete
+!data/uci_processed/power_plant
 data/pde_wave/*
 !data/pde_wave/16x16*
 

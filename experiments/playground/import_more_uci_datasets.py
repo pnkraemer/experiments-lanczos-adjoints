@@ -39,3 +39,13 @@ print(inputs.shape, targets.shape)
 print("\nSGEMM:")
 inputs, targets = uci_util.uci_sgemm()
 print(inputs.shape, targets.shape)
+
+
+print("\nConcrete:")
+inputs, targets = uci_util.uci_concrete()
+print(inputs.shape, targets.shape)
+
+
+print("\nPower plant:")
+inputs, targets = uci_util.uci_power_plant()
+print(inputs.shape, targets.shape)

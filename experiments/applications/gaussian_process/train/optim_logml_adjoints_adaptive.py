@@ -1,37 +1,25 @@
 import argparse
 import os.path
 import time
-import urllib.request
 
 import jax
 import jax.numpy as jnp
 import optax
-import scipy.io
 import tqdm
 from matfree import hutchinson
 from matfree_extensions import cg, low_rank
-from matfree_extensions.util import data_util, exp_util, gp_util
+from matfree_extensions.util import data_util, exp_util, gp_util, uci_util
 
 
 def root_mean_square_error(x, *, target):
     error_abs = x - target
     return jnp.sqrt(jnp.mean(error_abs**2))
-    # return jnp.linalg.norm(error_abs) / jnp.sqrt(x.size)
 
-
-if not os.path.isfile("../3droad.mat"):
-    print("Downloading '3droad' UCI dataset...")
-    urllib.request.urlretrieve(
-        "https://www.dropbox.com/s/f6ow1i59oqx05pl/3droad.mat?dl=1", "../3droad.mat"
-    )
-
-data = jnp.asarray(scipy.io.loadmat("../3droad.mat")["data"])
 
 # Choose parameters
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", type=str, required=True)
 parser.add_argument("--seed", type=int, required=True)
-parser.add_argument("--num_data", type=int, required=True)
 parser.add_argument("--rank_precon", type=int, required=True)
 parser.add_argument("--num_partitions", type=int, required=True)
 parser.add_argument("--num_matvecs", type=int, required=True)
@@ -40,73 +28,85 @@ parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--cg_tol", type=float, required=True)
 args = parser.parse_args()
 print()
-print(f"RUNNING: {args.name}")
+print("Arguments:", args)
 print()
-print(args)
-
 
 # todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
 #  but it might not be necessary?
 num_samples_sequential = args.num_samples
 num_matvecs_train_lanczos = args.num_matvecs
-# num_matvecs_eval_cg = 10 * num_matvecs_train_cg
-noise_bd = 1e-4
+noise_minval = 1e-4
+train_test_split = 0.9
 
-memory_bytes = args.num_data**2 * num_matvecs_train_lanczos / args.num_partitions * 32
+# Load data
+key = jax.random.PRNGKey(args.seed)
+key, subkey = jax.random.split(key, num=2)
+# inputs, targets = uci_util.uci_road_network()
+inputs, targets = uci_util.uci_concrete()
+
+# Subsample data to a multiple of num_partitions
+num_data_raw = len(inputs)
+coeff = num_data_raw // (10 * args.num_partitions)
+num_data = int(coeff * 10 * args.num_partitions)
+print(
+    f"\nSubsampling data from N={num_data_raw} points "
+    f"to N={num_data} points to satisfy "
+    f"P={args.num_partitions} partitions "
+    f"and the train-test-split.\n"
+)
+
+
+# Predict memory consumption
+memory_bytes = num_data**2 * num_matvecs_train_lanczos / args.num_partitions * 32
 memory_gb = memory_bytes / 8589934592
 print(f"\nPredicting ~ {memory_gb} GB of memory\n")
 
-key = jax.random.PRNGKey(args.seed)
-key, subkey = jax.random.split(key, num=2)
-data_sampled = data[: args.num_data, :-1], data[: args.num_data, -1]
-# train, test = data_util.split_train_test_shuffle(subkey, *data_sampled, train=0.9)
-train, test = data_util.split_train_test(*data_sampled, train=0.9)
+# Train-test split
+print()
+data_sampled = inputs[:num_data], targets[:num_data]
+train, test = data_util.split_train_test_shuffle(
+    subkey, *data_sampled, train=train_test_split
+)
+# train, test = data_util.split_train_test(*data_sampled, train=0.9)
 (train_x, train_y), (test_x, test_y) = train, test
 print("Train:", train_x.shape, train_y.shape)
 print("Test:", test_x.shape, test_y.shape)
 print()
 
-# Normalise features
-mean = train_x.mean(axis=-2, keepdims=True)
-std = train_x.std(axis=-2, keepdims=True) + 1e-6  # prevent dividing by 0
-train_x = (train_x - mean) / std
-test_x = (test_x - mean) / std
-
-# Normalise labels
-mean, std = train_y.mean(), train_y.std()
-train_y = (train_y - mean) / std
-test_y = (test_y - mean) / std
-
 
 # Set up linear algebra for training
-# solve_p = gp_util.krylov_solve_pcg_fixed_step(num_matvecs_train_cg)
 solve_p = cg.pcg_adaptive(atol=args.cg_tol, rtol=0.0, maxiter=1_000)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=1)
 logdet = gp_util.krylov_logdet_slq(
-    num_matvecs_train_lanczos, sample=sample, num_batches=num_samples_sequential
+    num_matvecs_train_lanczos,
+    sample=sample,
+    num_batches=num_samples_sequential,
+    checkpoint=False,
 )
 cholesky = low_rank.cholesky_partial_pivot(rank=args.rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-gram_matvec = gp_util.gram_matvec_partitioned(args.num_partitions)
+gram_matvec = gp_util.gram_matvec_partitioned(args.num_partitions, checkpoint=True)
+constrain = gp_util.constraint_greater_than(noise_minval)
 likelihood, p_likelihood = gp_util.likelihood_pdf_p(
-    noise_bd, gram_matvec, logpdf_p, precondition
+    gram_matvec, logpdf_p, precondition=precondition, constrain=constrain
 )
 
 # Set up a model
+ndim = train_x.shape[-1]
 m, p_mean = gp_util.mean_constant(shape_out=())
-k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(3,), shape_out=())
+k, p_kernel = gp_util.kernel_scaled_matern_32(shape_in=(ndim,), shape_out=())
 prior = gp_util.model_gp(m, k)
 
 # Build the loss and evaluate
 loss = gp_util.target_logml(prior, likelihood)
 
 # Initialise the parameters
-key, subkey = jax.random.split(key)
 ps = (p_mean, p_kernel, p_likelihood)
-# ps = exp_util.tree_random_like(subkey, ps)
+key, subkey = jax.random.split(key)
+ps = exp_util.tree_random_like(subkey, ps)
 p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 
 
@@ -131,7 +131,7 @@ def mll_cholesky(params, inputs, targets):
 
     # Build the loss and evaluate
     logpdf = gp_util.logpdf_scipy_stats()
-    lklhd, _ = gp_util.likelihood_pdf(noise_bd, gram_matvec, logpdf)
+    lklhd, _ = gp_util.likelihood_pdf(gram_matvec, logpdf, constrain=constrain)
 
     loss_fun = gp_util.target_logml(prior, lklhd)
     val, info = loss_fun(
@@ -142,7 +142,7 @@ def mll_cholesky(params, inputs, targets):
 
 solve = cg.pcg_adaptive(atol=1e-2, rtol=0.0, maxiter=1_000)
 likelihood_, _p_likelihood_ = gp_util.likelihood_condition_p(
-    noise_bd, gram_matvec, solve, precondition
+    gram_matvec, solve, precondition=precondition, constrain=constrain
 )
 
 posterior = gp_util.target_posterior(prior, likelihood_)
@@ -168,7 +168,7 @@ key, subkey = jax.random.split(key)
 mll_train.block_until_ready()
 slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
 residual = aux["logpdf"]["solve"]["residual_abs"]
-print("NumSteps apriori", aux["logpdf"]["solve"]["num_steps"])
+print("num_steps a-priori", aux["logpdf"]["solve"]["num_steps"])
 
 cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
@@ -217,7 +217,7 @@ state = optimizer.init(p_opt)
 # optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True, stepsize=0.1, linesearch="backtracking")
 # state = optimizer.init_state(p_opt, subkey, inputs=train_x, targets=train_y)
 
-noise = exp_util.softplus(unflatten(p_opt)[-1]["raw_noise"])
+noise = constrain(unflatten(p_opt)[-1]["raw_noise"])
 progressbar = tqdm.tqdm(range(args.num_epochs))
 cg_numsteps = aux["logpdf"]["solve"]["num_steps"]
 progressbar.set_description(
@@ -265,7 +265,7 @@ for _ in progressbar:
 
         # Save values
         raw_noise = unflatten(p_opt)[-1]["raw_noise"]
-        noise = exp_util.softplus(raw_noise)
+        noise = constrain(raw_noise)
         current = time.perf_counter()
         loss_curve.append(float(value))
         loss_timestamps.append(time.perf_counter() - start)
@@ -314,7 +314,7 @@ print()
 # Save results to a file
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
-path = f"{directory}{args.name}_s{args.seed}_n{args.num_data}"
+path = f"{directory}{args.name}_s{args.seed}_n{num_data}"
 jnp.save(f"{path}_loss_timestamps.npy", loss_timestamps)
 jnp.save(f"{path}_test_nlls.npy", test_nlls)
 jnp.save(f"{path}_test_rmses.npy", test_rmses)
