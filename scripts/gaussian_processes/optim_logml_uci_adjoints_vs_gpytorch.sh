@@ -14,23 +14,21 @@
 module load cuda/12.4
 source ../penv/bin/activate
 
-name=adjoints_small
+name=adjoints
 seed=1
-rank_precon=50
-num_partitions=10
-num_matvecs=10
+rank_precon=500
+num_partitions=1
+num_matvecs=20
 num_epochs=50
-num_samples=1
+num_samples=15
 cg_tol=1.0
 
 for dataset in concrete power_plant
 do
-  for seed in 1 2 3
+  for seed in 1 2
   do
   python experiments/applications/gaussian_process/train/optim_logml_adjoints_adaptive.py \
     --name $name --dataset $dataset --seed $seed --rank_precon $rank_precon --num_matvecs $num_matvecs \
     --num_samples $num_samples --num_epochs $num_epochs --cg_tol $cg_tol --num_partitions $num_partitions;
   done
 done
-
-time python experiments/applications/gaussian_process/train/optim_logml_adjoints_adaptive.py --name $name --dataset $dataset --seed 1 --rank_precon 50 --num_matvecs 10 --num_samples 1 --num_epochs 50 --cg_tol 1. --num_partitions 10;

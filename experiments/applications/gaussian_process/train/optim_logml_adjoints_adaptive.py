@@ -43,7 +43,8 @@ print()
 # todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
 #  but it might not be necessary?
-num_samples_sequential = args.num_samples
+num_samples_sequential = 1
+num_samples_batched = args.num_samples
 num_matvecs_train_lanczos = args.num_matvecs
 noise_minval = 1e-4
 train_test_split = 0.9
@@ -84,16 +85,17 @@ print()
 
 
 # Set up linear algebra for training
-solve_p = cg.pcg_adaptive(atol=args.cg_tol, rtol=0.0, maxiter=1_000)
+solve_p = cg.pcg_adaptive(atol=args.cg_tol, rtol=0.0, maxiter=100)
 v_like = jnp.ones((len(train_x),), dtype=float)
-sample = hutchinson.sampler_rademacher(v_like, num=1)
+sample = hutchinson.sampler_rademacher(v_like, num=num_samples_sequential)
 logdet = gp_util.krylov_logdet_slq(
     num_matvecs_train_lanczos,
     sample=sample,
-    num_batches=num_samples_sequential,
+    num_batches=num_samples_batched,
     checkpoint=False,
 )
-cholesky = low_rank.cholesky_partial_pivot(rank=args.rank_precon)
+rank_precon = int(jnp.minimum(args.rank_precon, len(train_x)))
+cholesky = low_rank.cholesky_partial_pivot(rank=rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
 gram_matvec = gp_util.gram_matvec_partitioned(args.num_partitions, checkpoint=True)
