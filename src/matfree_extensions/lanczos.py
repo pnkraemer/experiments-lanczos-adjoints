@@ -56,7 +56,7 @@ def integrand_spd(
         # and therefore (Q v)^T f(D) (Qv) = Q[0] * f(diag) * Q[0]
         # Evaluate the matrix-function
         fx_eigvals = jax.vmap(matfun)(eigvals)
-        return scale**2 * jnp.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
+        return len(v0) * jnp.dot(eigvecs[0, :], fx_eigvals * eigvecs[0, :])
 
     return quadform
 

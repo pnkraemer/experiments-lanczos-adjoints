@@ -69,7 +69,7 @@ def cg_adaptive(**kwargs):
 
 
 # atol and rtol follow jnp.allclose logic
-def pcg_adaptive(*, atol: float, rtol, maxiter: int):
+def pcg_adaptive(*, atol: float, rtol, maxiter: int, miniter: int):
     def pcg(A: Callable, b: jax.Array, P: Callable):
         # Uncomment if we want to print values from inside the solver:
         # return pcg_impl(A, b, P=P)
@@ -79,6 +79,8 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
         )
 
     def pcg_impl(A: Callable, b, P):
+        length = jnp.linalg.norm(b)
+        b /= length
         x = jnp.zeros_like(b)
 
         r = b - A(x)
@@ -89,8 +91,8 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
         body_fun = make_body(A, P)
         init = (x, p, r, z, 0.0)
         x, p, r, z, num_steps = jax.lax.while_loop(cond_fun, body_fun, init)
-        return x, {
-            "residual_abs": r,
+        return length * x, {
+            "residual_abs": length * r,
             "residual_rel": r / jnp.abs(x),
             "num_steps": num_steps,
         }
@@ -101,9 +103,9 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
 
             error_rel = r / (atol + jnp.abs(x) * rtol)
             is_error_large = jnp.sqrt(jnp.mean(error_rel**2)) > 1.0
-            is_first_step = nsteps == 0.0
-            is_not_beyond_maxiter = nsteps < maxiter
+            is_first_step = nsteps < miniter
             proceed = jnp.logical_or(is_error_large, is_first_step)
+            is_not_beyond_maxiter = nsteps < maxiter
             return jnp.logical_and(proceed, is_not_beyond_maxiter)
 
         return cond

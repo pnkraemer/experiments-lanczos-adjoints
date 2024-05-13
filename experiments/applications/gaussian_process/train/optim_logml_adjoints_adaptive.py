@@ -16,12 +16,29 @@ def load_data(which: str, /):
         return uci_util.uci_concrete()
     if which == "power_plant":
         return uci_util.uci_power_plant()
+    if which == "parkinson":
+        return uci_util.uci_parkinson()
+    if which == "protein":
+        return uci_util.uci_protein()
+    if which == "bike_sharing":
+        return uci_util.uci_bike_sharing()
+    if which == "kegg_undirected":
+        return uci_util.uci_kegg_undirected()
+    if which == "kegg_directed":
+        return uci_util.uci_kegg_directed()
+    if which == "elevators":
+        return uci_util.uci_elevators()
+    if which == "kin40k":
+        return uci_util.uci_kin40k()
+    if which == "slice":
+        return uci_util.uci_slice()
     raise ValueError
 
 
 def root_mean_square_error(x, *, target):
     error_abs = x - target
-    return jnp.sqrt(jnp.mean(error_abs**2))
+    error = error_abs
+    return jnp.sqrt(jnp.mean(error**2))
 
 
 # Choose parameters
@@ -36,9 +53,9 @@ parser.add_argument("--num_samples", type=int, required=True)
 parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--cg_tol", type=float, required=True)
 args = parser.parse_args()
-print()
-print("Arguments:", args)
-print()
+
+# print("Arguments:", args)
+
 
 # todo: we _could_ give CG a different matvec
 #  (fewer partitions) to boost performance,
@@ -47,7 +64,7 @@ num_samples_sequential = 1
 num_samples_batched = args.num_samples
 num_matvecs_train_lanczos = args.num_matvecs
 noise_minval = 1e-4
-train_test_split = 0.9
+train_test_split = 0.8
 
 # Load data
 key = jax.random.PRNGKey(args.seed)
@@ -56,49 +73,57 @@ inputs, targets = load_data(args.dataset)
 
 # Subsample data to a multiple of num_partitions
 num_data_raw = len(inputs)
-coeff = num_data_raw // (10 * args.num_partitions)
-num_data = int(coeff * 10 * args.num_partitions)
+coeff = num_data_raw // (5 * args.num_partitions)
+num_data = int(coeff * 5 * args.num_partitions)
 print(
-    f"\nSubsampling data from N={num_data_raw} points "
+    f"Subsampling data from N={num_data_raw} points "
     f"to N={num_data} points to satisfy "
     f"P={args.num_partitions} partitions "
-    f"and the train-test-split.\n"
+    f"and the train-test-split."
 )
 
 
 # Predict memory consumption
-memory_bytes = num_data**2 * num_matvecs_train_lanczos / args.num_partitions * 32
+memory_bytes = (
+    num_data**2
+    * num_samples_batched
+    * num_matvecs_train_lanczos
+    / args.num_partitions
+    * 32
+)
 memory_gb = memory_bytes / 8589934592
-print(f"\nPredicting ~ {memory_gb} GB of memory\n")
+# print(f"Predicting ~ {memory_gb} GB of memory")
 
 # Train-test split
-print()
+
 data_sampled = inputs[:num_data], targets[:num_data]
-train, test = data_util.split_train_test_shuffle(
-    subkey, *data_sampled, train=train_test_split
-)
-# train, test = data_util.split_train_test(*data_sampled, train=0.9)
+# train, test = data_util.split_train_test_shuffle(
+#     subkey, *data_sampled, train=train_test_split
+# )
+train, test = data_util.split_train_test(*data_sampled, train=train_test_split)
 (train_x, train_y), (test_x, test_y) = train, test
-print("Train:", train_x.shape, train_y.shape)
-print("Test:", test_x.shape, test_y.shape)
-print()
+# print("Train:", train_x.shape, train_y.shape)
+# print("Test:", test_x.shape, test_y.shape)
 
 
 # Set up linear algebra for training
-solve_p = cg.pcg_adaptive(atol=args.cg_tol, rtol=0.0, maxiter=100)
+solve_p = cg.pcg_adaptive(rtol=args.cg_tol, atol=args.cg_tol, maxiter=100, miniter=10)
 v_like = jnp.ones((len(train_x),), dtype=float)
-sample = hutchinson.sampler_rademacher(v_like, num=num_samples_sequential)
+sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
 logdet = gp_util.krylov_logdet_slq(
     num_matvecs_train_lanczos,
     sample=sample,
-    num_batches=num_samples_batched,
-    checkpoint=False,
+    num_batches=num_samples_sequential,
+    checkpoint=True,
 )
 rank_precon = int(jnp.minimum(args.rank_precon, len(train_x)))
 cholesky = low_rank.cholesky_partial_pivot(rank=rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-gram_matvec = gp_util.gram_matvec_partitioned(args.num_partitions, checkpoint=True)
+if args.num_partitions == 1:
+    gram_matvec = gp_util.gram_matvec()
+else:
+    gram_matvec = gp_util.gram_matvec_partitioned(args.num_partitions, checkpoint=True)
 constrain = gp_util.constraint_greater_than(noise_minval)
 likelihood, p_likelihood = gp_util.likelihood_pdf_p(
     gram_matvec, logpdf_p, precondition=precondition, constrain=constrain
@@ -116,7 +141,7 @@ loss = gp_util.target_logml(prior, likelihood)
 # Initialise the parameters
 ps = (p_mean, p_kernel, p_likelihood)
 key, subkey = jax.random.split(key)
-ps = exp_util.tree_random_like(subkey, ps)
+# ps = exp_util.tree_random_like(subkey, ps)
 p_opt, unflatten = jax.flatten_util.ravel_pytree(ps)
 
 
@@ -132,7 +157,7 @@ def mll_lanczos(params, *p_logdet, inputs, targets):
         params_kernel=p2,
         params_likelihood=p3,
     )
-    return -val / len(inputs), info
+    return -1.0 * val / len(inputs), info
 
 
 @jax.jit
@@ -147,10 +172,10 @@ def mll_cholesky(params, inputs, targets):
     val, info = loss_fun(
         inputs, targets, params_mean=p1, params_kernel=p2, params_likelihood=p3
     )
-    return -val / len(inputs), info
+    return -1.0 * val / len(inputs), info
 
 
-solve = cg.pcg_adaptive(atol=1e-2, rtol=0.0, maxiter=1_000)
+solve = cg.pcg_adaptive(atol=1e-4, rtol=0.0, maxiter=10_000, miniter=10)
 likelihood_, _p_likelihood_ = gp_util.likelihood_condition_p(
     gram_matvec, solve, precondition=precondition, constrain=constrain
 )
@@ -178,7 +203,7 @@ key, subkey = jax.random.split(key)
 mll_train.block_until_ready()
 slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
 residual = aux["logpdf"]["solve"]["residual_abs"]
-print("num_steps a-priori", aux["logpdf"]["solve"]["num_steps"])
+# print("num_steps a-priori", aux["logpdf"]["solve"]["num_steps"])
 
 cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
 
@@ -188,7 +213,7 @@ for _ in range(1):
     (value, aux) = mll_lanczos(p_opt, subkey, inputs=train_x, targets=train_y)
     value.block_until_ready()
 t1 = time.perf_counter()
-print("Runtime (value):", (t1 - t0) / 1)
+# print("Runtime (value):", (t1 - t0) / 1)
 
 
 # Pre-compile the value-and-grad
@@ -200,29 +225,28 @@ grad_train.block_until_ready()
 # Benchmark the value-and-gradient function
 t0 = time.perf_counter()
 for _ in range(1):
-    (value, _aux), grad = value_and_grad(p_opt, key, inputs=train_x, targets=train_y)
+    (value, _aux), grads = value_and_grad(p_opt, key, inputs=train_x, targets=train_y)
     value.block_until_ready()
-    grad.block_until_ready()
+    grads.block_until_ready()
 t1 = time.perf_counter()
-print("Runtime (value-and-gradient):", (t1 - t0) / 1)
-print()
+# print("Runtime (value-and-gradient):", (t1 - t0) / 1)
+
 
 # Pre-compile the test-loss
 predicted, predict_info = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
 rmse = root_mean_square_error(predicted, target=test_y)
 nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
-print("A-priori CG error:", cg_error)
-print("A-priori SLQ std (rel):", slq_std_rel)
-print("A-priori RMSE:", rmse)
-print("A-priori NLL:", nll)
+# print("A-priori CG error:", cg_error)
+# print("A-priori SLQ std (rel):", slq_std_rel)
+# print("A-priori RMSE:", rmse)
+# print("A-priori NLL:", nll)
 predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
-print("RMSE-error (prediction):", predict_error)
-print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
-print("Initial params:", unflatten(p_opt))
+# print("RMSE-error (prediction):", predict_error)
+# print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
+# print("Initial params:", unflatten(p_opt))
 
-print()
 
-optimizer = optax.adam(0.1)
+optimizer = optax.sgd(1.0)
 state = optimizer.init(p_opt)
 # optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True, stepsize=0.1, linesearch="backtracking")
 # state = optimizer.init_state(p_opt, subkey, inputs=train_x, targets=train_y)
@@ -232,7 +256,7 @@ progressbar = tqdm.tqdm(range(args.num_epochs))
 cg_numsteps = aux["logpdf"]["solve"]["num_steps"]
 progressbar.set_description(
     f"loss: {mll_train:.3F}, "
-    f"raw_noise: {noise:.3E}, "
+    f"rmse: {rmse:.3E}, "
     f"cg_error: {cg_error:.1e}, "
     f"cg_numsteps: {int(cg_numsteps)}, "
     f"slq_std_rel: {slq_std_rel:.1e}, "
@@ -247,6 +271,7 @@ loss_timestamps = []
 loss_curve = [float(mll_train)]
 cg_errors = [float(cg_error)]
 cg_numsteps_all = [int(cg_numsteps)]
+test_rmses = [rmse]
 slq_std_rels = [float(slq_std_rel)]
 
 start = time.perf_counter()
@@ -263,7 +288,11 @@ for _ in progressbar:
         # value = state.value
         # aux = state.aux
         # grads = state.grad
+        # for xx in unflatten(grads):
+        #     print(xx)
+        #     print()
 
+        # assert False
         # Evaluate relevant quantities
         slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
         residual = aux["logpdf"]["solve"]["residual_abs"]
@@ -273,29 +302,35 @@ for _ in progressbar:
             for name, value in p_dict.items():
                 gradient_norms[name].append(jnp.linalg.norm(value))
 
+        predicted, predict_info = predict_mean(
+            p_opt, test_x, inputs=train_x, targets=train_y
+        )
+        rmse = root_mean_square_error(predicted, target=test_y)
+
         # Save values
         raw_noise = unflatten(p_opt)[-1]["raw_noise"]
         noise = constrain(raw_noise)
         current = time.perf_counter()
+        test_rmses.append(float(rmse))
         loss_curve.append(float(value))
         loss_timestamps.append(time.perf_counter() - start)
         cg_errors.append(float(cg_error))
         cg_numsteps_all.append(int(cg_numsteps))
         slq_std_rels.append(float(slq_std_rel))
-        progressbar.set_description(
-            f"loss: {value:.3F}, "
-            f"noise: {noise:.3E}, "
-            f"cg_error: {cg_error:.1e}, "
-            f"cg_numsteps: {int(cg_numsteps)}, "
-            f"slq_std_rel: {slq_std_rel:.1e} "
-        )
+        # progressbar.set_description(
+        #     f"loss: {value:.3F}, "
+        #     f"rmse: {rmse:.3E}, "
+        #     f"cg_error: {cg_error:.1e}, "
+        #     f"cg_numsteps: {int(cg_numsteps)}, "
+        #     f"slq_std_rel: {slq_std_rel:.1e} "
+        # )
 
     except KeyboardInterrupt:
         break
 end = time.perf_counter()
-print()
 
-print("Found params:", unflatten(p_opt))
+
+# print("Found params:", unflatten(p_opt))
 
 
 # Complete the data collection
@@ -311,15 +346,15 @@ predicted, predict_info = predict_mean(p_opt, test_x, inputs=train_x, targets=tr
 rmse = root_mean_square_error(predicted, target=test_y)
 nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
 test_nlls = jnp.asarray(nll)
-test_rmses = jnp.asarray(rmse)
+test_rmses = jnp.asarray(test_rmses)
 
-print()
-print("RMSE:", rmse)
-print("NLL:", nll)
+
+# print("RMSE:", rmse)
+# print("NLL:", nll)
 predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
-print("RMSE-error:", predict_error)
-print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
-print()
+# print("RMSE-error:", predict_error)
+# print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
+
 
 # Save results to a file
 directory = exp_util.matching_directory(__file__, "results/")
