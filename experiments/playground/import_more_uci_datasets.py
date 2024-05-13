@@ -1,16 +1,41 @@
 """Import and plot UCI datasets."""
 
-import matplotlib.pyplot as plt
-from matfree_extensions import exp_util
+from matfree_extensions.util import uci_util
 
-X, y = exp_util.uci_household_electric(use_cache_if_possible=True)
-
-
-print(X.shape)
-print(y.shape)
-
-print(X)
+print("\nRoad network:")
+inputs, targets = uci_util.uci_road_network()
+print(inputs.shape, targets.shape)
 
 
-plt.plot(X[:, 0], y[:, 0], ".")
-plt.show()
+print("\nSong:")
+inputs, targets = uci_util.uci_song()
+print(inputs.shape, targets.shape)
+
+print("\nAir quality:")
+inputs, targets = uci_util.uci_air_quality()
+print(inputs.shape, targets.shape)
+
+
+print("\nBike sharing:")
+inputs, targets = uci_util.uci_bike_sharing()
+print(inputs.shape, targets.shape)
+
+
+print("\nKEGG undirected:")
+inputs, targets = uci_util.uci_kegg_undirected()
+print(inputs.shape, targets.shape)
+
+
+print("\nParkinson:")
+inputs, targets = uci_util.uci_parkinson()
+print(inputs.shape, targets.shape)
+
+
+print("\nProtein:")
+inputs, targets = uci_util.uci_protein()
+print(inputs.shape, targets.shape)
+
+
+print("\nSGEMM:")
+inputs, targets = uci_util.uci_sgemm()
+print(inputs.shape, targets.shape)

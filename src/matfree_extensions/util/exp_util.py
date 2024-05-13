@@ -1,12 +1,12 @@
 """Test utilities."""
 
 import os
-from typing import Literal, get_args
 
 import jax.experimental.sparse
 import jax.flatten_util
 import jax.numpy as jnp
 import scipy.io
+import ucimlrepo
 
 
 def suite_sparse_download(
@@ -42,34 +42,14 @@ def suite_sparse_load(which, /, path="./data/matrices/", suffix=".mtx"):
     return jax.experimental.sparse.BCOO([data, indices], shape=matrix.shape)
 
 
-# Rationale for choosing the data sets below (from UCI):
-#
-# * Multivariate data
-# * Regression
-# * Less than 10 features
-# * More than 1000 instances
-# * Numerical features
-# * Available for python import
-#
-# This gives three sets:
-#   concrete_compressive_strength,
-#   combined cycle power plant,
-#   and household electric
-# todo: household electric dataset
-UCI_DATASET_ARGS = Literal[
-    "concrete_compressive_strength", "combined_cycle_power_plant"
-]
-UCI_DATASETS = get_args(UCI_DATASET_ARGS)
-
-
-def uci_dataset(which: UCI_DATASET_ARGS, /, *, use_cache_if_possible: bool = True):
+def uci_dataset_mlrepo(which, /, *, use_cache_if_possible: bool = True):
     """Load one of the UCI datasets."""
 
-    from ucimlrepo import fetch_ucirepo
+    available = ["concrete_compressive_strength", "combined_cycle_power_plant"]
 
-    if which not in UCI_DATASETS:
+    if which not in available:
         msg = "The dataset is unknown."
-        msg += f"\n\tExpected: One of {UCI_DATASETS}."
+        msg += f"\n\tExpected: One of {available}."
         msg += f"\n\tReceived: '{which}'."
         raise ValueError(msg)
 
@@ -80,7 +60,7 @@ def uci_dataset(which: UCI_DATASET_ARGS, /, *, use_cache_if_possible: bool = Tru
         return inputs, targets
 
     # fetch dataset
-    dataset = fetch_ucirepo(id=165)
+    dataset = ucimlrepo.fetch_ucirepo(id=165)
 
     # data (as pandas dataframes)
     X = jnp.asarray(dataset.data.features.values)
@@ -137,31 +117,3 @@ def tree_random_like(key, tree, *, generate_func=jax.random.normal):
     flat, unflatten = jax.flatten_util.ravel_pytree(tree)
     flat_like = generate_func(key, shape=flat.shape, dtype=flat.dtype)
     return unflatten(flat_like)
-
-
-def goldstein_price(X, Y, /):
-    # Motivated by:
-    # https://docs.jaxgaussianprocesses.com/api/decision_making/test_functions/continuous_functions/
-    # See: https://www.sfu.ca/~ssurjano/goldpr.html
-    # Code from: https://gist.github.com/MiguelAngelHFlores/777062e58419e1458a1c1800d00b03d5
-    return (
-        1 + (X + Y + 1) ** 2 * (19 - 14 * X + 3 * X**2 - 14 * Y + 6 * X * Y + 3 * Y**2)
-    ) * (
-        30
-        + (2 * X - 3 * Y) ** 2
-        * (18 - 32 * X + 12 * X**2 + 48 * Y - 36 * X * Y + 27 * Y**2)
-    )
-
-
-def softplus(x, beta=1.0, threshold=20.0):
-    # Shamelessly stolen from:
-    # https://github.com/google/jax/issues/18443
-
-    # mirroring the pytorch implementation
-    #  https://pytorch.org/docs/stable/generated/torch.nn.Softplus.html
-    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
-    return jax.lax.select(
-        x * beta < threshold,
-        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
-        x,
-    )
