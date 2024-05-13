@@ -13,8 +13,7 @@ data/matrices/*
 !data/matrices/gyro
 !data/matrices/1138_bus
 data/uci_processed/*
-!data/uci_processed/concrete_compressive_strength
-!data/uci_processed/combined_cycle_power_plant
+!data/uci_processed/bike_sharing
 data/pde_wave/*
 !data/pde_wave/16x16*
 
