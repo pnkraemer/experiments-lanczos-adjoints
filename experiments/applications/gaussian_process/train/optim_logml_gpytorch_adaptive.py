@@ -127,7 +127,7 @@ with cfg_precon, cfg_cg_tol, cfg_smpls, cfg_lanczos, cfg_probes:
             loss = -mll(output, train_y)
 
             loss.backward()
-            optimizer.step() 
+            optimizer.step()
 
             # Store values
             loss_values.append(loss)
@@ -164,7 +164,7 @@ with torch.no_grad():
     print()
     print("RMSE:", rmse)
     print("NLL: (todo)")
-    print()    
+    print()
 
     # Save results to a file
     directory = exp_util.matching_directory(__file__, "results/")

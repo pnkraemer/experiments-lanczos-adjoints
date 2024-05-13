@@ -165,4 +165,3 @@ def softplus(x, beta=1.0, threshold=20.0):
         1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
         x,
     )
-

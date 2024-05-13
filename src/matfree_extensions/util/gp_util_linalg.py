@@ -13,6 +13,7 @@ from matfree_extensions import cg, lanczos
 # todo: delete all lineax and jax wrappers for CG
 # (actually, delete all CG from here and move code back to gp_util?)
 
+
 def gram_matvec_sequential(*, checkpoint: bool):
     """Turn a covariance function into a gram-matrix vector product.
 

@@ -119,7 +119,9 @@ def test_logml_matches_gpytorch_mll(logpdf, gram_matvec):
     m, p_mean = gp_util.mean_constant(shape_out=())
     k, p_kernel = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
     prior = gp_util.model_gp(m, k)
-    likelihood, p_likelihood = gp_util.likelihood_pdf(gram_matvec, logpdf_fun)
+    likelihood, p_likelihood = gp_util.likelihood_pdf(
+        gram_matvec, logpdf_fun, noise_min=1e-4
+    )
     loss = gp_util.target_logml(prior, likelihood)
 
     # Ensure that the parameters match
@@ -164,7 +166,9 @@ def test_logml_matches_gpytorch_mll_preconditioned(logpdf_p, gram_matvec, precon
     k, p_kernel = gp_util.kernel_scaled_rbf(shape_in=(), shape_out=())
     prior = gp_util.model_gp(m, k)
 
-    likelihood, p_likelihood = gp_util.likelihood_pdf_p(gram_matvec, logpdf_fun, precon)
+    likelihood, p_likelihood = gp_util.likelihood_pdf_p(
+        gram_matvec, logpdf_fun, precon, noise_min=1e-4
+    )
     loss = gp_util.target_logml(prior, likelihood)
 
     # Ensure that the parameters match

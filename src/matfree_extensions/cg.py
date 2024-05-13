@@ -34,7 +34,7 @@ def pcg_fixed_step(num_matvecs: int, /):
         body_fun = make_body(A, P)
         init = (x, p, r, z)
         x, p, r, z = jax.lax.fori_loop(0, num_matvecs, body_fun, init_val=init)
-        return x, {"residual_abs": r, "residual_rel": r / jnp.abs(x), }
+        return x, {"residual_abs": r, "residual_rel": r / jnp.abs(x)}
 
     def make_body(A, P):
         def body_fun(_i, state):
@@ -59,7 +59,6 @@ def pcg_fixed_step(num_matvecs: int, /):
     return pcg
 
 
-
 # atol and rtol follow jnp.allclose logic
 def pcg_adaptive(*, atol: float, rtol, maxiter: int):
     def pcg(A: Callable, b: jax.Array, P: Callable):
@@ -79,23 +78,26 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
 
         cond_fun = make_cond()
         body_fun = make_body(A, P)
-        init = (x, p, r, z, 0.)
+        init = (x, p, r, z, 0.0)
         x, p, r, z, num_steps = jax.lax.while_loop(cond_fun, body_fun, init)
-        return x, {"residual_abs": r, "residual_rel": r / jnp.abs(x), "num_steps": num_steps}
+        return x, {
+            "residual_abs": r,
+            "residual_rel": r / jnp.abs(x),
+            "num_steps": num_steps,
+        }
 
     def make_cond():
         def cond(state):
-            x, p, r, z, nsteps = state 
-            
-            error_rel = r / (atol + jnp.abs(x)*rtol)
-            is_error_large = jnp.sqrt(jnp.mean(error_rel**2)) > 1.
-            is_first_step = nsteps == 0.
-            is_not_beyond_maxiter = nsteps < maxiter            
-            proceed= jnp.logical_or(is_error_large, is_first_step)
+            x, p, r, z, nsteps = state
+
+            error_rel = r / (atol + jnp.abs(x) * rtol)
+            is_error_large = jnp.sqrt(jnp.mean(error_rel**2)) > 1.0
+            is_first_step = nsteps == 0.0
+            is_not_beyond_maxiter = nsteps < maxiter
+            proceed = jnp.logical_or(is_error_large, is_first_step)
             return jnp.logical_and(proceed, is_not_beyond_maxiter)
 
-        return cond 
-
+        return cond
 
     def make_body(A, P):
         def body_fun(state):
@@ -113,7 +115,7 @@ def pcg_adaptive(*, atol: float, rtol, maxiter: int):
 
             b = _safe_divide(jnp.dot(r, z), jnp.dot(rold, zold))
             p = z + b * p
-            return x, p, r, z, nsteps+1
+            return x, p, r, z, nsteps + 1
 
         return body_fun
 

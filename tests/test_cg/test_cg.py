@@ -25,7 +25,7 @@ def test_pcg_adaptive():
     solution = jnp.linalg.solve(A, b)
 
     solve = cg.pcg_adaptive(atol=1e-5, rtol=1e-5)
-    approximation, _info = solve(lambda v: A @ v, b, lambda v:  v)
+    approximation, _info = solve(lambda v: A @ v, b, lambda v: v)
     assert jnp.allclose(approximation, solution)
 
 

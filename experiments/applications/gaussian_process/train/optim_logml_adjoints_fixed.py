@@ -9,9 +9,8 @@ import optax
 import scipy.io
 import tqdm
 from matfree import hutchinson
-from matfree_extensions import low_rank, cg
+from matfree_extensions import cg, low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, gp_util_linalg
-import jaxopt 
 
 
 def root_mean_square_error(x, *, target):
@@ -51,7 +50,7 @@ print(args)
 num_samples_sequential = args.num_samples
 num_matvecs_train_lanczos = args.num_matvecs
 num_matvecs_train_cg = args.num_samples * args.num_matvecs
-num_matvecs_eval_cg = 10*num_matvecs_train_cg
+num_matvecs_eval_cg = 10 * num_matvecs_train_cg
 noise_bd = 1e-4
 
 memory_bytes = args.num_data**2 * num_matvecs_train_lanczos / args.num_partitions * 32
@@ -86,13 +85,20 @@ solve_p = cg.pcg_fixed_step(num_matvecs_train_cg)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=1)
 logdet = gp_util_linalg.krylov_logdet_slq(
-    num_matvecs_train_lanczos, sample=sample, num_batches=num_samples_sequential, checkpoint=False
+    num_matvecs_train_lanczos,
+    sample=sample,
+    num_batches=num_samples_sequential,
+    checkpoint=False,
 )
 cholesky = low_rank.cholesky_partial_pivot(rank=args.rank_precon)
 precondition = low_rank.preconditioner(cholesky)
 logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
-gram_matvec = gp_util_linalg.gram_matvec_partitioned(args.num_partitions, checkpoint=False)
-likelihood, p_likelihood = gp_util.likelihood_pdf_p(noise_bd, gram_matvec, logpdf_p, precondition)
+gram_matvec = gp_util_linalg.gram_matvec_partitioned(
+    args.num_partitions, checkpoint=False
+)
+likelihood, p_likelihood = gp_util.likelihood_pdf_p(
+    noise_bd, gram_matvec, logpdf_p, precondition
+)
 
 # Set up a model
 m, p_mean = gp_util.mean_constant(shape_out=())
@@ -138,8 +144,11 @@ def mll_cholesky(params, inputs, targets):
     )
     return -val / len(inputs), info
 
-solve = cg.pcg_adaptive(atol=1e-2, rtol=0., maxiter=1_000)
-likelihood_, _p_likelihood_ = gp_util.likelihood_condition_p(noise_bd, gram_matvec, solve, precondition)
+
+solve = cg.pcg_adaptive(atol=1e-2, rtol=0.0, maxiter=1_000)
+likelihood_, _p_likelihood_ = gp_util.likelihood_condition_p(
+    noise_bd, gram_matvec, solve, precondition
+)
 
 posterior = gp_util.target_posterior(prior, likelihood_)
 
@@ -201,7 +210,7 @@ print("A-priori CG error:", cg_error)
 print("A-priori SLQ std (rel):", slq_std_rel)
 print("A-priori RMSE:", rmse)
 print("A-priori NLL:", nll)
-predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"]**2))
+predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
 print("RMSE-error (prediction):", predict_error)
 # print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
 print("Initial params:", unflatten(p_opt))
@@ -246,9 +255,9 @@ for _ in progressbar:
         updates, state = optimizer.update(grads, state)
         p_opt = optax.apply_updates(p_opt, updates)
         # p_opt, state = optimizer.update(p_opt, state, subkey, inputs=train_x, targets=train_y)
-        # value = state.value 
-        # aux = state.aux 
-        # grads = state.grad 
+        # value = state.value
+        # aux = state.aux
+        # grads = state.grad
 
         # Evaluate relevant quantities
         slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
@@ -302,7 +311,7 @@ test_rmses = jnp.asarray(rmse)
 print()
 print("RMSE:", rmse)
 print("NLL:", nll)
-predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"]**2))
+predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
 print("RMSE-error:", predict_error)
 print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
 print()

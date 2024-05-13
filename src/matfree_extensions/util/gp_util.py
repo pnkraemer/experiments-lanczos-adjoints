@@ -206,14 +206,16 @@ def _assert_shapes(x, y, shape_in):
         raise ValueError(error)
 
 
-def likelihood_pdf(noise_greater_than, gram_matvec: Callable, logpdf: Callable) -> tuple[Callable, dict]:
+def likelihood_pdf(
+    gram_matvec: Callable, logpdf: Callable, *, noise_min: float
+) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         # todo: implement a box-constraint?
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_greater_than
+        noise = _softplus(raw_noise) + noise_min
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -233,19 +235,23 @@ def likelihood_pdf(noise_greater_than, gram_matvec: Callable, logpdf: Callable) 
     return likelihood, p
 
 
-def likelihood_pdf_p(noise_greater_than: float,
-    gram_matvec: Callable, logpdf_p: Callable, precondition: Callable
+def likelihood_pdf_p(
+    gram_matvec: Callable,
+    logpdf_p: Callable,
+    precondition: Callable,
+    *,
+    noise_min: float,
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_greater_than
+        noise = _softplus(raw_noise) + noise_min
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j])
-            
+
         def cov_matvec(v):
             cov = gram_matvec(lazy_kernel)
             idx = jnp.arange(len(inputs))
@@ -259,7 +265,7 @@ def likelihood_pdf_p(noise_greater_than: float,
                 targets,
                 *p_logpdf,
                 mean=mean_array,
-                cov_matvec=lambda v: cov_matvec(v) + noise*v,
+                cov_matvec=lambda v: cov_matvec(v) + noise * v,
                 P=lambda v: pre(v, noise),
             )
             return val, {"precondition": info, "logpdf": aux}
@@ -270,15 +276,15 @@ def likelihood_pdf_p(noise_greater_than: float,
     return likelihood, p
 
 
-def likelihood_condition(noise_greater_than,
-    gram_matvec: Callable, solve: Callable
+def likelihood_condition(
+    gram_matvec: Callable, solve: Callable, *, noise_min: float
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_greater_than
+        noise = _softplus(raw_noise) + noise_min
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j]) + noise * (i == j)
@@ -305,15 +311,15 @@ def likelihood_condition(noise_greater_than,
     return likelihood, p
 
 
-def likelihood_condition_p(noise_greater_than: float,
-    gram_matvec: Callable, solve_p: Callable, precondition
+def likelihood_condition_p(
+    gram_matvec: Callable, solve_p: Callable, precondition, *, noise_min: float
 ) -> tuple[Callable, dict]:
     """Construct a Gaussian likelihood."""
 
     def likelihood(inputs: jax.Array, mean: Callable, kernel: Callable, params: dict):
         # Apply a soft-plus because GPyTorch does
         raw_noise = params["raw_noise"]
-        noise = _softplus(raw_noise) + noise_greater_than
+        noise = _softplus(raw_noise) + noise_min
 
         def lazy_kernel(i: int, j: int):
             return kernel(inputs[i], inputs[j])
@@ -329,8 +335,8 @@ def likelihood_condition_p(noise_greater_than: float,
             mean_array = jax.vmap(mean)(inputs)
 
             weights, info = solve_p(
-                lambda v: cov_matvec(v) + noise*v, 
-                targets - mean_array, 
+                lambda v: cov_matvec(v) + noise * v,
+                targets - mean_array,
                 P=lambda v: pre(v, noise),
             )
 
