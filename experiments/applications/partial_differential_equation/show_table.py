@@ -86,23 +86,3 @@ print()
 print()
 print()
 print()
-
-# print(results_dataframe_std)
-# print(results_dataframe_mean)
-# results_dataframe_mean.index.name = 'param'
-# results_dataframe_std.index.name = 'param'
-# results_ = [results_dataframe_mean, results_dataframe_std]
-# results = pd.concat(results_,axis=0).groupby('param').agg(lambda mu_std: '±'.join(mu_std))
-# print(results)
-assert False
-
-# Create a latex-table
-num_keys = len(stats["Arnoldi"].keys())
-column_format = f"l{'c'*num_keys}"
-
-latex = results_dataframe.to_latex(float_format="%.1e")
-print()
-print()
-print(latex)
-print()
-print()

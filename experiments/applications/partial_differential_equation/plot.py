@@ -63,7 +63,7 @@ img = ax["dopri5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
 plt.colorbar(img, ax=ax["dopri5"])
 
 ax["tsit5"].set_title("Solver: Tsit5", fontsize="small")
-path = f"{directory}{args.resolution}x{args.resolution}_diffrax:tsit5+recursive_checkpoint_s2"
+path = f"{directory}{args.resolution}x{args.resolution}_diffrax:tsit5+recursive_checkpoint_s2"  # noqa: E501
 parameter_estimate = jnp.load(f"{path}_parameter.npy")
 img = ax["tsit5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
 plt.colorbar(img, ax=ax["tsit5"])
@@ -87,8 +87,8 @@ plt.savefig(f"{directory_fig}contours.pdf")
 plt.show()
 
 
-layout = ["forward", "forward", "gradient", "gradient", "loss", "loss", "loss"]
-fig, ax = plt.subplot_mosaic([layout], dpi=200, figsize=(8, 2), constrained_layout=True)
+layout = [["forward", "forward", "gradient", "gradient", "loss", "loss", "loss"]]
+fig, ax = plt.subplot_mosaic(layout, dpi=200, figsize=(8, 2), constrained_layout=True)
 
 
 for method in methods:
@@ -176,107 +176,3 @@ ax["gradient"].set_title("A2.", **kwargs)
 plt.savefig(f"{directory}pde_training_curves.pdf")
 
 plt.show()
-
-
-#
-#
-# assert False
-# # Prepare the figure: create subfigures, a meshgrid, etc.
-# xs_1d = jnp.linspace(0, 1, endpoint=True, num=len(parameter))
-# mesh = jnp.stack(jnp.meshgrid(xs_1d, xs_1d))
-# layout = [
-#     ["convergence", "convergence", "truth", "arnoldi", "workprec_fwd"],
-#     ["convergence", "convergence", "dopri5", "tsit5", "workprec_rev"],
-# ]
-# layout = onp.asarray(layout)
-# fig, axes =
-# plt.subplot_mosaic(layout, dpi=200, figsize=(8, 3), constrained_layout=True)
-#
-# # Plot the app
-# # Plot the work-precision diagrams
-# axes["convergence"].set_title("Convergence", fontsize="small")
-# axes["convergence"].set_xlabel("Time (sec)", fontsize="small")
-# axes["convergence"].set_ylabel("Loss", fontsize="small")
-# for color, method in enumerate(methods):
-#     for seed in [1, 2, 3]:
-#         path = f"{directory}{args.resolution}x{args.resolution}_{method}_s{seed}"
-#         parameter_estimate = jnp.load(f"{path}_parameter.npy")
-#         convergence = jnp.load(f"{path}_convergence.npy")
-#         timestamps = jnp.load(f"{path}_timestamps.npy")
-#         if "arnoldi" in method:
-#             alpha, zorder = 0.9, 100
-#         else:
-#             alpha, zorder = 0.9, 0
-#
-#         def _process(x):
-#             return jnp.mean(x.reshape((-1, 50)), axis=-1)
-#
-#         axes["convergence"].semilogy(
-#             _process(timestamps),
-#             _process(convergence),
-#             label=f"{labels[method]} (3000 epochs)",
-#             alpha=alpha,
-#             zorder=zorder,
-#             color=f"C{color}",
-#         )
-#
-#         # handles, labels = axes["convergence"].get_legend_handles_labels()
-#         # by_label = dict(zip(labels, handles))
-#         # axes["convergence"].legend(by_label.values(), by_label.keys())
-#
-#         handles_, labels_ = axes["convergence"].get_legend_handles_labels()
-#         by_label = dict(zip(labels_, handles_))
-#         axes["convergence"].legend(
-#             by_label.values(), by_label.keys(), fontsize="x-small"
-#         )
-#         # axes["convergence"].set_ylim((0, 100))
-#         axes["convergence"].grid(axis="y", which="both")
-# #
-# for method in methods:
-#     num_matvecs = jnp.load(f"{directory}/wp_{method}_Ns.npy")
-#     # ts_all = jnp.load(f"{directory}/wp_{method}_ts.npy")
-#     errors_fwd = jnp.load(f"{directory}/wp_{method}_errors_fwd.npy")
-#     errors_rev = jnp.load(f"{directory}/wp_{method}_errors_rev.npy")
-#     idx = num_matvecs >= 3
-#     if "arnoldi" in method:
-#         alpha, zorder = 0.99, 100
-#     else:
-#         alpha, zorder = 0.8, 0
-#
-#     axes["workprec_fwd"].loglog(
-#         num_matvecs[idx],
-#         errors_fwd[idx],
-#         label=labels[method],
-#         alpha=alpha,
-#         zorder=zorder,
-#     )
-#     axes["workprec_rev"].loglog(
-#         num_matvecs[idx],
-#         errors_rev[idx],
-#         label=labels[method],
-#         alpha=alpha,
-#         zorder=zorder,
-#     )
-#
-#
-# axes["workprec_fwd"].sharex(axes["workprec_rev"])
-# axes["workprec_fwd"].set_ylabel("RMSE (relative)", fontsize="small")
-# axes["workprec_fwd"].set_title("Forward error", fontsize="small")
-# axes["workprec_fwd"].legend(fontsize="xx-small")
-# axes["workprec_fwd"].grid(which="major")
-#
-# axes["workprec_rev"].set_xlabel("No. Matvecs", fontsize="small")
-# axes["workprec_rev"].set_ylabel("RMSE (relative)", fontsize="small")
-# axes["workprec_rev"].set_title("Gradient error", fontsize="small")
-# axes["workprec_rev"].legend(fontsize="xx-small")
-# axes["workprec_rev"].grid(which="major")
-#
-#
-# kwargs = dict(fontsize="small", fontweight="bold", loc="left")
-# axes["convergence"].set_title("A.", **kwargs)
-# axes["truth"].set_title("B1.", **kwargs)
-# axes["arnoldi"].set_title("B2.", **kwargs)
-# axes["dopri5"].set_title("B3.", **kwargs)
-# axes["tsit5"].set_title("B4.", **kwargs)
-# axes["workprec_fwd"].set_title("C1.", **kwargs)
-# axes["workprec_rev"].set_title("C2.", **kwargs)
