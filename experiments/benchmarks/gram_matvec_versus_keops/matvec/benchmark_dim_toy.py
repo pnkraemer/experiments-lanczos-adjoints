@@ -10,7 +10,7 @@ import gpytorch.kernels.keops
 import jax
 import jax.numpy as jnp
 import torch
-from matfree_extensions.util import exp_util, gp_util, gp_util_linalg
+from matfree_extensions.util import exp_util, gp_util
 
 
 def print_ts(ts: jax.Array, label_: str, /, *, num_runs: int):
@@ -101,40 +101,35 @@ if __name__ == "__main__":
         params = (data_size, (dim,))
 
         label = "matfree_sequential"
-        matvec = gp_util_linalg.gram_matvec_sequential(checkpoint=True)
+        matvec = gp_util.gram_matvec_sequential(checkpoint=True)
         t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
         print_ts(t, label, num_runs=args.num_runs)
         results[label] = t
 
-        label = "matfree_full"
-        matvec = gp_util_linalg.gram_matvec()
-        t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
-        print_ts(t, label, num_runs=args.num_runs)
-        results[label] = t
+        if data_size <= 50_000:
+            label = "matfree_full"
+            matvec = gp_util.gram_matvec()
+            t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
+            print_ts(t, label, num_runs=args.num_runs)
+            results[label] = t
 
         label = "matfree_partitioned_10"
         num_batches = int(jnp.minimum(10, data_size))
-        matvec = gp_util_linalg.gram_matvec_partitioned(
-            num=num_batches, checkpoint=True
-        )
+        matvec = gp_util.gram_matvec_partitioned(num=num_batches, checkpoint=True)
         t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
         print_ts(t, label, num_runs=args.num_runs)
         results[label] = t
 
         label = "matfree_partitioned_100"
         num_batches = int(jnp.minimum(100, data_size))
-        matvec = gp_util_linalg.gram_matvec_partitioned(
-            num=num_batches, checkpoint=True
-        )
+        matvec = gp_util.gram_matvec_partitioned(num=num_batches, checkpoint=True)
         t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
         print_ts(t, label, num_runs=args.num_runs)
         results[label] = t
 
         label = "matfree_partitioned_1000"
         num_batches = int(jnp.minimum(1_000, data_size))
-        matvec = gp_util_linalg.gram_matvec_partitioned(
-            num=num_batches, checkpoint=True
-        )
+        matvec = gp_util.gram_matvec_partitioned(num=num_batches, checkpoint=True)
         t = time_matfree(seed, *params, mv=matvec, num_runs=args.num_runs)
         print_ts(t, label, num_runs=args.num_runs)
         results[label] = t
