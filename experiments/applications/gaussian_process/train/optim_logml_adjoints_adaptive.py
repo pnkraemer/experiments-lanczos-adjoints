@@ -181,7 +181,6 @@ def predict_mean(params, x, Xs, ys):
     return postmean(x)
 
 
-
 optimizer = optax.adam(0.1)
 state = optimizer.init(p_opt)
 value_and_grad = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0, has_aux=True))
@@ -272,7 +271,7 @@ cg_numsteps_all = jnp.asarray(cg_numsteps_all)
 predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
 rmse = root_mean_square_error(predicted, target=test_y)
 
-nll, _ = mll_cholesky(p_opt,  Xs=test_x, ys=test_y)
+nll, _ = mll_cholesky(p_opt, Xs=test_x, ys=test_y)
 test_nlls = jnp.asarray(nll)
 test_rmses = jnp.asarray(test_rmses)
 

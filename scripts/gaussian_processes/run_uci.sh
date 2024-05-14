@@ -27,12 +27,12 @@ num_matvecs=10
 
 # Like in GPyTorch
 cg_tol=1e0
-rank_precon=15  
+rank_precon=15
 
 # Similar to GPyTorch (slightly less, but checkpoints...)
 num_samples=10
 
-# Slightly more than in most papers 
+# Slightly more than in most papers
 # (because 50 aren't enough for convergence)
 num_epochs=100
 

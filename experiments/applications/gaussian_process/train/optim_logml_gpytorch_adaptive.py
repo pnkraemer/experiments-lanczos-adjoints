@@ -153,7 +153,6 @@ with (
     loss_values = []
     loss_timestamps = []
 
-
     output = model(train_x)
     loss = -mll(output, train_y)
 
@@ -191,13 +190,12 @@ with torch.no_grad(), cfg_cg_tol, cfg_skip_var, cfg_maxiter:
     mean = pred_dist.mean
     rmse = mean.sub(test_y).pow(2).mean().sqrt()
 
-cfg_chol=cfg.fast_computations(log_prob=False, solves=False)
-cfg_nojitter = cfg.cholesky_jitter(0., 0., 0.) 
+cfg_chol = cfg.fast_computations(log_prob=False, solves=False)
+cfg_nojitter = cfg.cholesky_jitter(0.0, 0.0, 0.0)
 with torch.no_grad(), cfg_chol, cfg_nojitter:
     testloss = -likelihood(model(test_x)).log_prob(test_y) / len(test_y)
     print("Test-loss:", testloss)
     print("RMSE:", rmse)
-
 
 
 # Save results to a file
