@@ -4,7 +4,7 @@
 #BSUB -J pde-final-run
 #BSUB -n 4
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 6:00
+#BSUB -W 3:00
 #BSUB -R "select[gpu32gb]"
 #BSUB -R "rusage[mem=2GB]"
 #BSUB -R "span[hosts=1]"
