@@ -23,57 +23,56 @@ args = parser.parse_args()
 print(args)
 
 
+# Decide which methods to plot
 labels = {
     "arnoldi": "Arnoldi",
-    "diffrax:euler+backsolve": "Euler",
-    "diffrax:heun+recursive_checkpoint": "Heun",
+    # "diffrax:euler+backsolve": "Euler",
+    # "diffrax:heun+recursive_checkpoint": "Heun",
     "diffrax:dopri5+backsolve": "Dopri5",
     "diffrax:tsit5+recursive_checkpoint": "Tsit5",
 }
 methods = list(labels.keys())
 
-
+# Load the data set (here, this means loading the true parmater)
 path = f"./data/pde_wave/{args.resolution}x{args.resolution}"
 parameter = jnp.load(f"{path}_data_parameter.npy")
 directory = exp_util.matching_directory(__file__, "results/")
 
+
+# Prepare the figure: create subfigures, a meshgrid, etc.
 xs_1d = jnp.linspace(0, 1, endpoint=True, num=len(parameter))
 mesh = jnp.stack(jnp.meshgrid(xs_1d, xs_1d))
-
 layout = [
-    ["convergence", "truth", "arnoldi", "workprec_fwd"],
-    ["convergence", "dopri5", "tsit5", "workprec_rev"],
+    ["convergence", "convergence", "truth", "arnoldi", "workprec_fwd"],
+    ["convergence", "convergence", "dopri5", "tsit5", "workprec_rev"],
 ]
 layout = onp.asarray(layout)
-
 fig, axes = plt.subplot_mosaic(layout, dpi=200, figsize=(8, 3), constrained_layout=True)
 
-
+# Plot the approximations
 axes["truth"].set_title("Truth", fontsize="small")
 img = axes["truth"].contourf(*mesh, jnp.abs(parameter), cmap="Greys")
 plt.colorbar(img, ax=axes["truth"])
 
 axes["arnoldi"].set_title(r"Solver: $\it{Arnoldi}$", fontsize="small")
-path = f"{directory}{args.resolution}x{args.resolution}_arnoldi"
+path = f"{directory}{args.resolution}x{args.resolution}_arnoldi_s2"
 parameter_estimate = jnp.load(f"{path}_parameter.npy")
 img = axes["arnoldi"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Blues")
 plt.colorbar(img, ax=axes["arnoldi"])
 
 axes["dopri5"].set_title("Solver: Dopri5", fontsize="small")
-path = f"{directory}{args.resolution}x{args.resolution}_diffrax:dopri5+backsolve"
+path = f"{directory}{args.resolution}x{args.resolution}_diffrax:dopri5+backsolve_s2"
 parameter_estimate = jnp.load(f"{path}_parameter.npy")
 img = axes["dopri5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
 plt.colorbar(img, ax=axes["dopri5"])
 
 axes["tsit5"].set_title("Solver: Tsit5", fontsize="small")
-path = (
-    f"{directory}{args.resolution}x{args.resolution}_diffrax:tsit5+recursive_checkpoint"
-)
+path = f"{directory}{args.resolution}x{args.resolution}_diffrax:tsit5+recursive_checkpoint_s2"  # noqa: E501
 parameter_estimate = jnp.load(f"{path}_parameter.npy")
 img = axes["tsit5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
 plt.colorbar(img, ax=axes["tsit5"])
 
-
+# Set all x- and ylims to the unit square
 for method in ["tsit5", "arnoldi", "dopri5"]:
     axes[method].sharex(axes["truth"])
     axes[method].sharey(axes["truth"])
@@ -83,25 +82,44 @@ for method in ["tsit5", "arnoldi", "dopri5"]:
     axes[method].set_ylim((0.0, 1.0))
     axes[method].set_yticks((0.0, 0.5, 1.0))
 
+# Plot the work-precision diagrams
 axes["convergence"].set_title("Convergence", fontsize="small")
 axes["convergence"].set_xlabel("Time (sec)", fontsize="small")
 axes["convergence"].set_ylabel("Loss", fontsize="small")
-for method in methods:
-    path = f"{directory}{args.resolution}x{args.resolution}_{method}"
-    parameter_estimate = jnp.load(f"{path}_parameter.npy")
-    convergence = jnp.load(f"{path}_convergence.npy")
-    timestamps = jnp.load(f"{path}_timestamps.npy")
-    if "arnoldi" in method:
-        alpha, zorder = 0.99, 100
-    else:
-        alpha, zorder = 0.8, 0
+for color, method in enumerate(methods):
+    for seed in [1, 2, 3, 4, 5]:
+        path = f"{directory}{args.resolution}x{args.resolution}_{method}_s{seed}"
+        parameter_estimate = jnp.load(f"{path}_parameter.npy")
+        convergence = jnp.load(f"{path}_convergence.npy")
+        timestamps = jnp.load(f"{path}_timestamps.npy")
+        if "arnoldi" in method:
+            alpha, zorder = 0.8, 100
+        else:
+            alpha, zorder = 0.6, 0
 
-    axes["convergence"].semilogy(
-        timestamps, convergence, label=labels[method], zorder=zorder, alpha=alpha
-    )
-    axes["convergence"].legend(fontsize="x-small")
-    axes["convergence"].grid(axis="y", which="both")
+        def _process(x):
+            return jnp.mean(x.reshape((-1, 50)), axis=-1)
 
+        axes["convergence"].semilogy(
+            _process(timestamps),
+            _process(convergence),
+            label=labels[method],
+            alpha=alpha,
+            color=f"C{color}",
+        )
+
+        # handles, labels = axes["convergence"].get_legend_handles_labels()
+        # by_label = dict(zip(labels, handles))
+        # axes["convergence"].legend(by_label.values(), by_label.keys())
+
+        handles_, labels_ = axes["convergence"].get_legend_handles_labels()
+        by_label = dict(zip(labels_, handles_))
+        axes["convergence"].legend(
+            by_label.values(), by_label.keys(), fontsize="x-small"
+        )
+        axes["convergence"].set_ylim((0, 100))
+        axes["convergence"].grid(axis="y", which="both")
+#
 for method in methods:
     num_matvecs = jnp.load(f"{directory}/wp_{method}_Ns.npy")
     # ts_all = jnp.load(f"{directory}/wp_{method}_ts.npy")
