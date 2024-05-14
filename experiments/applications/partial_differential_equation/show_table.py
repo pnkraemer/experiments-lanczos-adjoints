@@ -16,8 +16,8 @@ print(args)
 
 labels = {
     "arnoldi": "Arnoldi",
-    "diffrax:euler+backsolve": "Euler/Backsolve",
-    "diffrax:heun+recursive_checkpoint": "Heun/Autodiff",
+    # "diffrax:euler+backsolve": "Euler/Backsolve",
+    # "diffrax:heun+recursive_checkpoint": "Heun/Autodiff",
     "diffrax:dopri5+backsolve": "Dopri5/Backsolve ",
     "diffrax:tsit5+recursive_checkpoint": "Tsit5/Autodiff",
 }
@@ -28,22 +28,24 @@ directory = exp_util.matching_directory(__file__, "results/")
 
 stats = {}
 for method in methods:
-    path = f"{directory}{args.resolution}x{args.resolution}_{method}"
-    with open(f"{path}_stats.pkl", "rb") as handle:
-        results = pickle.load(handle)
+    for seed in [1]:
+        path = f"{directory}{args.resolution}x{args.resolution}_{method}_s{seed}"
+        with open(f"{path}_stats.pkl", "rb") as handle:
+            results = pickle.load(handle)
 
-    # jnp.save(f"{path}_parameter.npy", scale_after)
-    # jnp.save(f"{path}_matvecs.npy", jnp.asarray(matvecs))
-    # jnp.save(f"{path}_convergence.npy", jnp.asarray(convergence))
-    timestamps = jnp.load(f"{path}_timestamps.npy")
-    matvecs = results["loss"][1]["num_matvecs"].sum()
+        # jnp.save(f"{path}_parameter.npy", scale_after)
+        # jnp.save(f"{path}_matvecs.npy", jnp.asarray(matvecs))
+        # jnp.save(f"{path}_convergence.npy", jnp.asarray(convergence))
+        timestamps = jnp.load(f"{path}_timestamps.npy")
+        print(results)
+        # matvecs = results["loss"]["num_matvecs"].sum()
 
-    stats[labels[method]] = {
-        "Test loss": results["loss"][0],
-        "RMSE (Parameter)": results["rmse_param"],
-        "Runtime/Epoch": jnp.mean(timestamps),
-        "No. Matvecs": matvecs,
-    }
+        stats[labels[method]] = {
+            "Test loss": results["loss"],
+            "RMSE (Parameter)": results["rmse_param"],
+            "Runtime/Epoch": jnp.mean(timestamps),
+            # "No. Matvecs": matvecs,
+        }
 
 
 stats = jax.tree_util.tree_map(float, stats)
