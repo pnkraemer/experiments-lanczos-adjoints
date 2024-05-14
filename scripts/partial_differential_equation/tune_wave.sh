@@ -2,11 +2,11 @@
 
 #BSUB -q gpuv100
 #BSUB -J pde-final-run
-#BSUB -n 8
+#BSUB -n 4
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 6:00
 #BSUB -R "select[gpu32gb]"
-#BSUB -R "rusage[mem=10GB]"
+#BSUB -R "rusage[mem=2GB]"
 #BSUB -R "span[hosts=1]"
 #BSUB -o logs/pde-final-run-%J.out
 #BSUB -e logs/pde-final-run-%J.err
@@ -27,9 +27,9 @@ num_steps_max=30
 num_epochs=3000
 
 
-printf "\nGenerating data...\n"
-time python experiments/applications/partial_differential_equation/make_data.py  \
-    --resolution $resolution --num_data $num_data --seed 1;
+# printf "\nGenerating data...\n"
+# time python experiments/applications/partial_differential_equation/make_data.py  \
+#     --resolution $resolution --num_data $num_data --seed 1;
 
 
 printf "\nCollecting results for the workprecision diagram\n"

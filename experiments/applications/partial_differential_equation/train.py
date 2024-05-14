@@ -115,7 +115,7 @@ print("done.")
 
 print("Setting up an optimiser...", end=" ")
 variables_after = variables_before
-optimizer = optax.adam(args.learning_rate)
+optimizer = optax.rmsprop(args.learning_rate)
 opt_state = optimizer.init(variables_after)
 print("done.")
 
