@@ -3,6 +3,7 @@ mfe/
 
 # Results
 results/applications/gaussian_process/*
+!results/applications/gaussian_process/train*
 
 # HPC logs
 logs/
