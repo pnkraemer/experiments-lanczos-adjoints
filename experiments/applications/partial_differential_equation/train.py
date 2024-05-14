@@ -24,7 +24,7 @@ parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
 parser.add_argument("--num_epochs", type=int, required=True)
 parser.add_argument("--seed", type=int, required=True)
-parser.add_argument("--learning_rate", type=float, default=1e-3)
+parser.add_argument("--learning_rate", type=float, default=2e-4)
 args = parser.parse_args()
 print(args)
 
@@ -115,7 +115,7 @@ print("done.")
 
 print("Setting up an optimiser...", end=" ")
 variables_after = variables_before
-optimizer = optax.rmsprop(args.learning_rate)
+optimizer = optax.adam(args.learning_rate)
 opt_state = optimizer.init(variables_after)
 print("done.")
 
