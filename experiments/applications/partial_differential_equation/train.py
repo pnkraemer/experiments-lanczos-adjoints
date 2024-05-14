@@ -22,9 +22,9 @@ from matfree_extensions.util import exp_util, pde_util
 parser = argparse.ArgumentParser()
 parser.add_argument("--resolution", type=int, required=True, help="Eg. 4, 16, 32, ...")
 parser.add_argument("--method", type=str, required=True, help="Eg. 'arnoldi'")
-parser.add_argument("--num_epochs", type=int, default=2000)
+parser.add_argument("--num_epochs", type=int, required=True)
+parser.add_argument("--seed", type=int, required=True)
 parser.add_argument("--learning_rate", type=float, default=1e-3)
-parser.add_argument("--seed", type=int, default=1)
 args = parser.parse_args()
 print(args)
 
@@ -72,16 +72,6 @@ if args.method == "arnoldi":
     arnoldi_depth = 10
     expm = pde_util.expm_arnoldi(10)
     solve = pde_util.solver_expm(0.0, 1.0, vector_field, expm=expm)
-
-elif args.method == "diffrax:euler+backsolve":
-    method, adjoint = "euler", "backsolve"
-    kwargs = {"num_steps": 100, "method": method, "adjoint": adjoint}
-    solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
-
-elif args.method == "diffrax:heun+recursive_checkpoint":
-    method, adjoint = "heun", "recursive_checkpoint"
-    kwargs = {"num_steps": 10, "method": method, "adjoint": adjoint}
-    solve = pde_util.solver_diffrax(0.0, 1.0, vector_field, **kwargs)
 
 elif args.method == "diffrax:tsit5+recursive_checkpoint":
     method, adjoint = "tsit5", "recursive_checkpoint"
@@ -165,7 +155,7 @@ print("done.\n")
 print("Saving results...", end=" ")
 directory = exp_util.matching_directory(__file__, "results/")
 os.makedirs(directory, exist_ok=True)
-path = f"{directory}{args.resolution}x{args.resolution}_{args.method}"
+path = f"{directory}{args.resolution}x{args.resolution}_{args.method}_s{args.seed}"
 stats = {"rmse_param": rmse, "loss": loss}
 with open(f"{path}_stats.pkl", "wb") as handle:
     pickle.dump(stats, handle)

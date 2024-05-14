@@ -4,6 +4,7 @@ mfe/
 # Results
 results/applications/gaussian_process/*
 !results/applications/gaussian_process/train*
+results/applications/partial_differentia_equation/*
 
 # HPC logs
 logs/
