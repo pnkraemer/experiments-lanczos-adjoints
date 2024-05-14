@@ -2,15 +2,14 @@ import argparse
 import os
 import os.path
 import time
-import urllib.request
-import numpy as onp
+
 import gpytorch
 import gpytorch.settings as cfg
 import jax.numpy as jnp
+import numpy as onp  # noqa: ICN001
 import torch
 import tqdm
 from matfree_extensions.util import exp_util, uci_util
-from scipy.io import loadmat
 
 
 def load_data(which: str, /):

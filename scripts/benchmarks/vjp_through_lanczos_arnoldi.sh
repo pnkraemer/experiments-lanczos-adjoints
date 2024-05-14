@@ -26,13 +26,13 @@ max_krylov_depth=50
 
 for matrix in "1138_bus" "gyro"
 do
-    for method in "arnoldi" "lanczos" 
+    for method in "arnoldi" "lanczos"
     do
-        for reortho in "full" "none" 
-        do 
+        for reortho in "full" "none"
+        do
             time python experiments/benchmarks/wall_times_vjp_through_lanczos_arnoldi/suite_sparse/benchmark.py  --which_matrix $matrix --lanczos_or_arnoldi $method --reortho $reortho --max_krylov_depth $max_krylov_depth --backprop_until $backprop_until  --num_runs 1;
 
             time python experiments/benchmarks/wall_times_vjp_through_lanczos_arnoldi/suite_sparse/benchmark.py --which_matrix $matrix --lanczos_or_arnoldi $method --reortho $reortho --max_krylov_depth $max_krylov_depth --backprop_until $backprop_until  --num_runs 5 --precompile;
-        done 
+        done
     done
 done

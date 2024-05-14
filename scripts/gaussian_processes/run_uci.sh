@@ -17,20 +17,20 @@ source ../penv/bin/activate
 
 # Optimisation with Adam(0.1) is built in.
 # (Even though Pytorch's and Optax's implementations differ slightly)
-# 
+#
 # Eval-CG tolerance 1e-4 is built in.
 # 80/20 Train/test splits are built in.
 
 # No point setting below 10, gpytorch seems to override anyway
 # CG usually converged within 10-20 iterations, so 20 seems fine
-num_matvecs=10  
+num_matvecs=10
 
 # Like in GPyTorch
-cg_tol=1e0       
-rank_precon=15  
+cg_tol=1e0
+rank_precon=15
 
 # Similar to GPyTorch (slightly less, but checkpoints...)
-num_samples=10  
+num_samples=10
 
 # Like in most papers
 num_epochs=50
@@ -38,7 +38,7 @@ num_epochs=50
 
 for seed in 1 2 3 4 5
 do
-  for dataset in concrete power_plant elevators protein kin40k kegg_directed kegg_undirected 
+  for dataset in concrete power_plant elevators protein kin40k kegg_directed kegg_undirected
   do
     python experiments/applications/gaussian_process/train/optim_logml_gpytorch_adaptive.py \
       --name final-gpytorch --seed $seed --num_matvecs $num_matvecs \
