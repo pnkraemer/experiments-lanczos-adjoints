@@ -1,15 +1,15 @@
 #!/bin/bash
 
 #BSUB -q gpuv100
-#BSUB -J gp-train-next-run
+#BSUB -J gp-train-again
 #BSUB -n 8
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 24:00
+#BSUB -W 14:00
 #BSUB -R "select[gpu32gb]"
-#BSUB -R "rusage[mem=10GB]"
+#BSUB -R "rusage[mem=2GB]"
 #BSUB -R "span[hosts=1]"
-#BSUB -o logs/gp-train-next-run-%J.out
-#BSUB -e logs/gp-train-next-run-%J.err
+#BSUB -o logs/gp-train-again-%J.out
+#BSUB -e logs/gp-train-again-%J.err
 
 ### Load the cuda module
 module load cuda/12.4
@@ -39,7 +39,7 @@ num_epochs=100
 
 for seed in 1 2 3 4 5
 do
-  for dataset in kin40k kegg_directed kegg_undirected protein elevators
+  for dataset in kin40k elevators kegg_directed kegg_undirected protein elevators
   do
     python experiments/applications/gaussian_process/train/optim_logml_gpytorch_adaptive.py \
       --name gpytorch-next-run-nll --seed $seed --num_matvecs $num_matvecs \

@@ -153,15 +153,27 @@ def mll_lanczos(params, *p_logdet, Xs, ys):
 
 
 @jax.jit
-def mll_cholesky(params, Xs, ys):
+def mll_lanczos_eval(params, *p_args, Xs, ys):
     p1, p2, p3 = unflatten(params)
 
-    # Build the loss and evaluate
-    logpdf = gp_util.logpdf_scipy_stats()
-    lklhd, _ = gp_util.likelihood_pdf(gram_matvec, logpdf, constrain=constrain)
+    solve_p = cg.pcg_adaptive(rtol=0.0, atol=1e-4, maxiter=10_000, miniter=10)
+    v_like = jnp.ones((len(Xs),), dtype=float)
+    sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
+    logdet = gp_util.krylov_logdet_slq(
+        num_matvecs_train_lanczos,
+        sample=sample,
+        num_batches=num_samples_sequential,
+        checkpoint=True,
+    )
+    logpdf_p = gp_util.logpdf_krylov_p(solve_p=solve_p, logdet=logdet)
+    lklhd, _ = gp_util.likelihood_pdf_p(
+        gram_matvec, logpdf_p, precondition=precondition, constrain=constrain
+    )
 
     loss_fun = gp_util.target_logml(prior, lklhd)
-    val, info = loss_fun(Xs, ys, params_mean=p1, params_kernel=p2, params_likelihood=p3)
+    val, info = loss_fun(
+        Xs, ys, *p_args, params_mean=p1, params_kernel=p2, params_likelihood=p3
+    )
     return -1.0 * val / len(Xs), info
 
 
@@ -169,7 +181,7 @@ def mll_cholesky(params, Xs, ys):
 def predict_mean(params, x, Xs, ys):
     p1, p2, p3 = unflatten(params)
 
-    solve_ = cg.pcg_adaptive(atol=1e-4, rtol=0.0, maxiter=10_000, miniter=10)
+    solve_ = cg.pcg_adaptive(atol=1e-2, rtol=0.0, maxiter=10_000, miniter=10)
     likelihood_, _p_likelihood_ = gp_util.likelihood_condition_p(
         gram_matvec, solve_, precondition=precondition, constrain=constrain
     )
@@ -271,9 +283,10 @@ cg_numsteps_all = jnp.asarray(cg_numsteps_all)
 predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
 rmse = root_mean_square_error(predicted, target=test_y)
 
-nll, _ = mll_cholesky(p_opt, Xs=test_x, ys=test_y)
+key, subkey = jax.random.split(key, num=2)
+nll, _ = mll_lanczos_eval(p_opt, subkey, Xs=test_x, ys=test_y)
 test_nlls = jnp.asarray(nll)
-test_rmses = jnp.asarray(test_rmses)
+test_rmses = jnp.asarray(rmse)
 
 print("NLL:", nll)
 print("RMSE:", rmse)

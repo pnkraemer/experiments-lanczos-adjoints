@@ -180,21 +180,28 @@ with (
 # Evaluate:
 model.eval()
 likelihood.eval()
+# Configs
+with (
+    torch.no_grad(),
+    cfg.max_preconditioner_size(args.rank_precon),
+    cfg.cg_tolerance(1e-4),
+    cfg.num_trace_samples(args.num_samples),
+    cfg.max_lanczos_quadrature_iterations(args.num_matvecs),
+    cfg.ciq_samples(False),
+    cfg.deterministic_probes(False),
+    cfg.skip_logdet_forward(False),
+    cfg.fast_computations(True, True, True),
+    cfg.max_root_decomposition_size(args.num_matvecs),
+    cfg.min_preconditioning_size(10),
+    cfg.tridiagonal_jitter(0.0),
+):
+    with cfg.skip_posterior_variances():
+        pred_dist = likelihood(model(test_x))
+        mean = pred_dist.mean
+        rmse = mean.sub(test_y).pow(2).mean().sqrt()
 
-cfg_maxiter = cfg.max_cg_iterations(10_000)
-cfg_cg_tol = cfg.eval_cg_tolerance(1e-4)
-cfg_skip_var = cfg.skip_posterior_variances()
-
-with torch.no_grad(), cfg_cg_tol, cfg_skip_var, cfg_maxiter:
-    pred_dist = likelihood(model(test_x))
-    mean = pred_dist.mean
-    rmse = mean.sub(test_y).pow(2).mean().sqrt()
-
-cfg_chol = cfg.fast_computations(log_prob=False, solves=False)
-cfg_nojitter = cfg.cholesky_jitter(0.0, 0.0, 0.0)
-with torch.no_grad(), cfg_chol, cfg_nojitter:
-    testloss = -likelihood(model(test_x)).log_prob(test_y) / len(test_y)
-    print("Test-loss:", testloss)
+    # testloss = -mll(model(test_x), test_y)
+    # print("Test-loss:", testloss)
     print("RMSE:", rmse)
 
 
@@ -215,8 +222,8 @@ jnp.save(f"{path}_loss_timestamps.npy", array)
 
 array = jnp.asarray(rmse.detach().cpu().numpy())
 jnp.save(f"{path}_rmse.npy", array)
-array = jnp.asarray(testloss.detach().cpu().numpy())
-jnp.save(f"{path}_testloss.npy", array)
+# array = jnp.asarray(testloss.detach().cpu().numpy())
+# jnp.save(f"{path}_testloss.npy", array)
 
 # print()
 print()
