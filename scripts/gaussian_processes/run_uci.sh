@@ -1,15 +1,15 @@
 #!/bin/bash
 
 #BSUB -q gpuv100
-#BSUB -J gp-train-final-run
+#BSUB -J gp-train-next-run
 #BSUB -n 8
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 24:00
 #BSUB -R "select[gpu32gb]"
 #BSUB -R "rusage[mem=10GB]"
 #BSUB -R "span[hosts=1]"
-#BSUB -o logs/gp-train-final-run-%J.out
-#BSUB -e logs/gp-train-final-run-%J.err
+#BSUB -o logs/gp-train-next-run-%J.out
+#BSUB -e logs/gp-train-next-run-%J.err
 
 ### Load the cuda module
 module load cuda/12.4
@@ -23,29 +23,30 @@ source ../penv/bin/activate
 
 # No point setting below 10, gpytorch seems to override anyway
 # CG usually converged within 10-20 iterations, so 20 seems fine
-num_matvecs=10  
+num_matvecs=10
 
 # Like in GPyTorch
-cg_tol=1e0       
+cg_tol=1e0
 rank_precon=15  
 
 # Similar to GPyTorch (slightly less, but checkpoints...)
-num_samples=10  
+num_samples=10
 
-# Like in most papers
-num_epochs=50
+# Slightly more than in most papers 
+# (because 50 aren't enough for convergence)
+num_epochs=100
 
 
 for seed in 1 2 3 4 5
 do
-  for dataset in concrete power_plant elevators protein kin40k kegg_directed kegg_undirected 
+  for dataset in kin40k kegg_directed kegg_undirected protein elevators
   do
     python experiments/applications/gaussian_process/train/optim_logml_gpytorch_adaptive.py \
-      --name final-gpytorch --seed $seed --num_matvecs $num_matvecs \
+      --name gpytorch-next-run-nll --seed $seed --num_matvecs $num_matvecs \
       --num_samples $num_samples --num_epochs $num_epochs --cg_tol $cg_tol \
       --dataset $dataset --rank_precon $rank_precon --num_partitions 10;
     python experiments/applications/gaussian_process/train/optim_logml_adjoints_adaptive.py \
-      --name final-adjoints --seed $seed --num_matvecs $num_matvecs \
+      --name adjoints-next-run-nll --seed $seed --num_matvecs $num_matvecs \
       --num_samples $num_samples --num_epochs $num_epochs --cg_tol $cg_tol \
       --dataset $dataset --rank_precon $rank_precon  --num_partitions 10;
   done

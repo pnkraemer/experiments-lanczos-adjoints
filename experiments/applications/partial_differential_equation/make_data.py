@@ -28,8 +28,7 @@ mesh = pde_util.mesh_tensorproduct(xs_1d, xs_1d)
 
 # Prepare randomness
 key = jax.random.PRNGKey(seed=args.seed)
-# gram = gp_util.gram_matvec_map_over_batch(num_batches=4, checkpoint=False)
-gram = gp_util.gram_matvec_full_batch()
+gram = gp_util.gram_matvec()
 xs = mesh.reshape((2, -1)).T
 mean = jnp.zeros_like(mesh[0]).reshape((-1,))
 

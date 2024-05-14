@@ -101,14 +101,11 @@ data_sampled = inputs[:num_data], targets[:num_data]
 train, test = data_util.split_train_test_shuffle(
     subkey, *data_sampled, train=train_test_split
 )
-# train, test = data_util.split_train_test(*data_sampled, train=train_test_split)
 (train_x, train_y), (test_x, test_y) = train, test
-# print("Train:", train_x.shape, train_y.shape)
-# print("Test:", test_x.shape, test_y.shape)
 
 
 # Set up linear algebra for training
-solve_p = cg.pcg_adaptive(rtol=0.0, atol=args.cg_tol, maxiter=100, miniter=10)
+solve_p = cg.pcg_adaptive(rtol=0.0, atol=args.cg_tol, maxiter=1000, miniter=10)
 v_like = jnp.ones((len(train_x),), dtype=float)
 sample = hutchinson.sampler_rademacher(v_like, num=num_samples_batched)
 logdet = gp_util.krylov_logdet_slq(
@@ -185,53 +182,6 @@ def predict_mean(params, x, Xs, ys):
     return postmean(x)
 
 
-# # Pre-compile the loss function
-# key, subkey = jax.random.split(key)
-# (mll_train, aux) = mll_lanczos(p_opt, subkey, inputs=train_x, targets=train_y)
-# mll_train.block_until_ready()
-# slq_std_rel = aux["logpdf"]["logdet"]["std_rel"]
-# residual = aux["logpdf"]["solve"]["residual_abs"]
-# # print("num_steps a-priori", aux["logpdf"]["solve"]["num_steps"])
-
-# cg_error = jnp.linalg.norm(residual) / jnp.sqrt(len(residual))
-
-# # Benchmark the loss function
-# t0 = time.perf_counter()
-# for _ in range(1):
-#     (value, aux) = mll_lanczos(p_opt, subkey, inputs=train_x, targets=train_y)
-#     value.block_until_ready()
-# t1 = time.perf_counter()
-# # print("Runtime (value):", (t1 - t0) / 1)
-
-
-# # Pre-compile the value-and-grad
-# _, grad_train = value_and_grad(p_opt, subkey, inputs=train_x, targets=train_y)
-# grad_train.block_until_ready()
-
-
-# # Benchmark the value-and-gradient function
-# t0 = time.perf_counter()
-# for _ in range(1):
-#     (value, _aux), grads = value_and_grad(p_opt, key, inputs=train_x, targets=train_y)
-#     value.block_until_ready()
-#     grads.block_until_ready()
-# t1 = time.perf_counter()
-# # print("Runtime (value-and-gradient):", (t1 - t0) / 1)
-
-
-# Pre-compile the test-loss
-# predicted, predict_info = predict_mean(p_opt, test_x, inputs=train_x, targets=train_y)
-# rmse = root_mean_square_error(predicted, target=test_y)
-# nll, _ = mll_cholesky(p_opt, inputs=test_x, targets=test_y)
-# # print("A-priori CG error:", cg_error)
-# # print("A-priori SLQ std (rel):", slq_std_rel)
-# # print("A-priori RMSE:", rmse)
-# # print("A-priori NLL:", nll)
-# predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
-# # print("RMSE-error (prediction):", predict_error)
-# # print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
-# # print("Initial params:", unflatten(p_opt))
-
 
 optimizer = optax.adam(0.1)
 state = optimizer.init(p_opt)
@@ -287,7 +237,7 @@ for _ in progressbar:
             for name, gradval in p_dict.items():
                 gradient_norms[name].append(jnp.linalg.norm(gradval))
 
-        predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
+        # predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
         # rmse = root_mean_square_error(predicted, target=test_y)
 
         # Save values
@@ -312,31 +262,23 @@ for _ in progressbar:
 end = time.perf_counter()
 
 
-# print("Found params:", unflatten(p_opt))
-
-
 # Complete the data collection
 loss_curve = jnp.asarray(loss_curve)
 loss_timestamps = jnp.asarray(loss_timestamps)
 cg_errors = jnp.asarray(cg_errors)
 cg_numsteps_all = jnp.asarray(cg_numsteps_all)
-# slq_std_rels = jnp.asarray(slq_std_rels)
 
 
 # Evaluate: RMSE & NLL
 predicted, predict_info = predict_mean(p_opt, test_x, Xs=train_x, ys=train_y)
 rmse = root_mean_square_error(predicted, target=test_y)
-nll, _ = mll_cholesky(p_opt, Xs=test_x, ys=test_y)
+
+nll, _ = mll_cholesky(p_opt,  Xs=test_x, ys=test_y)
 test_nlls = jnp.asarray(nll)
 test_rmses = jnp.asarray(test_rmses)
 
-
+print("NLL:", nll)
 print("RMSE:", rmse)
-# print("RMSE (rel -> saved):", rmse)
-# print("NLL:", nll)
-# predict_error = jnp.sqrt(jnp.mean(predict_info["solve"]["residual_abs"] ** 2))
-# print("RMSE-error:", predict_error)
-# print("RMSE (num_steps):", predict_info["solve"]["num_steps"])
 
 
 # Save results to a file

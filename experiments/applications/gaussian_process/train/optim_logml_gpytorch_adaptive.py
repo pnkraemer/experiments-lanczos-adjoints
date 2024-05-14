@@ -154,6 +154,7 @@ with (
     loss_values = []
     loss_timestamps = []
 
+
     output = model(train_x)
     loss = -mll(output, train_y)
 
@@ -163,31 +164,16 @@ with (
 
     for _ in progressbar:
         try:
-            # for name, p in model.named_parameters():
-            #     print(name, p.grad)
-            #     print()
-
-            # print()
-            # print()
-            # print()
-
             optimizer.zero_grad()
             output = model(train_x)
             loss = -mll(output, train_y)
             loss.backward()
             optimizer.step()
 
-            # print(loss)
-
             # Store values
             loss_values.append(loss)
             loss_timestamps.append(time.perf_counter() - time_start)
-            # for name, p in model.named_parameters():
-            #     gradient_norms[name].append(torch.norm(p.grad))
-            #     print(name, p.grad)
-            # print()
 
-            # assert False
             progressbar.set_description(f"Loss {loss:.3f}")
         except KeyboardInterrupt:
             break
@@ -197,39 +183,44 @@ with (
 model.eval()
 likelihood.eval()
 
-with torch.no_grad():
-    # RMSE
-    cfg_maxiter = cfg.max_cg_iterations(10_000)
-    cfg_cg_tol = cfg.eval_cg_tolerance(1e-4)
-    cfg_skip_var = cfg.skip_posterior_variances()
-    with cfg_cg_tol, cfg_skip_var, cfg_maxiter:
-        pred_dist = likelihood(model(test_x))
-        mean = pred_dist.mean
-        rmse = mean.sub(test_y).pow(2).mean().sqrt()
+cfg_maxiter = cfg.max_cg_iterations(10_000)
+cfg_cg_tol = cfg.eval_cg_tolerance(1e-4)
+cfg_skip_var = cfg.skip_posterior_variances()
 
-    # NLL ??
+with torch.no_grad(), cfg_cg_tol, cfg_skip_var, cfg_maxiter:
+    pred_dist = likelihood(model(test_x))
+    mean = pred_dist.mean
+    rmse = mean.sub(test_y).pow(2).mean().sqrt()
 
+cfg_chol=cfg.fast_computations(log_prob=False, solves=False)
+cfg_nojitter = cfg.cholesky_jitter(0., 0., 0.) 
+with torch.no_grad(), cfg_chol, cfg_nojitter:
+    testloss = -likelihood(model(test_x)).log_prob(test_y) / len(test_y)
+    print("Test-loss:", testloss)
     print("RMSE:", rmse)
-    # print("NLL: (todo)")
 
-    # Save results to a file
-    directory = exp_util.matching_directory(__file__, "results/")
-    os.makedirs(directory, exist_ok=True)
-    path = f"{directory}{args.name}_{args.dataset}_s{args.seed}"
 
-    for name, _ in model.named_parameters():
-        array = jnp.asarray(torch.tensor(gradient_norms[name]).numpy())
-        jnp.save(f"{path}_gradient_norms_{name}.npy", array)
 
-    array = jnp.asarray(torch.tensor(loss_values).numpy())
-    jnp.save(f"{path}_loss_values.npy", array)
+# Save results to a file
+directory = exp_util.matching_directory(__file__, "results/")
+os.makedirs(directory, exist_ok=True)
+path = f"{directory}{args.name}_{args.dataset}_s{args.seed}"
 
-    array = jnp.asarray(torch.tensor(loss_timestamps).numpy())
-    jnp.save(f"{path}_loss_timestamps.npy", array)
+for name, _ in model.named_parameters():
+    array = jnp.asarray(torch.tensor(gradient_norms[name]).numpy())
+    jnp.save(f"{path}_gradient_norms_{name}.npy", array)
 
-    array = jnp.asarray(rmse.detach().cpu().numpy())
-    jnp.save(f"{path}_rmse.npy", array)
+array = jnp.asarray(torch.tensor(loss_values).numpy())
+jnp.save(f"{path}_loss_values.npy", array)
 
-    # print()
+array = jnp.asarray(torch.tensor(loss_timestamps).numpy())
+jnp.save(f"{path}_loss_timestamps.npy", array)
+
+array = jnp.asarray(rmse.detach().cpu().numpy())
+jnp.save(f"{path}_rmse.npy", array)
+array = jnp.asarray(testloss.detach().cpu().numpy())
+jnp.save(f"{path}_testloss.npy", array)
+
+# print()
 print()
 print()
