@@ -39,9 +39,9 @@ for method in \
     diffrax:heun+recursive_checkpoint \
     diffrax:dopri5+backsolve \
     diffrax:tsit5+recursive_checkpoint
-do 
+do
     time python experiments/applications/partial_differential_equation/workprecision.py  \
-        --resolution $resolution --num_runs $num_runs \ 
+        --resolution $resolution --num_runs $num_runs \
         --num_steps_max $num_steps_max --method $method;
 done
 
@@ -57,4 +57,4 @@ do
         time python experiments/applications/partial_differential_equation/train.py \
             --num_epochs $num_epochs --resolution $resolution --method $method --seed $seed;
     done
-done 
+done

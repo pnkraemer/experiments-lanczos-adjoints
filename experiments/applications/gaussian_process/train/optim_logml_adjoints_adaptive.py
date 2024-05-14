@@ -9,7 +9,6 @@ import tqdm
 from matfree import hutchinson
 from matfree_extensions import cg, low_rank
 from matfree_extensions.util import data_util, exp_util, gp_util, uci_util
-import jaxopt
 
 
 def load_data(which: str, /):
@@ -212,7 +211,7 @@ loss_timestamps = []
 loss_curve = [float(value)]
 cg_errors = [float(cg_error)]
 cg_numsteps_all = [int(cg_numsteps)]
-test_rmses = []
+test_rmses: list = []
 # slq_std_rels = [float(slq_std_rel)]
 
 start = time.perf_counter()

@@ -17,7 +17,7 @@ source ../penv/bin/activate
 
 # Optimisation with Adam(0.1) is built in.
 # (Even though Pytorch's and Optax's implementations differ slightly)
-# 
+#
 # Eval-CG tolerance 1e-4 is built in.
 # 80/20 Train/test splits are built in.
 
