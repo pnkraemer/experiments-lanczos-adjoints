@@ -15,43 +15,86 @@ print(args)
 
 
 labels = {
-    "arnoldi": "Arnoldi",
-    # "diffrax:euler+backsolve": "Euler/Backsolve",
-    # "diffrax:heun+recursive_checkpoint": "Heun/Autodiff",
-    "diffrax:dopri5+backsolve": "Dopri5/Backsolve ",
-    "diffrax:tsit5+recursive_checkpoint": "Tsit5/Autodiff",
+    "arnoldi": r"Arnoldi \& Adjoints (ours)",
+    "diffrax:dopri5+backsolve": r"Dopri5 \& Backsolve ",
+    "diffrax:tsit5+recursive_checkpoint": r"Tsit5 \& RecursiveCheckpoint",
 }
 methods = list(labels.keys())
 
 
 directory = exp_util.matching_directory(__file__, "results/")
 
-stats = {}
+stats_mean = {}
+stats_std = {}
 for method in methods:
-    for seed in [1]:
+    losses = []
+    rmses = []
+    runtimes = []
+
+    for seed in [1, 2, 3]:
         path = f"{directory}{args.resolution}x{args.resolution}_{method}_s{seed}"
         with open(f"{path}_stats.pkl", "rb") as handle:
             results = pickle.load(handle)
 
-        # jnp.save(f"{path}_parameter.npy", scale_after)
-        # jnp.save(f"{path}_matvecs.npy", jnp.asarray(matvecs))
-        # jnp.save(f"{path}_convergence.npy", jnp.asarray(convergence))
         timestamps = jnp.load(f"{path}_timestamps.npy")
-        print(results)
-        # matvecs = results["loss"]["num_matvecs"].sum()
 
-        stats[labels[method]] = {
-            "Test loss": results["loss"],
-            "RMSE (Parameter)": results["rmse_param"],
-            "Runtime/Epoch": jnp.mean(timestamps),
-            # "No. Matvecs": matvecs,
-        }
+        losses.append(results["loss"])
+        rmses.append(results["rmse_param"])
+        runtimes.append(timestamps[-1] / len(timestamps))
+
+    losses = jnp.asarray(losses)
+    rmses = jnp.asarray(rmses)
+    runtimes = jnp.asarray(runtimes)
+
+    stats_mean[labels[method]] = {
+        "Loss on test set": jnp.mean(losses),
+        "Parameter RMSE": jnp.mean(rmses),
+        "Runtime per epoch": jnp.mean(runtimes),
+    }
+    print(losses)
+    print(jnp.std(losses))
+    stats_std[labels[method]] = {
+        "Loss on test set": jnp.std(losses),
+        "Parameter RMSE": jnp.std(rmses),
+        "Runtime per epoch": jnp.std(runtimes),
+    }
 
 
-stats = jax.tree_util.tree_map(float, stats)
+stats_mean = jax.tree_util.tree_map(float, stats_mean)
+stats_std = jax.tree_util.tree_map(float, stats_std)
 
-results_dataframe = pd.DataFrame(stats)
+results_dataframe_mean = pd.DataFrame(stats_mean)
+results_dataframe_std = pd.DataFrame(stats_std)
 
+print()
+print()
+print()
+print()
+print()
+
+latex = results_dataframe_mean.to_latex(float_format="%.1e")
+print(latex)
+print()
+print()
+print()
+print()
+print()
+latex = results_dataframe_std.to_latex(float_format="%.1e")
+print(latex)
+print()
+print()
+print()
+print()
+print()
+
+# print(results_dataframe_std)
+# print(results_dataframe_mean)
+# results_dataframe_mean.index.name = 'param'
+# results_dataframe_std.index.name = 'param'
+# results_ = [results_dataframe_mean, results_dataframe_std]
+# results = pd.concat(results_,axis=0).groupby('param').agg(lambda mu_std: '±'.join(mu_std))
+# print(results)
+assert False
 
 # Create a latex-table
 num_keys = len(stats["Arnoldi"].keys())

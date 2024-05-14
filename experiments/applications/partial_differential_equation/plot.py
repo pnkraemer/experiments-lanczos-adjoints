@@ -6,14 +6,13 @@ import os
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from matfree_extensions.util import exp_util
-from tueplots import axes, fontsizes
-
-# plt.rcParams.update(figsizes.neurips2024(nrows=2, ncols=8, height_to_width_ratio=1.))
+from tueplots import axes, figsizes, fontsizes
 
 plt.rcParams.update(axes.lines())
 plt.rcParams.update(axes.legend())
 plt.rcParams.update(axes.grid())
-plt.rcParams.update(fontsizes.neurips2024(default_smaller=2))
+plt.rcParams.update(fontsizes.iclr2024())
+plt.rcParams.update(figsizes.iclr2024(ncols=3))
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -36,6 +35,56 @@ methods = list(labels.keys())
 path = f"./data/pde_wave/{args.resolution}x{args.resolution}"
 parameter = jnp.load(f"{path}_data_parameter.npy")
 directory = exp_util.matching_directory(__file__, "results/")
+
+
+# Prepare the figure: create subfigures, a meshgrid, etc.
+xs_1d = jnp.linspace(0, 1, endpoint=True, num=len(parameter))
+mesh = jnp.stack(jnp.meshgrid(xs_1d, xs_1d))
+
+
+layout = [["truth", "arnoldi"], ["dopri5", "tsit5"]]
+fig, ax = plt.subplot_mosaic(layout, figsize=(4, 3))
+
+
+ax["truth"].set_title("Truth", fontsize="small")
+img = ax["truth"].contourf(*mesh, jnp.abs(parameter), cmap="Greys")
+plt.colorbar(img, ax=ax["truth"])
+
+ax["arnoldi"].set_title(r"Solver: $\it{Arnoldi}$", fontsize="small")
+path = f"{directory}{args.resolution}x{args.resolution}_arnoldi_s2"
+parameter_estimate = jnp.load(f"{path}_parameter.npy")
+img = ax["arnoldi"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Blues")
+plt.colorbar(img, ax=ax["arnoldi"])
+
+ax["dopri5"].set_title("Solver: Dopri5", fontsize="small")
+path = f"{directory}{args.resolution}x{args.resolution}_diffrax:dopri5+backsolve_s2"
+parameter_estimate = jnp.load(f"{path}_parameter.npy")
+img = ax["dopri5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
+plt.colorbar(img, ax=ax["dopri5"])
+
+ax["tsit5"].set_title("Solver: Tsit5", fontsize="small")
+path = f"{directory}{args.resolution}x{args.resolution}_diffrax:tsit5+recursive_checkpoint_s2"
+parameter_estimate = jnp.load(f"{path}_parameter.npy")
+img = ax["tsit5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
+plt.colorbar(img, ax=ax["tsit5"])
+
+# Set all x- and ylims to the unit square
+for method in ["tsit5", "arnoldi", "dopri5"]:
+    ax[method].sharex(ax["truth"])
+    ax[method].sharey(ax["truth"])
+
+    ax[method].set_xlim((0.0, 1.0))
+    ax[method].set_xticks((0.0, 0.5, 1.0))
+    ax[method].set_ylim((0.0, 1.0))
+    ax[method].set_yticks((0.0, 0.5, 1.0))
+
+
+directory_fig = exp_util.matching_directory(__file__, "figures/")
+os.makedirs(directory_fig, exist_ok=True)
+plt.savefig(f"{directory_fig}contours.pdf")
+
+
+plt.show()
 
 
 layout = ["forward", "forward", "gradient", "gradient", "loss", "loss", "loss"]
@@ -68,23 +117,23 @@ for method in methods:
         zorder=zorder,
     )
 
-ax["forward"].set_ylabel("RMSE (relative)", fontsize="small")
-ax["forward"].set_title("Forward error", fontsize="small")
+ax["forward"].set_ylabel("RMSE (relative)")
+ax["forward"].set_title("Forward error")
 ax["forward"].legend(fontsize="xx-small")
 ax["forward"].grid(which="major")
-ax["forward"].set_xlabel("No. Matvecs", fontsize="small")
-ax["gradient"].set_xlabel("No. Matvecs", fontsize="small")
-# ax["gradient"].set_ylabel("RMSE (relative)", fontsize="small")
-ax["gradient"].set_title("Gradient error", fontsize="small")
+ax["forward"].set_xlabel("No. Matvecs")
+ax["gradient"].set_xlabel("No. Matvecs")
+# ax["gradient"].set_ylabel("RMSE (relative)")
+ax["gradient"].set_title("Gradient error")
 ax["gradient"].legend(fontsize="xx-small")
 ax["gradient"].grid(which="major")
 ax["forward"].sharex(ax["gradient"])
 ax["forward"].sharey(ax["gradient"])
 
 
-ax["loss"].set_title("Training loss", fontsize="small")
-ax["loss"].set_xlabel("Time (sec)", fontsize="small")
-ax["loss"].set_ylabel("Loss", fontsize="small")
+ax["loss"].set_title("Training loss")
+ax["loss"].set_xlabel("Time (sec)")
+ax["loss"].set_ylabel("Loss")
 for color, method in enumerate(methods):
     for seed in [1, 2, 3]:
         path = f"{directory}{args.resolution}x{args.resolution}_{method}_s{seed}"
@@ -124,6 +173,10 @@ ax["loss"].set_title("B.", **kwargs)
 ax["forward"].set_title("A1.", **kwargs)
 ax["gradient"].set_title("A2.", **kwargs)
 
+plt.savefig(f"{directory}pde_training_curves.pdf")
+
+plt.show()
+
 
 #
 #
@@ -139,40 +192,7 @@ ax["gradient"].set_title("A2.", **kwargs)
 # fig, axes =
 # plt.subplot_mosaic(layout, dpi=200, figsize=(8, 3), constrained_layout=True)
 #
-# # Plot the approximations
-# axes["truth"].set_title("Truth", fontsize="small")
-# img = axes["truth"].contourf(*mesh, jnp.abs(parameter), cmap="Greys")
-# plt.colorbar(img, ax=axes["truth"])
-#
-# axes["arnoldi"].set_title(r"Solver: $\it{Arnoldi}$", fontsize="small")
-# path = f"{directory}{args.resolution}x{args.resolution}_arnoldi_s2"
-# parameter_estimate = jnp.load(f"{path}_parameter.npy")
-# img = axes["arnoldi"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Blues")
-# plt.colorbar(img, ax=axes["arnoldi"])
-#
-# axes["dopri5"].set_title("Solver: Dopri5", fontsize="small")
-# path = f"{directory}{args.resolution}x{args.resolution}_diffrax:dopri5+backsolve_s2"
-# parameter_estimate = jnp.load(f"{path}_parameter.npy")
-# img = axes["dopri5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
-# plt.colorbar(img, ax=axes["dopri5"])
-#
-# axes["tsit5"].set_title("Solver: Tsit5", fontsize="small")
-# path = f"{directory}{args.resolution}x
-# {args.resolution}_diffrax:tsit5+recursive_checkpoint_s2"
-# parameter_estimate = jnp.load(f"{path}_parameter.npy")
-# img = axes["tsit5"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Greens")
-# plt.colorbar(img, ax=axes["tsit5"])
-#
-# # Set all x- and ylims to the unit square
-# for method in ["tsit5", "arnoldi", "dopri5"]:
-#     axes[method].sharex(axes["truth"])
-#     axes[method].sharey(axes["truth"])
-#
-#     axes[method].set_xlim((0.0, 1.0))
-#     axes[method].set_xticks((0.0, 0.5, 1.0))
-#     axes[method].set_ylim((0.0, 1.0))
-#     axes[method].set_yticks((0.0, 0.5, 1.0))
-#
+# # Plot the app
 # # Plot the work-precision diagrams
 # axes["convergence"].set_title("Convergence", fontsize="small")
 # axes["convergence"].set_xlabel("Time (sec)", fontsize="small")
@@ -260,10 +280,3 @@ ax["gradient"].set_title("A2.", **kwargs)
 # axes["tsit5"].set_title("B4.", **kwargs)
 # axes["workprec_fwd"].set_title("C1.", **kwargs)
 # axes["workprec_rev"].set_title("C2.", **kwargs)
-
-directory = exp_util.matching_directory(__file__, "figures/")
-os.makedirs(directory, exist_ok=True)
-
-plt.savefig(f"{directory}pde_training_curves.pdf")
-
-plt.show()
