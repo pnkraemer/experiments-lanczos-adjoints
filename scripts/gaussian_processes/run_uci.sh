@@ -42,11 +42,11 @@ do
   for dataset in kin40k elevators kegg_directed kegg_undirected protein elevators
   do
     python experiments/applications/gaussian_process/train/optim_logml_gpytorch_adaptive.py \
-      --name gpytorch-next-run-nll --seed $seed --num_matvecs $num_matvecs \
+      --name again-gpytorch --seed $seed --num_matvecs $num_matvecs \
       --num_samples $num_samples --num_epochs $num_epochs --cg_tol $cg_tol \
       --dataset $dataset --rank_precon $rank_precon --num_partitions 10;
     python experiments/applications/gaussian_process/train/optim_logml_adjoints_adaptive.py \
-      --name adjoints-next-run-nll --seed $seed --num_matvecs $num_matvecs \
+      --name again-adjoints --seed $seed --num_matvecs $num_matvecs \
       --num_samples $num_samples --num_epochs $num_epochs --cg_tol $cg_tol \
       --dataset $dataset --rank_precon $rank_precon  --num_partitions 10;
   done
