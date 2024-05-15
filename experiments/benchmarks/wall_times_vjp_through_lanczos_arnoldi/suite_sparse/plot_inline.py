@@ -61,7 +61,7 @@ with plt.rc_context(axes.spines(top=True, right=True, bottom=True, left=True)):
     ax_in.set_yticks(())
 
 
-ax.set_xlabel("No. Matvecs", fontsize="small")
+ax.set_xlabel("Krylov-space depth", fontsize="small")
 ax.set_ylabel("Wall time (sec)", fontsize="small")
 
 # ax.set_xlim((-1, 90))

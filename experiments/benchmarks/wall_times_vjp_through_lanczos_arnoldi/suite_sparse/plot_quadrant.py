@@ -66,5 +66,5 @@ for ax, (method, precompile) in zip(
 # # Save the figure
 directory = exp_util.matching_directory(__file__, "figures/")
 os.makedirs(directory, exist_ok=True)
-# plt.savefig(f"{directory}/figure_single.pdf")
+plt.savefig(f"{directory}/figure_quadrant.pdf")
 plt.show()
