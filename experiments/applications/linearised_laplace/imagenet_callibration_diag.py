@@ -37,38 +37,35 @@ n_params = len(params_vec)
 print(f"Number of parameters: {n_params}")
 
 # Log Determinant Function
-lanczos_rank = 10  # 50
+lanczos_rank = 50
 slq_num_samples = 1
 slq_num_batches = 10
 
 
-def _softplus(x, beta=1.0, threshold=20.0):
-    x_safe = jax.lax.select(x * beta < threshold, x, jax.numpy.ones_like(x))
-    return jax.lax.select(
-        x * beta < threshold,
-        1 / beta * jax.numpy.log(1 + jax.numpy.exp(beta * x_safe)),
-        x,
-    )
-
-
 def unconstrain(a):
-    # return calibrate_log_alpha_min + _softplus(a)
     return calibrate_log_alpha_min + jnp.exp(a)
 
 
 # Callibration Loss
 
 calib_rng, rng = jax.random.split(rng)
-calib_loss = bnn_util.callibration_loss(model_apply, unflatten, unconstrain, n_params)
+hutchinson_samples = 50
+num_samples = 3
+calib_loss = bnn_util.callibration_loss_diagonal(model_apply, unflatten, unconstrain, hutchinson_samples, num_samples, n_params)
+# calib_loss = jax.jit(calib_loss)
 value_and_grad = jax.jit(jax.value_and_grad(calib_loss, argnums=0))
+
+# Optimize alpha
 
 calibrate_log_alpha_min = 0.1
 calibrate_lrate = 1e-2
 optimizer = optax.rmsprop(calibrate_lrate)
 
+
 alpha_rng, rng = jax.random.split(rng, num=2)
-log_alpha = 1.0  # jax.random.normal(alpha_rng, shape=())
+log_alpha = 1.0 #jax.random.normal(alpha_rng, shape=())
 optimizer_state = optimizer.init(log_alpha)
+
 
 # Epochs
 log_alphas = []
@@ -76,12 +73,12 @@ losses = []
 n_epochs = 200
 for epoch in range(n_epochs):
     for i, batch in enumerate(train_loader):
-        # i = epoch
+    # i = epoch
         model_rng, rng = jax.random.split(rng)
         img, label = batch["image"], batch["label"]
         img, label = jnp.asarray(img, dtype=float), jnp.asarray(label, dtype=float)
         start_time = time.perf_counter()
-        loss, grad = value_and_grad(log_alpha, params_vec, img, label, rng)
+        loss, grad = value_and_grad(log_alpha, params_vec, img, label)
         updates, optimizer_state = optimizer.update(grad, optimizer_state)
         log_alpha = optax.apply_updates(log_alpha, updates)
         end_time = time.perf_counter()
@@ -92,5 +89,5 @@ for epoch in range(n_epochs):
         losses.append(loss)
 
 results = {"log_alphas": log_alphas, "losses": losses}
-save_path = "./results/applications/linearised_laplace/imagenet_callibration"
+save_path = "./results/applications/linearised_laplace/imagenet_callibration_diag"
 pickle.dump(results, open(f"{save_path}.pickle", "wb"))
