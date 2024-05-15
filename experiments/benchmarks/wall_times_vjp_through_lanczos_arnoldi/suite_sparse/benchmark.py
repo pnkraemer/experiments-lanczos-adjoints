@@ -28,9 +28,6 @@ print(args)
 LABEL = f"{args.lanczos_or_arnoldi}"
 LABEL += f"_{args.which_matrix}"
 LABEL += f"_reortho_{args.reortho}"
-LABEL += f"_num_runs_{args.num_runs}"
-LABEL += f"_backprop_until_{args.backprop_until}"
-LABEL += f"_max_krylov_depth_{args.max_krylov_depth}"
 LABEL += f"_precompile_{args.precompile}"
 print("Label:", LABEL)
 
@@ -82,7 +79,7 @@ times_fwdpass = []
 times_custom = []
 times_autodiff = []
 
-n = args.max_krylov_depth // 10
+n = args.backprop_until // 10
 krylov_depths = jnp.arange(n, args.max_krylov_depth + n, step=n, dtype=int)
 for krylov_depth in krylov_depths:
     print("Krylov-depth:", krylov_depth)
