@@ -19,12 +19,12 @@ source ../penv/bin/activate
 backprop_until=100
 
 # Go up to K=500
-max_krylov_depth=50
+max_krylov_depth=150
 
 # Test different matrices, methods, reorthogonalisation
 # and measure compile- and run-time
 
-for matrix in "1138_bus" "gyro"
+for matrix in bcsstk18
 do
     for method in "arnoldi" "lanczos"
     do
@@ -33,6 +33,7 @@ do
             time python experiments/benchmarks/wall_times_vjp_through_lanczos_arnoldi/suite_sparse/benchmark.py  --which_matrix $matrix --lanczos_or_arnoldi $method --reortho $reortho --max_krylov_depth $max_krylov_depth --backprop_until $backprop_until  --num_runs 1;
 
             time python experiments/benchmarks/wall_times_vjp_through_lanczos_arnoldi/suite_sparse/benchmark.py --which_matrix $matrix --lanczos_or_arnoldi $method --reortho $reortho --max_krylov_depth $max_krylov_depth --backprop_until $backprop_until  --num_runs 5 --precompile;
+
         done
     done
 done
