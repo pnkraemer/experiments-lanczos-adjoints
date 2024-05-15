@@ -51,7 +51,9 @@ def unconstrain(a):
 calib_rng, rng = jax.random.split(rng)
 hutchinson_samples = 50
 num_samples = 3
-calib_loss = bnn_util.callibration_loss_diagonal(model_apply, unflatten, unconstrain, hutchinson_samples, num_samples, n_params)
+calib_loss = bnn_util.callibration_loss_diagonal(
+    model_apply, unflatten, unconstrain, hutchinson_samples, num_samples, n_params
+)
 # calib_loss = jax.jit(calib_loss)
 value_and_grad = jax.jit(jax.value_and_grad(calib_loss, argnums=0))
 
@@ -63,7 +65,7 @@ optimizer = optax.rmsprop(calibrate_lrate)
 
 
 alpha_rng, rng = jax.random.split(rng, num=2)
-log_alpha = 1.0 #jax.random.normal(alpha_rng, shape=())
+log_alpha = 1.0  # jax.random.normal(alpha_rng, shape=())
 optimizer_state = optimizer.init(log_alpha)
 
 
@@ -73,7 +75,7 @@ losses = []
 n_epochs = 200
 for epoch in range(n_epochs):
     for i, batch in enumerate(train_loader):
-    # i = epoch
+        # i = epoch
         model_rng, rng = jax.random.split(rng)
         img, label = batch["image"], batch["label"]
         img, label = jnp.asarray(img, dtype=float), jnp.asarray(label, dtype=float)

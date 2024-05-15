@@ -32,8 +32,8 @@ for dataset in datasets:
     for name in ["gpytorch"]:
         results[dataset][name] = {}
         times, rmses, losses = [], [], []
-        for seed in [1, 2, 3, 4]:
-            path = f"{directory}again-{name}_{dataset}_s{seed}"
+        for seed in [1, 2, 3]:
+            path = f"{directory}{name}75_{dataset}_s{seed}"
             times.append(jnp.load(f"{path}_loss_timestamps.npy"))
             rmses.append(jnp.load(f"{path}_rmse.npy"))
             losses.append(jnp.load(f"{path}_loss_values.npy"))
@@ -45,8 +45,8 @@ for dataset in datasets:
     for name in ["adjoints"]:
         results[dataset][name] = {}
         times, rmses, losses = [], [], []
-        for seed in [1, 2, 3, 4]:
-            path = f"{directory}again-{name}_{dataset}_s{seed}"
+        for seed in [1, 2, 3]:
+            path = f"{directory}{name}75_{dataset}_s{seed}"
 
             times.append(jnp.load(f"{path}_loss_timestamps.npy"))
             rmses.append(jnp.load(f"{path}_test_rmses.npy"))
