@@ -4,7 +4,15 @@ import jax
 import jax.numpy as jnp
 
 
-def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True):
+def hessenberg(
+    matvec,
+    krylov_depth,
+    /,
+    *,
+    reortho: str,
+    custom_vjp: bool = True,
+    reortho_vjp: str = "match",
+):
     reortho_expected = ["none", "full"]
     if reortho not in reortho_expected:
         msg = f"Unexpected input for {reortho}: either of {reortho_expected} expected."
@@ -15,7 +23,8 @@ def hessenberg(matvec, krylov_depth, /, *, reortho: str, custom_vjp: bool = True
         return estimate_backend(matvec_convert, v, *params, *aux_args)
 
     def estimate_backend(matvec_convert: Callable, v, *params):
-        return _forward(matvec_convert, krylov_depth, v, *params, reortho=reortho)
+        reortho_ = reortho_vjp if reortho_vjp != "match" else reortho_vjp
+        return _forward(matvec_convert, krylov_depth, v, *params, reortho=reortho_)
 
     def estimate_fwd(matvec_convert: Callable, v, *params):
         outputs = estimate_backend(matvec_convert, v, *params)
