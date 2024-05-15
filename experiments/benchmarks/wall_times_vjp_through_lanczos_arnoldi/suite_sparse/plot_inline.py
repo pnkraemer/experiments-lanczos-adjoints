@@ -24,14 +24,7 @@ max_krylov_depth = 150
 precompile = True
 num_runs = 5
 directory = exp_util.matching_directory(__file__, "results/")
-path = (
-    f"{directory}{method}_{matrix}"
-    f"_reortho_{reortho}"
-    f"_num_runs_{num_runs}"
-    f"_backprop_until_{backprop_until}"
-    f"_max_krylov_depth_{max_krylov_depth}"
-    f"_precompile_{precompile}"
-)
+path = f"{directory}{method}_{matrix}" f"_reortho_{reortho}" f"_precompile_{precompile}"
 krylov_depths = jnp.load(f"{path}_krylov_depths.npy")
 times_fwdpass = jnp.load(f"{path}_times_fwdpass.npy")
 times_custom = jnp.load(f"{path}_times_custom.npy")
@@ -47,21 +40,21 @@ fig, ax = plt.subplots(dpi=200)
 
 style_fwd = {"label": "Forward", "color": "black", "linestyle": "dashed"}
 ax.plot(krylov_depths, times_fwdpass, **style_fwd)
-ax.annotate("Forward pass", xy=(60.0, -0.005), color="black", fontsize="xx-small")
+ax.annotate("Forward pass", xy=(70.0, 0.03), color="gray", fontsize="x-small")
 
 style_adjoint = {"label": "Adjoint", "color": "C0"}
 ax.plot(krylov_depths, times_custom, **style_adjoint)
-ax.annotate("Adjoint", xy=(70.0, 0.04), color="C0", fontsize="x-small")
+ax.annotate("Adjoint", xy=(170.0, 0.25), color="C0", fontsize="x-small")
 
 style_autodiff = {"label": "Backprop", "color": "C1"}
 ax.plot(krylov_depths[: len(times_autodiff)], times_autodiff, **style_autodiff)
-ax.annotate("Backprop", xy=(60.0, 0.2), color="C1", fontsize="x-small")
+ax.annotate("Backprop", xy=(10.0, 0.2), color="C1", fontsize="x-small")
 
 
 with plt.rc_context(axes.spines(top=True, right=True, bottom=True, left=True)):
-    ax_in = inset_axes(ax, width="30%", height="30%", loc=2, borderpad=1.5)
-    ax_in.set_title(f"SuiteSparse: {matrix}", fontsize="xx-small", pad=3)
-    exp_util.plt_spy_coo(ax_in, M, markersize=0.2, cmap="viridis", invert_axes=False)
+    ax_in = inset_axes(ax, width="30%", height="30%", loc=2, borderpad=1.75)
+    ax_in.set_title(f"SuiteSparse: '{matrix}'", fontsize="xx-small", pad=3)
+    exp_util.plt_spy_coo(ax_in, M, markersize=0.1, cmap="cividis", invert_axes=False)
     ax_in.set_xlabel(rf"$N={M.shape[0]}$ rows", fontsize="xx-small")
     ax_in.invert_yaxis()
     ax_in.set_xticks(())
@@ -72,7 +65,7 @@ ax.set_xlabel("Krylov-space depth", fontsize="small")
 ax.set_ylabel("Wall time (sec)", fontsize="small")
 
 # ax.set_xlim((-1, 90))
-ax.set_ylim((0.0, 0.5))
+ax.set_ylim((0.0, 0.6))
 
 # # Save the figure
 directory = exp_util.matching_directory(__file__, "figures/")

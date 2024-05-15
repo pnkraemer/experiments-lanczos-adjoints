@@ -41,9 +41,6 @@ for ax, (method, precompile) in zip(
     path = (
         f"{directory}{method}_{matrix}"
         f"_reortho_{reortho}"
-        f"_num_runs_{num_runs}"
-        f"_backprop_until_{backprop_until}"
-        f"_max_krylov_depth_{max_krylov_depth}"
         f"_precompile_{precompile}"
     )
     krylov_depths = jnp.load(f"{path}_krylov_depths.npy")
@@ -55,22 +52,16 @@ for ax, (method, precompile) in zip(
     ax.set_title(title, fontsize="medium")
     style_fwd = {"label": "Forward", "color": "black", "linestyle": "dashed"}
     ax.plot(krylov_depths, times_fwdpass, **style_fwd)
-    # ax.annotate("Forward pass", xy=(60.0, -0.005), color="black", fontsize="xx-small")
 
     style_adjoint = {"label": "Adjoint", "color": "C0"}
     ax.plot(krylov_depths, times_custom, **style_adjoint)
-    # ax.annotate("Adjoint", xy=(70.0, 0.04), color="C0", fontsize="x-small")
 
     style_autodiff = {"label": "Backprop", "color": "C1"}
     ax.plot(krylov_depths[: len(times_autodiff)], times_autodiff, **style_autodiff)
-    # ax.annotate("Backprop", xy=(60.0, 0.2), color="C1", fontsize="x-small")
 
     ax.legend(fontsize="xx-small")
     ax.set_xlabel("Krylov-space depth", fontsize="small")
     ax.set_ylabel("Wall time (sec)", fontsize="small")
-
-    # ax.set_xlim((-1, 90))
-    # ax.set_ylim((0., 0.5))
 
 # # Save the figure
 directory = exp_util.matching_directory(__file__, "figures/")
