@@ -72,16 +72,18 @@ def uci_dataset_mlrepo(which, /, *, use_cache_if_possible: bool = True):
     return X, y
 
 
-def plt_spy_coo(ax, A, /, markersize=3, cmap="jet", invert_axes=True):
+def plt_spy_coo(
+    ax, A, /, markersize=3, cmap="jet", invert_axes=True, subsample: int = 1
+):
     """Plot the sparsity pattern of a BCOO matrix.
 
     Credit:
     https://gist.github.com/lukeolson/9710288
     """
     ax.scatter(
-        A.indices[:, 0],
-        A.indices[:, 1],
-        c=A.data,
+        A.indices[::subsample, 0],
+        A.indices[::subsample, 1],
+        c=A.data[::subsample],
         s=markersize,
         marker="s",
         edgecolors="none",

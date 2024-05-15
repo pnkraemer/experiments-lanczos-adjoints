@@ -54,7 +54,9 @@ ax.annotate("Backprop", xy=(10.0, 0.2), color="C1", fontsize="x-small")
 with plt.rc_context(axes.spines(top=True, right=True, bottom=True, left=True)):
     ax_in = inset_axes(ax, width="30%", height="30%", loc=2, borderpad=1.75)
     ax_in.set_title(f"SuiteSparse: '{matrix}'", fontsize="xx-small", pad=3)
-    exp_util.plt_spy_coo(ax_in, M, markersize=0.1, cmap="cividis", invert_axes=False)
+    exp_util.plt_spy_coo(
+        ax_in, M, markersize=0.1, cmap="cividis", invert_axes=False, subsample=20
+    )
     ax_in.set_xlabel(rf"$N={M.shape[0]}$ rows", fontsize="xx-small")
     ax_in.invert_yaxis()
     ax_in.set_xticks(())

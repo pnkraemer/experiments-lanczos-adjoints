@@ -11,7 +11,9 @@ import jax.scipy.linalg
 import matplotlib.pyplot as plt
 import tqdm
 from matfree_extensions.util import gp_util, pde_util
+from tueplots import axes
 
+plt.rcParams.update(axes.lines())
 # Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("--seed", type=int, required=True)
@@ -105,21 +107,24 @@ jnp.save(f"{path}_data_parameter.npy", parameter)
 
 
 print("\nPlotting the inputs and targets...", end="")
-num = jnp.minimum(8, args.num_data)  # plot only a few data points
+num = jnp.minimum(3, args.num_data)  # plot only a few data points
 num = int(num)
 
 figsize = (2 * num, 2)
 fig, axes = plt.subplots(nrows=2, ncols=num, figsize=figsize, constrained_layout=True)
 
 for ax, ins, outs in zip(axes.T[:num], inputs[:num], targets[:num]):
-    img = ax[0].contourf(ins[0])
-    plt.colorbar(img, ax=ax[0])
+    img = ax[0].contourf(*mesh, ins[0], cmap="bone")
+    cb = plt.colorbar(img, ax=ax[0])
+    cb.ax.tick_params(labelsize="xx-small")
+    ax[0].tick_params(labelsize="x-small")
 
-    img = ax[1].contourf(outs[1])
-    plt.colorbar(img, ax=ax[1])
+    img = ax[1].contourf(*mesh, outs[1], cmap="pink")
+    cb = plt.colorbar(img, ax=ax[1])
+    cb.ax.tick_params(labelsize="xx-small")
+    ax[1].tick_params(labelsize="x-small")
 
-
-axes[0][0].set_xlabel("Inputs")
+axes[0][0].set_ylabel("Inputs")
 axes[1][0].set_ylabel("Targets")
 
 plt.savefig(f"{path}_plot_data.pdf")

@@ -27,23 +27,23 @@ num_steps_max=30
 num_epochs=3000
 
 
-# printf "\nGenerating data...\n"
-# time python experiments/applications/partial_differential_equation/make_data.py  \
-#     --resolution $resolution --num_data $num_data --seed 1;
+printf "\nGenerating data...\n"
+time python experiments/applications/partial_differential_equation/make_data.py  \
+   --resolution $resolution --num_data $num_data --seed 1;
 
 
-# printf "\nCollecting results for the workprecision diagram\n"
-# for method in \
-#     arnoldi \
-#     diffrax:euler+backsolve \
-#     diffrax:heun+recursive_checkpoint \
-#     diffrax:dopri5+backsolve \
-#     diffrax:tsit5+recursive_checkpoint
-# do
-#     time python experiments/applications/partial_differential_equation/workprecision.py  \
-#         --resolution $resolution --num_runs $num_runs \
-#         --num_steps_max $num_steps_max --method $method;
-# done
+printf "\nCollecting results for the workprecision diagram\n"
+for method in \
+   arnoldi \
+   diffrax:euler+backsolve \
+   diffrax:heun+recursive_checkpoint \
+   diffrax:dopri5+backsolve \
+   diffrax:tsit5+recursive_checkpoint
+do
+   time python experiments/applications/partial_differential_equation/workprecision.py  \
+       --resolution $resolution --num_runs $num_runs \
+       --num_steps_max $num_steps_max --method $method;
+done
 
 
 printf "\nTraining the network...\n"
