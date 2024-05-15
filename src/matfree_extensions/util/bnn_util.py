@@ -6,10 +6,13 @@ from typing import Callable
 import flax.linen
 import jax
 import jax.numpy as jnp
+from jax._src import linear_util as lu
+from jax._src.util import wraps
 from matfree import hutchinson
 from tqdm import tqdm
 
 from matfree_extensions import lanczos
+from matfree_extensions.util import gp_util_linalg
 from matfree_extensions.util.bnn_baselines import hutchinson_diagonal
 
 # TODO: Decide if we abbreviate metric in function names
@@ -23,7 +26,7 @@ def model_mlp(*, out_dims, activation: Callable):
         @flax.linen.compact
         def __call__(self, x):
             x = x.reshape((x.shape[0], -1))
-            x = flax.linen.Dense(100)(x)
+            x = flax.linen.Dense(50)(x)
             x = self.activation(x)
             x = flax.linen.Dense(50)(x)
             x = self.activation(x)
@@ -386,6 +389,26 @@ def sampler_lanczos(*, ggn_fun, num, lanczos_rank):
     return sample
 
 
+def lanczos_sampler(*, ggn_vp, num_samples, lanczos_rank, key, params_vec):
+    eps = jax.random.normal(key, (num_samples, *params_vec.shape))
+
+    def posterior_sampler(single_sample):
+        tridiag = lanczos.tridiag(ggn_vp, lanczos_rank, reortho="full")
+        (Q, tridiag), _ = tridiag(single_sample)
+        dense_matrix = _dense_tridiag(*tridiag)
+        (w, v) = jnp.linalg.eigh(dense_matrix)
+        eigvecs = Q.T @ v
+        eigvals = w
+        eigvals = jnp.where(w < 1e-9, 1.0, eigvals)
+        inv_eigvals = 1 / eigvals
+        inv_eigvals = jnp.where(w < 1e-9, 0.0, inv_eigvals)
+        sample = (jnp.sqrt(inv_eigvals)) * single_sample.at[:lanczos_rank].get()
+        sample = params_vec + (eigvecs @ sample)
+        return sample
+
+    return jax.vmap(posterior_sampler)(eps)
+
+
 def _dense_tridiag(diagonal, off_diagonal):
     return jnp.diag(diagonal) + jnp.diag(off_diagonal, 1) + jnp.diag(off_diagonal, -1)
 
@@ -408,7 +431,12 @@ def img_to_patch(x, patch_size, flatten_channels=True):
 
 
 def callibration_loss_diagonal(
-    model_apply, unflatten, hyperparam_unconstrain, num_classes, n_params
+    model_apply,
+    unflatten,
+    hyperparam_unconstrain,
+    hutchinson_samples,
+    num_levels,
+    n_params,
 ):
     # get_diag_fn = functools.partial(
     #     exact_diagonal,
@@ -424,10 +452,10 @@ def callibration_loss_diagonal(
     key = jax.random.PRNGKey(0)
     get_diag_fn = functools.partial(
         hutchinson_diagonal,
-        n_samples=50,
+        n_samples=hutchinson_samples,
         key=key,
         computation_type="serial",
-        num_levels=3,
+        num_levels=num_levels,
     )
 
     def loss(log_alpha, params_vec, img, label):
@@ -546,23 +574,48 @@ def logpdf_cholesky() -> Callable:
     return logpdf
 
 
+from jax._src.api import _jacfwd_unravel, _jvp, _std_basis
+from jax._src.api_util import argnums_partial
+
+
+def jacfwd_map(fun: Callable, argnums: int = 0) -> Callable:
+    @wraps(fun, argnums=argnums)
+    def jacfun(*args, **kwargs):
+        f = lu.wrap_init(fun, kwargs)
+        f_partial, dyn_args = argnums_partial(
+            f, argnums, args, require_static_args_hashable=False
+        )
+        pushfwd: Callable = functools.partial(_jvp, f_partial, dyn_args)
+        y, jac = jax.lax.map(pushfwd, _std_basis(dyn_args))
+        example_args = dyn_args[0] if isinstance(argnums, int) else dyn_args
+        jac_tree = jax.tree_map(
+            functools.partial(_jacfwd_unravel, example_args), y, jac
+        )
+        return jac_tree
+
+    return jacfun
+
+
 def logpdf_eigh() -> Callable:
     """Construct a logpdf function that uses a symmetric eigendecomposition."""
 
     def logpdf(y, /, *, mean, cov: Callable):
         # Materialise the covariance matrix
-        cov_matrix = jax.jacfwd(cov)(mean)
+        # cov_matrix = jax.jacfwd(cov)(mean)
+        cov_matrix = jacfwd_map(cov)(mean)
 
         # Compute H^(1/2) via eigh()
         (w, v) = jnp.linalg.eigh(cov_matrix)
         # w = jnp.maximum(0.0, w)  # clamp to allow sqrts
 
         # Log-determinant
-        w = jnp.where(w < 1e-4, 1.0, w)
-        logdet = jnp.sum(jnp.log(w)) / 2
+        w_ = jnp.where(w < 1e-6, 1.0, w)
+        logdet = jnp.sum(jnp.log(w_)) / 2
 
         # Mahalanobis norm
-        factor = (v * jnp.sqrt(1 / w[..., None, :])) @ v.T
+        inv_eigvals = 1 / w
+        inv_eigvals = jnp.where(w < 1e-6, 0.0, inv_eigvals)
+        factor = (v * jnp.sqrt(inv_eigvals[..., None, :])) @ v.T
         tmp = factor @ (y - mean)
         mahalanobis = jnp.dot(tmp, tmp)
 
@@ -587,10 +640,44 @@ def predictive_posterior_loglikelihood(*, model_apply, unflatten, logpdf, ggn_fu
         def cov_vp(v_):
             v = unflat(v_)
             (Jtv,) = vjp_fn(v)
-            inv_ggn, _info = jax.scipy.sparse.linalg.cg(ggn_fun, Jtv, tol=0.1)
+            cg = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(20)
+            # inv_ggn, _info = matfree.gp_utils.krylov_solve_cg_fixed_step_reortho()
+            # jax.scipy.sparse.linalg.cg(ggn_fun, Jtv, tol=0.1)
+            inv_ggn, _info = cg(ggn_fun, Jtv)
             out = jvp_fn(inv_ggn)
             return jax.flatten_util.ravel_pytree(out)[0]
 
         return logpdf(y_flat, mean=mean_flat, cov=cov_vp)
 
     return eval_logprob
+
+
+def predictive_logit_sampler(*, model_apply, unflatten, num_samples, ggn_fun):
+    def eval_test_set(params_vec, x_test, y_test, key):
+        mean_pred, jvp_fn = jax.linearize(
+            lambda p: model_apply(unflatten(p), x_test), params_vec
+        )
+
+        vjp_fn = jax.linear_transpose(jvp_fn, params_vec)
+        y_flat, unflat = jax.flatten_util.ravel_pytree(y_test)
+        mean_flat, _unflat = jax.flatten_util.ravel_pytree(mean_pred)
+
+        def cov_vp(v_):
+            v = unflat(v_)
+            (Jtv,) = vjp_fn(v)
+            cg = gp_util_linalg.krylov_solve_cg_fixed_step_reortho(20)
+            inv_ggn, _info = cg(ggn_fun, Jtv)
+            out = jvp_fn(inv_ggn)
+            return jax.flatten_util.ravel_pytree(out)[0]
+
+        cov_matrix = jacfwd_map(cov_vp)(mean_flat)
+        (w, v) = jnp.linalg.eigh(cov_matrix)
+        # Mahalanobis norm
+        inv_eigvals = 1 / w
+        inv_eigvals = jnp.where(w < 1e-6, 0.0, inv_eigvals)
+        cov_sqrt = (v * jnp.sqrt(inv_eigvals[..., None, :])) @ v.T
+        eps = jax.random.normal(key, (num_samples, *mean_flat.shape))
+        samples = jax.vmap(lambda e: mean_flat + cov_sqrt @ e)(eps)
+        return jax.vmap(unflat)(samples)
+
+    return eval_test_set
