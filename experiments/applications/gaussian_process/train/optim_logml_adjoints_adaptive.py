@@ -193,7 +193,7 @@ def predict_mean(params, x, Xs, ys):
     return postmean(x)
 
 
-optimizer = optax.adam(0.1)
+optimizer = optax.adam(0.05)
 state = optimizer.init(p_opt)
 value_and_grad = jax.jit(jax.value_and_grad(mll_lanczos, argnums=0, has_aux=True))
 # optimizer = jaxopt.LBFGS(value_and_grad, value_and_grad=True, has_aux=True)
