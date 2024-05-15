@@ -58,6 +58,7 @@ def decomposition(mv, /, unflatten_fun, reortho, method):
 
 
 path = "./data/matrices/"
+# M = exp_util.suite_sparse_download(args.which_matrix, path=path)
 M = exp_util.suite_sparse_load(args.which_matrix, path=path)
 
 params, params_unflatten = jax.flatten_util.ravel_pytree(M.data)
@@ -109,7 +110,7 @@ for krylov_depth in krylov_depths:
     times_fwdpass.append(time_fwdpass)
     print("Time (forward pass):\n\t", time_fwdpass)
 
-    print("Evaluating the forward+adjoint pass")
+    print("Evaluating the adjoint pass")
     fx_imp, vjp_imp = jax.vjp(implementation, flat)
     vjp_imp = jax.jit(vjp_imp)
 
@@ -125,7 +126,7 @@ for krylov_depth in krylov_depths:
     print("Time (adjoint):\n\t", time_custom)
 
     if krylov_depth < args.backprop_until:
-        print("Evaluating the forward+backprop pass")
+        print("Evaluating the backprop pass")
         fx_ref, vjp_ref = jax.vjp(reference, flat)
         vjp_ref = jax.jit(vjp_ref)
 
