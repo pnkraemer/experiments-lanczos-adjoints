@@ -17,7 +17,7 @@ source ../penv/bin/activate
 
 # For all problems
 resolution=128
-num_data=256
+num_data=1
 
 # For the work-precision scripts
 num_runs=5

@@ -23,7 +23,7 @@ print(args)
 
 # Decide which methods to plot
 labels = {
-    "arnoldi": "Arnoldi",
+    "arnoldi": "Arnoldi (ours)",
     # "diffrax:euler+backsolve": "Euler",
     # "diffrax:heun+recursive_checkpoint": "Heun",
     "diffrax:dopri5+backsolve": "Dopri5",
@@ -50,7 +50,7 @@ ax["truth"].set_title("Truth", fontsize="small")
 img = ax["truth"].contourf(*mesh, jnp.abs(parameter), cmap="Greys")
 plt.colorbar(img, ax=ax["truth"])
 
-ax["arnoldi"].set_title(r"Solver: $\it{Arnoldi}$", fontsize="small")
+ax["arnoldi"].set_title(r"Solver: $\it{Arnoldi~(ours)}$", fontsize="small")
 path = f"{directory}{args.resolution}x{args.resolution}_arnoldi_s2"
 parameter_estimate = jnp.load(f"{path}_parameter.npy")
 img = ax["arnoldi"].contourf(*mesh, jnp.abs(parameter_estimate), cmap="Blues")
@@ -151,7 +151,7 @@ for color, method in enumerate(methods):
         ax["loss"].semilogy(
             _process(timestamps),
             _process(loss),
-            label=f"{labels[method]} (3000 epochs)",
+            label=f"{labels[method]}, 3000 epochs",
             alpha=alpha,
             zorder=zorder,
             color=f"C{color}",
@@ -163,7 +163,7 @@ for color, method in enumerate(methods):
 
         handles_, labels_ = ax["loss"].get_legend_handles_labels()
         by_label = dict(zip(labels_, handles_))
-        ax["loss"].legend(by_label.values(), by_label.keys(), fontsize="x-small")
+        ax["loss"].legend(by_label.values(), by_label.keys(), fontsize="xx-small")
         # ax["loss"].set_ylim((0, 100))
         ax["loss"].grid(axis="y", which="both")
 
@@ -173,6 +173,6 @@ ax["loss"].set_title("B.", **kwargs)
 ax["forward"].set_title("A1.", **kwargs)
 ax["gradient"].set_title("A2.", **kwargs)
 
-plt.savefig(f"{directory}pde_training_curves.pdf")
+plt.savefig(f"{directory_fig}pde_training_curves.pdf")
 
 plt.show()
