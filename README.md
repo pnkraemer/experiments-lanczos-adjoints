@@ -7,7 +7,19 @@ This repository contains the experiment code for the paper
 > 2024
 > Preprint on arXiv: <identifier-coming-soon>.
 
-The paper is currently under review, and the content of this repository subject to change.
+A link to the preprint is here: <coming-soon>.
+
+
+
+Please cite the paper as follows:
+```tex
+@article{kraemer2024gradients,
+    title={Gradients of functions of large matrices},
+    author={Kr\"amer, Nicholas and Moreno-Mu\~noz, Pablo and Roy, Hrittik and Hauberg S\o{}ren},
+    journal={arXiv preprint arXiv:<coming-soon>},
+    year={2024}
+}
+```
 
 
 ## Installation
