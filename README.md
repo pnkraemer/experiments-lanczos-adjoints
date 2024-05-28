@@ -7,7 +7,7 @@ This repository contains the experiment code for the paper
 > 2024
 > Preprint on arXiv:2405.17277.
 
-A link to the preprint is here: <coming-soon>.
+[Here is a link to the preprint](https://arxiv.org/abs/2405.17277).
 
 
 
