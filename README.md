@@ -22,6 +22,10 @@ Please cite the paper as follows:
 ```
 
 
+_**A more accessible version of the code provided in here can be found [in the matfree library](https://github.com/pnkraemer/matfree). Install it via ``pip install matfree``.
+Unless you are looking for specific experiment configurations, you likely want use matfree, not this repository here.**_
+
+
 ## Installation
 
 
