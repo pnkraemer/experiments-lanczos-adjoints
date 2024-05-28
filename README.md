@@ -5,7 +5,7 @@ This repository contains the experiment code for the paper
 > **Gradients of functions of large matrices.**
 > _Nicholas Krämer, Pablo Moreno-Muñoz, Hrittik Roy, Søren Hauberg._
 > 2024
-> Preprint on arXiv: <identifier-coming-soon>.
+> Preprint on arXiv:2405.17277.
 
 A link to the preprint is here: <coming-soon>.
 
@@ -16,7 +16,7 @@ Please cite the paper as follows:
 @article{kraemer2024gradients,
     title={Gradients of functions of large matrices},
     author={Kr\"amer, Nicholas and Moreno-Mu\~noz, Pablo and Roy, Hrittik and Hauberg S\o{}ren},
-    journal={arXiv preprint arXiv:<coming-soon>},
+    journal={arXiv preprint arXiv:2405.17277},
     year={2024}
 }
 ```
